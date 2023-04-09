@@ -1,0 +1,6 @@
+extern "C" printf
+extern "C" putc
+extern "C" exit
+func sayHelloWorld() {
+    "Hello World\n" pop printf pop
+}

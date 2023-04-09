@@ -1,0 +1,8 @@
+extern "C" fopen
+extern "C" fwrite
+extern "C" exit
+func main(int, ptr : int) {
+    "w" pop "hello.txt" pop fopen
+    RAX push 1l 12l "Hello World!" pop fwrite
+    0 exit
+}

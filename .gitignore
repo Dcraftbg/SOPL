@@ -1,0 +1,7 @@
+/target
+/syntax
+/examples/bin/
+/examples/int/
+names.txt
+ideas.txt
+build.py
