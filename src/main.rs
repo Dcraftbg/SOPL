@@ -885,7 +885,8 @@ impl ConstValue {
                         return Ok(ConstValue::STR(val.clone()+&nval.to_string()));
                     }
                     ConstValue::STR(nval) => {
-                        return Ok(ConstValue::STR(val.clone()+nval));
+                        let out = val.clone()+nval;
+                        return Ok(ConstValue::STR(out));
                     },
                 }
             },
@@ -944,18 +945,18 @@ fn eval_const_def(lexer: &mut Lexer, build: &mut BuildProgram) -> ConstValue {
             TokenType::IntrinsicType(typ, _) => {
                 match typ {
                     IntrinsicType::ADD => {
-                        let valOne = par_expect!(token.location,varStack.pop(),"Stack underflow in constant definition");
                         let valTwo = par_expect!(token.location,varStack.pop(),"Stack underflow in constant definition");
+                        let valOne = par_expect!(token.location,varStack.pop(),"Stack underflow in constant definition");
                         varStack.push(par_expect!(token.location,valOne.add(&valTwo),"Error: Failed to add the constant values together"));
                     }
                     IntrinsicType::SUB => {
-                        let valOne = par_expect!(token.location,varStack.pop(),"Stack underflow in constant definition");
                         let valTwo = par_expect!(token.location,varStack.pop(),"Stack underflow in constant definition");
+                        let valOne = par_expect!(token.location,varStack.pop(),"Stack underflow in constant definition");
                         varStack.push(par_expect!(token.location,valOne.sub(&valTwo),"Error: Failed to add the constant values together"));
                     }
                     IntrinsicType::MUL => {
-                        let valOne = par_expect!(token.location,varStack.pop(),"Stack underflow in constant definition");
                         let valTwo = par_expect!(token.location,varStack.pop(),"Stack underflow in constant definition");
+                        let valOne = par_expect!(token.location,varStack.pop(),"Stack underflow in constant definition");
                         varStack.push(par_expect!(token.location,valOne.mul(&valTwo),"Error: Failed to add the constant values together"));
                     }
                     IntrinsicType::DOTCOMA => {
@@ -1618,77 +1619,6 @@ fn to_nasm_x86_64(build: &BuildProgram, program: &CmdProgram) -> io::Result<()>{
             writeln!(&mut f, "   jmp ENDOFCODE")?;
         }
     }
-
-    // for instruction in build.instructions.iter(){
-    //     match instruction {
-    //         Instruction::PUSH(Reg) => {
-    //             if Reg.size() == 4 {
-    //                 //writeln!(&mut f, "   sub rsp, 4")?;
-    //                 //writeln!(&mut f, "   mov dword [rsp], {}", Reg.to_string())?;
-    //                 todo!()
-    //             }
-    //             else{
-    //                 writeln!(&mut f, "   push {} {}",size_to_nasm_type(Reg.size()),Reg.to_string())?;
-    //             }
-    //             //writeln!(&mut f, "   push {} {}",size_to_nasm_type(Reg.size()),Reg.to_string())?;
-    //         }
-    //         Instruction::PUSHSTR(Index) => {
-    //             writeln!(&mut f, "   push _STRING_{}",Index)?;
-    //             writeln!(&mut f, "   push _LEN_STRING_{}",Index)?;
-    //         }
-    //         Instruction::PUSHRAW(Data) => {
-    //             writeln!(&mut f, "   push {}",Data)?;
-    //         }
-    //         Instruction::MOV(Reg, Data) => {
-    //             writeln!(&mut f, "   mov {}, {}",Reg.to_string(), Data)?;
-    //         }
-    //         Instruction::POP(Reg) => {
-    //             if Reg.size() == 4 {
-    //                 writeln!(&mut f, "   add rsp, 4")?;
-    //                 writeln!(&mut f, "   mov {}, dword [rsp]", Reg.to_string())?;
-    //             }
-    //             else{
-    //                 writeln!(&mut f, "   pop {} {}",size_to_nasm_type(Reg.size()),Reg.to_string())?;
-    //             }
-    //         }
-    //         Instruction::CALLRAW(Word) => {
-    //             writeln!(&mut f, "   call {}",Word)?;
-    //         }
-    //         Instruction::MOV_REG(reg1, reg2) => {
-    //             writeln!(&mut f, "   mov {}, {}",reg1.to_string(), reg2.to_string())?;
-    //         }
-    //         Instruction::ADD(reg1, reg2) => {
-    //             assert!(reg1.size() == reg2.size(), "Two different sized registers passed to add Instruction");
-    //             writeln!(&mut f, "   add {} {}, {}", size_to_nasm_type(reg1.size()),reg1.to_string(), reg2.to_string())?;
-    //         }
-    //         Instruction::SUB(reg1, reg2) => {
-    //             assert!(reg1.size() == reg2.size(), "Two different sized registers passed to sub Instruction");
-    //             writeln!(&mut f, "   sub {} {}, {}",size_to_nasm_type(reg1.size()),reg1.to_string(), reg2.to_string())?;
-    //         }
-    //         Instruction::MUL(reg1, reg2) => {
-    //             assert!(reg1.size() == reg2.size(), "Two different sized registers passed to mul Instruction");
-    //             writeln!(&mut f, "   mul {} {}, {}",size_to_nasm_type(reg1.size()),reg1.to_string(), reg2.to_string())?;
-    //         }
-    //         Instruction::DIV(reg1, reg2) => {
-    //             assert!(reg1.size() == reg2.size(), "Two different sized registers passed to div Instruction");
-    //             writeln!(&mut f, "   div {}, {}",reg1.to_string(), reg2.to_string())?;
-    //         }
-    //         Instruction::CALL(Func) => {
-    //             writeln!(&mut f, "   mov rbp, rsp")?;
-    //             writeln!(&mut f, "   mov rsp, [_CALLSTACK_BUF_PTR]")?;
-    //             writeln!(&mut f, "   call F_{}",Func)?;
-    //         }
-    //         Instruction::FNBEGIN() => {
-    //             writeln!(&mut f, "   mov [_CALLSTACK_BUF_PTR], rsp")?;
-    //             writeln!(&mut f, "   mov rsp, rbp")?;
-    //         }
-    //         Instruction::RET() => {
-    //             writeln!(&mut f, "   mov rbp, rsp")?;
-    //             writeln!(&mut f, "   mov rsp, _CALLSTACK")?;
-    //             writeln!(&mut f, "   ret")?;
-    //         }
-    //     }
-    // }
     writeln!(&mut f, "ENDOFCODE:")?;
     writeln!(&mut f, "section .data")?;
     writeln!(&mut f, "   _CALLSTACK_BUF_PTR: dq _CALLSTACK_TOP")?;
@@ -1707,20 +1637,6 @@ fn to_nasm_x86_64(build: &BuildProgram, program: &CmdProgram) -> io::Result<()>{
     writeln!(&mut f, "section .bss")?;
     writeln!(&mut f, "   _CALLSTACK: resb {}",program.call_stack_size)?;
     writeln!(&mut f, "   _CALLSTACK_TOP: ")?;
-    
-    //mov rbp, rsp
-    //mov rsp, _CALLSTACK
-    //call fib
-
-    //BEGIN:
-    //mov rsp, rbp
-    //...
-    //mov rbp, rsp
-    //mov rsp, _CALLSTACK
-    //ret
-    //AFTER:
-    //mov rsp, rbp
-    //f.write(b"BITS 64");
     Ok(())
 
 }
@@ -1802,7 +1718,6 @@ fn main() {
     Definitions.insert("ptr".to_string(), VarType::PTR);
     Definitions.insert("short".to_string(), VarType::SHORT);
     Definitions.insert("str".to_string(), VarType::STR);
-    //println!("[DEBUG] Path {}",program.path);
     let info = fs::read_to_string(&program.path).expect("Error: could not open file!");
 
     let mut lexer = Lexer::new(info, & Intrinsics);
@@ -1814,17 +1729,10 @@ fn main() {
             //println!("Build: {:#?}",build.constdefs);
             to_nasm_x86_64(&build, &program).expect("Could not build to nasm_x86_64");
             if program.should_build {
-                //println!("Building program!");
+        
                 let nasm = Command::new("nasm").args(["-f","elf",program.opath.as_str()]).output().expect("Could not build nasm!");
                 let gcc  = Command::new("gcc").args([Path::new(program.opath.as_str()).with_extension("o").to_str().unwrap(),"-o",Path::new(program.opath.as_str()).with_extension("").to_str().unwrap()]).output().expect("Could not build gcc!");
                 let _ld     = Command::new("ld".to_string()).arg(Path::new(program.opath.as_str()).with_extension("").to_str().unwrap()).output().expect("Could not build your program!");
-                //let prg  = Command::new(Path::new(program.opath.as_str()).with_extension("").to_str().unwrap()).output().expect("Could not build your program!");
-                //let prg = Command::new().args(["/K",(Path::new(program.opath.as_str()).with_extension("").to_str().unwrap().replace("/", "\\").as_str())]).output().expect("Could not build your program!");
-                //let prg = Command::new(Path::new(program.opath.as_str()).with_extension("").to_str().unwrap().replace("/", "\\").as_str()).creation_flags(0x08000000).output().expect("Could not build program");
-                //println!("{:?}","".to_string()+Path::new(program.opath.as_str()).with_extension("").to_str().unwrap());
-                //println!("{:?}",["-f","elf",program.opath.as_str()]);
-                //println!("{:?}",[Path::new(program.opath.as_str()).with_extension("o").to_str().unwrap(),"-o",Path::new(program.opath.as_str()).with_extension("").to_str().unwrap()]);
-                //println!("Path: {}",Path::new(program.opath.as_str()).with_extension("").to_str().unwrap().replace("/", "\\").as_str());
                 if !nasm.status.success() {
                     println!("Nasm: \n{:?}\n-----------",nasm);
                 }
@@ -1833,21 +1741,11 @@ fn main() {
                 }
                 else {
                     println!("Finished build successfully")
-                }
-                //println!("{:?}",prg);
-                //println!("{}{}",String::from_utf8_lossy(&prg.stdout),String::from_utf8_lossy(&prg.stderr));
-                
+                }        
             }
         }
         _ => {
             todo!("Unimplemented type {}",program.typ);
         }
     }
-    
-    //println!("{:#?}",build);
-    // if !path.ends_with(".spl") {
-    //     eprintln!("Error: invalid script extension! expected: \".spl\" but found {}",Path::new(&path).extension().and_then(OsStr::to_str).unwrap_or_else(|| "None"))
-    // }
-    // CALL STACK: 
-    // <ptr> <ptr> <ptr> <ptr>
 }
