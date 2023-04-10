@@ -32,6 +32,15 @@ macro_rules! par_assert {
         }
     });
 }
+macro_rules! lpar_assert {
+    ($location:expr, $condition:expr, $($arg:tt)*) => ({
+        if !$condition {
+            let message = format!($($arg)*);
+            eprintln!("(P) [ERROR] {}:{}:{}: {}", $location.clone().file, $location.clone().linenumber, $location.clone().character, message);
+            exit(1);
+        }
+    });
+}
 macro_rules! par_expect {
     ($location:expr, $expector:expr, $($arg:tt)*) => ({
 
@@ -134,10 +143,12 @@ fn usage() {
 enum IntrinsicType {
     Extern = 0,
     Func,
+    CONSTANT,
     OPENPAREN,
     CLOSEPAREN,
     DOUBLE_COLIN,
     COMA,
+    DOTCOMA,
     OPENCURLY,
     CLOSECURLY,
     // REGISTER OPERATIONS
@@ -153,7 +164,7 @@ enum IntrinsicType {
     EQ,
     RET,
     INCLUDE,
-    IF
+    IF,
 }
 impl IntrinsicType {
     fn to_string(&self,isplural: bool) -> String{
@@ -212,6 +223,13 @@ impl IntrinsicType {
             IntrinsicType::EQ => {
                 if isplural {"Equals".to_string()} else {"Equal".to_string()}
             },
+            IntrinsicType::CONSTANT => {
+                if isplural {"Constants".to_string()} else {"Constant".to_string()}
+            },
+            IntrinsicType::DOTCOMA => {
+                if isplural {"Dotcomas".to_string()} else {"Dotcoma".to_string()}
+            }
+            ,
         }
     }
 }
@@ -714,7 +732,7 @@ enum Instruction {
     CALL    (String),
     FNBEGIN (),
     RET     (),
-    SCOPEBEGIN,
+    SCOPEBEGIN, // Theoretically in the future we might have something like a vector of variable definitions
     SCOPEEND,
     CONDITIONAL_JUMP(usize), // offset
     //if x {
@@ -740,11 +758,153 @@ struct Function {
     location: ProgramLocation,
     body: Vec<(ProgramLocation,Instruction)>,
 }
+
+
+#[derive(Debug, Clone)]
+enum ConstValue {
+    INT(i32),
+    LONG(i64),
+    STR(String),
+}
+impl ConstValue {
+    fn mul(&self, Other: &ConstValue) -> Result<ConstValue,String> {
+        match self {
+            ConstValue::INT(val) => {
+                match Other {
+                    ConstValue::INT(nval) => {
+                        return Ok(ConstValue::INT(val*nval));
+                    }
+                    ConstValue::LONG(nval) => {
+                        return Ok(ConstValue::LONG((*val as i64)*nval));
+                    }
+                    ConstValue::STR(_nval) => {
+                        return Err("Error: Unexpected - operation on int and string".to_string());
+                        //return Ok(ConstValue::STR(val.to_string()+nval));
+                    },
+                }
+            }
+            ConstValue::LONG(val) => {
+                match Other {
+                    ConstValue::INT(nval) => {
+                        return Ok(ConstValue::LONG(val*(*nval as i64)));
+                    }
+                    ConstValue::LONG(nval) => {
+                        return Ok(ConstValue::LONG(val*nval));
+                    }
+                    ConstValue::STR(_nval) => {
+                        return Err("Error: Unexpected * operation on long and string".to_string());
+                        //return Ok(ConstValue::STR(val.to_string()+nval));
+                    },
+                }
+            }
+            ConstValue::STR(_) => {
+                match Other {
+                    // TODO:
+                    // Implement:
+                    // const HelloFive "Hello" 5 *;  // HelloHelloHelloHelloHello
+                    _ => {
+                        return Err("Error: Cannot do * operation on a string".to_string());
+                    }
+                }
+            },
+        }
+    }
+    fn sub(&self, Other: &ConstValue) -> Result<ConstValue,String> {
+        match self {
+            ConstValue::INT(val) => {
+                match Other {
+                    ConstValue::INT(nval) => {
+                        return Ok(ConstValue::INT(val-nval));
+                    }
+                    ConstValue::LONG(nval) => {
+                        return Ok(ConstValue::LONG((*val as i64)-nval));
+                    }
+                    ConstValue::STR(_nval) => {
+                        return Err("Error: Unexpected - operation on int and string".to_string());
+                        //return Ok(ConstValue::STR(val.to_string()+nval));
+                    },
+                }
+            }
+            ConstValue::LONG(val) => {
+                match Other {
+                    ConstValue::INT(nval) => {
+                        return Ok(ConstValue::LONG(val-(*nval as i64)));
+                    }
+                    ConstValue::LONG(nval) => {
+                        return Ok(ConstValue::LONG(val-nval));
+                    }
+                    ConstValue::STR(_nval) => {
+                        return Err("Error: Unexpected - operation on long and string".to_string());
+                        //return Ok(ConstValue::STR(val.to_string()+nval));
+                    },
+                }
+            }
+            ConstValue::STR(_) => {
+                match Other {
+                    _ => {
+                        return Err("Error: Cannot do - operation on a string".to_string());
+                    }
+                }
+            },
+        }
+    }
+    fn add(&self, Other: &ConstValue) -> Result<ConstValue,String> {
+        match self {
+            ConstValue::INT(val) => {
+                match Other {
+                    ConstValue::INT(nval) => {
+                        return Ok(ConstValue::INT(val+nval));
+                    }
+                    ConstValue::LONG(nval) => {
+                        return Ok(ConstValue::LONG((*val as i64)+nval));
+                    }
+                    ConstValue::STR(nval) => {
+                        return Ok(ConstValue::STR(val.to_string()+nval));
+                    },
+                }
+            }
+            ConstValue::LONG(val) => {
+                match Other {
+                    ConstValue::INT(nval) => {
+                        return Ok(ConstValue::LONG(val+(*nval as i64)));
+                    }
+                    ConstValue::LONG(nval) => {
+                        return Ok(ConstValue::LONG(val+nval));
+                    }
+                    ConstValue::STR(nval) => {
+                        return Ok(ConstValue::STR(val.to_string()+nval));
+                    },
+                }
+            }
+            ConstValue::STR(val) => {
+                match Other {
+                    ConstValue::INT(nval) => {
+                        return Ok(ConstValue::STR(val.clone()+&nval.to_string()));
+                    }
+                    ConstValue::LONG(nval) => {
+                        return Ok(ConstValue::STR(val.clone()+&nval.to_string()));
+                    }
+                    ConstValue::STR(nval) => {
+                        return Ok(ConstValue::STR(val.clone()+nval));
+                    },
+                }
+            },
+        }
+    }
+}
+
+#[derive(Debug)]
+enum RawConstValue {
+    INT(i32),
+    LONG(i64),
+    STR(Uuid),
+}
 #[derive(Debug)]
 struct BuildProgram {
-    externals: Vec<External>,
-    functions: HashMap<String, Function>,
-    stringdefs:   HashMap<Uuid,ProgramString>
+    externals:    Vec<External>,
+    functions:    HashMap<String, Function>,
+    stringdefs:   HashMap<Uuid,ProgramString>,
+    constdefs:    HashMap<String, RawConstValue>
 }
 // Functions: Vec<Function>
 
@@ -775,6 +935,73 @@ struct ScopeOpener {
 struct FunctionContract {
     Inputs: Vec<VarType>,
     Outputs: Vec<VarType>
+}
+fn eval_const_def(lexer: &mut Lexer, build: &mut BuildProgram) -> ConstValue {
+    
+    let mut varStack: Vec<ConstValue> = vec![];
+    while let Some(token) = lexer.next() {
+        match token.typ {
+            TokenType::IntrinsicType(typ, _) => {
+                match typ {
+                    IntrinsicType::ADD => {
+                        let valOne = par_expect!(token.location,varStack.pop(),"Stack underflow in constant definition");
+                        let valTwo = par_expect!(token.location,varStack.pop(),"Stack underflow in constant definition");
+                        varStack.push(par_expect!(token.location,valOne.add(&valTwo),"Error: Failed to add the constant values together"));
+                    }
+                    IntrinsicType::SUB => {
+                        let valOne = par_expect!(token.location,varStack.pop(),"Stack underflow in constant definition");
+                        let valTwo = par_expect!(token.location,varStack.pop(),"Stack underflow in constant definition");
+                        varStack.push(par_expect!(token.location,valOne.sub(&valTwo),"Error: Failed to add the constant values together"));
+                    }
+                    IntrinsicType::MUL => {
+                        let valOne = par_expect!(token.location,varStack.pop(),"Stack underflow in constant definition");
+                        let valTwo = par_expect!(token.location,varStack.pop(),"Stack underflow in constant definition");
+                        varStack.push(par_expect!(token.location,valOne.mul(&valTwo),"Error: Failed to add the constant values together"));
+                    }
+                    IntrinsicType::DOTCOMA => {
+                        break;
+                    }
+                    Other => {
+                        par_error!(token, "Unexpected Intrinsic: {}\nConstant definitions can only work with ADD,SUB,MUL intrinsics ",Other.to_string(false));
+                    }
+                }
+            }
+            TokenType::WordType(word) => {
+                let def = par_expect!(token.location, build.constdefs.get(&word), "Could not find constant definition {}. You can only have constants inside other constant definitions!",word);
+                //varStack.push(def.clone());
+                match def {
+                    RawConstValue::INT(val)  => {
+                        varStack.push(ConstValue::INT(val.clone()));
+                    }
+                    RawConstValue::LONG(val) => {
+                        varStack.push(ConstValue::LONG(val.clone()));
+                    }
+                    RawConstValue::STR(UUID)       => {
+                        varStack.push(ConstValue::STR(build.stringdefs.get(UUID).unwrap().Data.clone()));
+                    }
+                }
+            }
+            TokenType::StringType(word) => {
+                // let mut UUID = Uuid::new_v4();
+                // while build.stringdefs.insert(UUID,ProgramString {Data: word.clone(), Typ: ProgramStringType::STR}).is_some() {
+                //     UUID = Uuid::new_v4();
+                // }
+                varStack.push(ConstValue::STR(word))
+            }
+            TokenType::Number32(num) => {
+                varStack.push(ConstValue::INT(num));
+            }
+            TokenType::Number64(num) => {
+                varStack.push(ConstValue::LONG(num));
+            }
+            _ => {
+                par_error!(token,"Unexpected token type in const declaration {}",token.typ.to_string(false));
+            }
+        }
+    }
+    //lpar_error!(lexer.currentLocation,"Error:")
+    lpar_assert!(lexer.currentLocation,varStack.len() == 1,"Error: Lazy constant stack handling! You need to correctly handle your constants");
+    varStack.pop().unwrap()
 }
 fn parse_function_contract(lexer: &mut Lexer, Definitions: &HashMap<String,VarType>) -> FunctionContract {
     let mut out = FunctionContract {Inputs: vec![], Outputs: vec![]};
@@ -837,7 +1064,7 @@ fn parse_function_contract(lexer: &mut Lexer, Definitions: &HashMap<String,VarTy
     out
 }
 fn parse_tokens_to_build(lexer: &mut Lexer, _Intrinsics: &HashMap<String,IntrinsicType>, Definitions: &HashMap<String,VarType>, program: &mut CmdProgram) -> BuildProgram {
-    let mut build: BuildProgram = BuildProgram { externals: vec![], functions: HashMap::new(),stringdefs: HashMap::new()};
+    let mut build: BuildProgram = BuildProgram { externals: vec![], functions: HashMap::new(),stringdefs: HashMap::new(), constdefs: HashMap::new()};
     let mut scopeStack: Vec<ScopeOpener> = vec![];
     let mut currentFunction: Option<String> = None;
     while let Some(token) = lexer.next(){
@@ -947,6 +1174,26 @@ fn parse_tokens_to_build(lexer: &mut Lexer, _Intrinsics: &HashMap<String,Intrins
                         let func = build.functions.get_mut(currentFunction.as_mut().unwrap()).unwrap();
                         func.body.push((token.location.clone(),Instruction::CALL(word.clone())));
                         //func.body.push((token.location,Instruction::FNBEGIN());
+                    }
+                }
+                if !isvalid  {
+                    isvalid = build.constdefs.contains_key(&word);
+                    if isvalid {
+                        let func = build.functions.get_mut(currentFunction.as_mut().unwrap()).unwrap();
+                        let cons = build.constdefs.get(&word).unwrap();
+                        match cons {
+                            RawConstValue::INT(val) => {
+                                func.body.push((token.location.clone(),Instruction::MOV(Register::RAX, *val as i64)));
+                                func.body.push((token.location.clone(),Instruction::PUSH(Register::RAX)));
+                            }
+                            RawConstValue::LONG(val) => {
+                                func.body.push((token.location.clone(),Instruction::MOV(Register::RAX, *val as i64)));
+                                func.body.push((token.location.clone(),Instruction::PUSH(Register::RAX)));
+                            }
+                            RawConstValue::STR(val) => {
+                                func.body.push((token.location.clone(),Instruction::PUSHSTR(val.clone())));
+                            }
+                        }
                     }
                 }
                 par_assert!(token,isvalid,"Unknown word type: {}",word);
@@ -1169,14 +1416,63 @@ fn parse_tokens_to_build(lexer: &mut Lexer, _Intrinsics: &HashMap<String,Intrins
                         currentFunc.body.push((token.location.clone(),Instruction::EQUALS(Register::RAX, Register::R8)));
                         
                     },
+                    IntrinsicType::CONSTANT => {
+                        let first = lexer.next();
+                        let first = par_expect!(lexer.currentLocation,first,"abruptly ran out of tokens in constant name definition");//first.expect("Error: abruptly ran out of tokens in function contract");
+                        let mut name: String = match first.typ {
+                            TokenType::WordType(word) => {
+                                par_assert!(first, !build.constdefs.contains_key(&word) && !build.functions.contains_key(&word), "Error: multiple constant symbol definitions");
+                                word
+                            }
+                            _ => {
+                                par_error!(first, "Unexpected token type! Expected word but found {}",first.typ.to_string(false));
+                            }
+                        };
+                        let first = lexer.next();
+                        let first = par_expect!(lexer.currentLocation,first,"abruptly ran out of tokens in constant name definition");//first.expect("Error: abruptly ran out of tokens in function contract");
+                        match first.typ {
+                            TokenType::IntrinsicType(typ, _) => {
+                                match typ {
+                                    IntrinsicType::MOV_REG => {}
+                                    _ => {
+                                        par_error!(first, "Error: expected = but found {}",typ.to_string(false));
+                                    }
+                                }
+                            }
+                            _ => {
+                                par_error!(first, "Unexpected token type! Expected intrinsic but found {}",first.typ.to_string(false));
+                            }
+                        }
+                        
+                        let val = eval_const_def(lexer,&mut build);
+                        build.constdefs.insert(name, match val {
+                            ConstValue::INT(val) => {
+                                RawConstValue::INT(val)
+                            }
+                            ConstValue::LONG(val) => {
+                                RawConstValue::LONG(val)
+                            }
+                            ConstValue::STR(val) => {
+                                let mut UUID = Uuid::new_v4();
+                                while build.stringdefs.insert(UUID,ProgramString {Data: val.clone(), Typ: ProgramStringType::STR}).is_some() {
+                                    UUID = Uuid::new_v4();
+                                }
+                                RawConstValue::STR(UUID)
+                            }
+                        });
+                        
+                    },
+                    IntrinsicType::DOTCOMA => {},
                 }
             }
             TokenType::StringType(Word) => {
                 par_assert!(token,currentFunction.is_some(), "Unexpected string definition outside of entry point!");
 
                 //build.stringdefs.push(ProgramString {Word.clone());
-                let UUID = Uuid::new_v4();
-                build.stringdefs.insert(UUID,ProgramString {Data: Word.clone(), Typ: ProgramStringType::STR});
+                let mut UUID = Uuid::new_v4();
+                while build.stringdefs.insert(UUID,ProgramString {Data: Word.clone(), Typ: ProgramStringType::STR}).is_some() {
+                    UUID = Uuid::new_v4();
+                }
                 build.functions.get_mut(currentFunction.as_mut().unwrap()).unwrap().body.push((token.location,Instruction::PUSHSTR(UUID)));
             }
             TokenType::CharType(_) => {
@@ -1480,10 +1776,13 @@ fn main() {
     let mut Intrinsics: HashMap<String,IntrinsicType> = HashMap::new();
     Intrinsics.insert("extern".to_string(), IntrinsicType::Extern);
     Intrinsics.insert("func".to_string()  , IntrinsicType::Func);
+    Intrinsics.insert("include".to_string(), IntrinsicType::INCLUDE);
+    Intrinsics.insert("const".to_string(), IntrinsicType::CONSTANT);
     Intrinsics.insert("(".to_string(),IntrinsicType::OPENPAREN);
     Intrinsics.insert(")".to_string(),IntrinsicType::CLOSEPAREN);
     Intrinsics.insert(":".to_string(),IntrinsicType::DOUBLE_COLIN);
     Intrinsics.insert(",".to_string(),IntrinsicType::COMA);
+    Intrinsics.insert(";".to_string(),IntrinsicType::DOTCOMA);
     Intrinsics.insert("{".to_string(),IntrinsicType::OPENCURLY);
     Intrinsics.insert("}".to_string(),IntrinsicType::CLOSECURLY);
     Intrinsics.insert("push".to_string(),IntrinsicType::PUSH);
@@ -1493,7 +1792,6 @@ fn main() {
     Intrinsics.insert("-".to_string(),IntrinsicType::SUB);
     Intrinsics.insert("*".to_string(),IntrinsicType::MUL);
     Intrinsics.insert("ret".to_string(),IntrinsicType::RET);
-    Intrinsics.insert("include".to_string(), IntrinsicType::INCLUDE);
     Intrinsics.insert("if".to_string(), IntrinsicType::IF);
     Intrinsics.insert("==".to_string(),IntrinsicType::EQ);
     let mut Definitions: HashMap<String,VarType> = HashMap::new();
@@ -1510,9 +1808,10 @@ fn main() {
     let mut lexer = Lexer::new(info, & Intrinsics);
     lexer.currentLocation.file = program.path.clone();
     let build = parse_tokens_to_build(&mut lexer, &Intrinsics, &Definitions, &mut program);
+
     match program.typ.as_str() {
         "nasm_x86_64" => {
-            //println!("Build: {:#?}",build);
+            println!("Build: {:#?}",build.constdefs);
             to_nasm_x86_64(&build, &program).expect("Could not build to nasm_x86_64");
             if program.should_build {
                 //println!("Building program!");

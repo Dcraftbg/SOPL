@@ -1,0 +1,16 @@
+extern "C" printf
+func dup(long : long, long) {
+    RAX pop
+    RAX push
+    RAX push
+}
+const A = 5l ;
+const B = 4l ;
+const C = 4l 5l + ;
+const D = A B C + + ;
+ 
+func main(int, ptr : int) {
+    D "%d" pop printf
+    pop
+    pop
+}
