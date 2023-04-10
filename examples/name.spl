@@ -1,0 +1,9 @@
+extern "C" scanf
+extern "C" printf
+func main(int, ptr : int) {
+    "Whats your name? " pop printf
+    "                    " pop "%s" pop scanf
+    printf
+    pop
+
+}

@@ -1,0 +1,9 @@
+extern "C" printf
+func main(int, ptr : int) { 
+    RBX = 5
+    R8 = 5
+
+    if RBX R8 == {
+        "Hello World!" pop printf pop
+    }
+}

@@ -149,8 +149,11 @@ enum IntrinsicType {
     ADD,
     SUB,
     MUL,
+    // BOOLEAN OPERATIONS
+    EQ,
     RET,
-    INCLUDE
+    INCLUDE,
+    IF
 }
 impl IntrinsicType {
     fn to_string(&self,isplural: bool) -> String{
@@ -203,6 +206,12 @@ impl IntrinsicType {
             IntrinsicType::INCLUDE => {
                 if isplural {"Includes".to_string()} else {"Include".to_string()}
             }
+            IntrinsicType::IF => {
+                if isplural {"Ifs".to_string()} else {"If".to_string()}
+            }
+            IntrinsicType::EQ => {
+                if isplural {"Equals".to_string()} else {"Equal".to_string()}
+            },
         }
     }
 }
@@ -701,9 +710,18 @@ enum Instruction {
     SUB     (Register, Register),
     MUL     (Register, Register),
     DIV     (Register, Register),
+    EQUALS  (Register, Register),
     CALL    (String),
     FNBEGIN (),
-    RET     ()
+    RET     (),
+    SCOPEBEGIN,
+    SCOPEEND,
+    CONDITIONAL_JUMP(usize), // offset
+    //if x {
+    //        
+    //}
+    //CONDITIONAL_JUMP 0 (condition) SCOPEBEGIN
+    JUMP(usize),
 }
 
 #[derive(Debug,Clone)]
@@ -740,6 +758,18 @@ enum VarType {
     STR,
     PTR,
     CUSTOM(u64)   
+}
+#[derive(Debug)]
+enum ScopeOpenerType {
+    FUNC,
+    IF,
+    EMPTY,
+}
+#[derive(Debug)]
+struct ScopeOpener {
+    cinstruct_size: usize,
+    hasBeenOpened: bool,
+    typ:   ScopeOpenerType
 }
 #[derive(Debug)]
 struct FunctionContract {
@@ -808,9 +838,9 @@ fn parse_function_contract(lexer: &mut Lexer, Definitions: &HashMap<String,VarTy
 }
 fn parse_tokens_to_build(lexer: &mut Lexer, _Intrinsics: &HashMap<String,IntrinsicType>, Definitions: &HashMap<String,VarType>, program: &mut CmdProgram) -> BuildProgram {
     let mut build: BuildProgram = BuildProgram { externals: vec![], functions: HashMap::new(),stringdefs: HashMap::new()};
+    let mut scopeStack: Vec<ScopeOpener> = vec![];
     let mut currentFunction: Option<String> = None;
     while let Some(token) = lexer.next(){
-        
         match token.typ {
             TokenType::WordType(word) => {
                 //HashMap<String, ExternalType>
@@ -890,6 +920,9 @@ fn parse_tokens_to_build(lexer: &mut Lexer, _Intrinsics: &HashMap<String,Intrins
                                             }
                                             IntrinsicType::MUL => {
                                                 build.functions.get_mut(currentFunction.as_mut().unwrap()).unwrap().body.push((token.location.clone(),Instruction::MUL(reg, reg2)))
+                                            }
+                                            IntrinsicType::EQ => {
+                                                build.functions.get_mut(currentFunction.as_mut().unwrap()).unwrap().body.push((token.location.clone(),Instruction::EQUALS(reg, reg2)))
                                             }
                                             other => token.location.par_error(&format!("Unexpected Intrinsic! Expected Register Intrinsic but found {}",other.to_string(false)))//panic!("Unexpected Intrinsic! Expected Register Intrinsic but found {}",other.to_string(false))
                                         }
@@ -972,20 +1005,75 @@ fn parse_tokens_to_build(lexer: &mut Lexer, _Intrinsics: &HashMap<String,Intrins
                                 else {
                                     build.functions.insert(Word.clone(), Function { contract: _contract, body: vec![], location: token.location.clone() });
                                 }
-
+                                scopeStack.push(ScopeOpener{typ: ScopeOpenerType::FUNC, hasBeenOpened: false, cinstruct_size: 0});
+                                // TODO: push func onto the scope stack
                             }
                             Other => par_error!(token,"Unexpected behaviour! Expected type Word but found {}",Other.to_string(false))
                         }
+
                     }
                     IntrinsicType::OPENPAREN => todo!(),
                     IntrinsicType::CLOSEPAREN => todo!(),
                     IntrinsicType::DOUBLE_COLIN => todo!(),
                     IntrinsicType::COMA => todo!(),
                     IntrinsicType::OPENCURLY => {
-                        // TODO: implement stack system!
+                        let ln = scopeStack.len();
+                        if ln != 0 {
+                            let s = scopeStack.get_mut(ln-1).unwrap();
+                            //s.hasBeenOpened = !s.hasBeenOpened;
+                            par_assert!(token,!s.hasBeenOpened, "Scope already opened!");
+                            s.hasBeenOpened = true;
+                            let currentFunc = build.functions.get_mut(currentFunction.as_mut().unwrap()).unwrap();
+                            
+                            match s.typ {
+                                ScopeOpenerType::FUNC => {}
+                                ScopeOpenerType::IF => {
+                                    s.cinstruct_size = currentFunc.body.len();
+                                    currentFunc.body.push(( token.location.clone(),Instruction::CONDITIONAL_JUMP(currentFunc.body.len()+2) ));
+                                    currentFunc.body.push(( token.location.clone(),Instruction::JUMP(0) ));
+                                }
+                                ScopeOpenerType::EMPTY => {}
+                            }
+                            currentFunc.body.push(( token.location.clone(),Instruction::SCOPEBEGIN));
+                        }
+                        else {
+                            let currentFunc = build.functions.get_mut(currentFunction.as_mut().unwrap()).unwrap();
+                            currentFunc.body.push(( token.location.clone(), Instruction::SCOPEBEGIN));
+                            scopeStack.push( ScopeOpener { hasBeenOpened: true, typ: ScopeOpenerType::EMPTY, cinstruct_size: build.functions.get_mut(currentFunction.as_mut().unwrap()).unwrap().body.len() });
+                        }
+
+
+                        // TODO: I don't know if I should put something here or not
                     }
                     IntrinsicType::CLOSECURLY => {
-                        // TODO: implement stack system!
+                        if let Some(sc) = scopeStack.pop(){
+                            par_assert!(token,sc.hasBeenOpened, "Error: scope closed but never opened!");
+                            build.functions.get_mut(currentFunction.as_mut().unwrap()).unwrap().body.push((token.location.clone(),Instruction::SCOPEEND));
+                            let currentFunc = build.functions.get_mut(currentFunction.as_mut().unwrap()).unwrap();
+                            match sc.typ {
+                                ScopeOpenerType::FUNC => {
+                                    currentFunction = None;
+                                },
+                                ScopeOpenerType::IF => {
+                                    let mut body = &mut currentFunc.body;
+                                    let len = body.len();
+                                    //let l = currentFunc.body.get_mut(sc.cinstruct_size);
+                                    println!("{:#?}",body);
+                                    let (_, p) = par_expect!(token.location.clone(),body.get_mut(sc.cinstruct_size+1), "Error");
+                                    match p {
+                                        Instruction::JUMP(loc) => {
+                                            *loc = len-1;
+                                        }
+                                        _ => par_error!(token,"Unexpected Instruction! This is probably due to a bug inside the program! {:?}",p)
+                                    }
+                                },
+                                ScopeOpenerType::EMPTY => {}
+                            }
+                        }
+                        else {
+                            par_error!(token, "Scope closed but never opened!!!");
+                            //build.functions.get_mut(currentFunction.as_mut().unwrap()).unwrap().body.push((token.location.clone(),Instruction::SCOPEEND));
+                        }
                     }
                     IntrinsicType::POP => {
                         build.functions.get_mut(currentFunction.as_mut().unwrap()).unwrap().body.push((token.location.clone(),Instruction::POP(Register::RAX)));
@@ -1071,6 +1159,16 @@ fn parse_tokens_to_build(lexer: &mut Lexer, _Intrinsics: &HashMap<String,Intrins
                             }
                         }
                     },
+                    IntrinsicType::IF => {
+                        scopeStack.push( ScopeOpener { hasBeenOpened: false, typ: ScopeOpenerType::IF, cinstruct_size: build.functions.get_mut(currentFunction.as_mut().unwrap()).unwrap().body.len().clone() });
+                    },
+                    IntrinsicType::EQ => {
+                        let currentFunc = build.functions.get_mut(currentFunction.as_mut().unwrap()).unwrap();
+                        currentFunc.body.push((token.location.clone(),Instruction::POP(Register::RAX)));
+                        currentFunc.body.push((token.location.clone(),Instruction::POP(Register::R8)));
+                        currentFunc.body.push((token.location.clone(),Instruction::EQUALS(Register::RAX, Register::R8)));
+                        
+                    },
                 }
             }
             TokenType::StringType(Word) => {
@@ -1132,7 +1230,7 @@ fn to_nasm_x86_64(build: &BuildProgram, program: &CmdProgram) -> io::Result<()>{
         else {
             writeln!(&mut f, "F_{}:",function_name)?;
         }
-        for (_location, instruction) in function.body.iter(){
+        for (i,(_location, instruction)) in function.body.iter().enumerate(){
             match instruction {
                 Instruction::PUSH(Reg) => {
                     if Reg.size() == 4 {
@@ -1202,6 +1300,21 @@ fn to_nasm_x86_64(build: &BuildProgram, program: &CmdProgram) -> io::Result<()>{
                     writeln!(&mut f, "   mov rsp, [_CALLSTACK_BUF_PTR]")?;
                     writeln!(&mut f, "   ret")?;
                 }
+                Instruction::SCOPEBEGIN => {
+                    writeln!(&mut f, "   _{}_S_{}:",function_name,i)?;
+                }
+                Instruction::SCOPEEND => {
+                    writeln!(&mut f, "   _{}_S_{}:",function_name,i)?;
+                }
+                Instruction::CONDITIONAL_JUMP(ni) => {
+                    writeln!(&mut f, "   je _{}_S_{}",function_name,ni)?;
+                }
+                Instruction::JUMP(ni) => {
+                    writeln!(&mut f, "   jmp _{}_S_{}",function_name,ni)?;
+                }
+                Instruction::EQUALS(Reg1, Reg2) => {
+                    writeln!(&mut f, "   cmp {}, {}",Reg1.to_string(),Reg2.to_string())?;
+                },
             }
         }
         if function_name == "main" {
@@ -1381,6 +1494,8 @@ fn main() {
     Intrinsics.insert("*".to_string(),IntrinsicType::MUL);
     Intrinsics.insert("ret".to_string(),IntrinsicType::RET);
     Intrinsics.insert("include".to_string(), IntrinsicType::INCLUDE);
+    Intrinsics.insert("if".to_string(), IntrinsicType::IF);
+    Intrinsics.insert("==".to_string(),IntrinsicType::EQ);
     let mut Definitions: HashMap<String,VarType> = HashMap::new();
     Definitions.insert("int".to_string(), VarType::INT);
     Definitions.insert("char".to_string(), VarType::CHAR);
@@ -1397,6 +1512,7 @@ fn main() {
     let build = parse_tokens_to_build(&mut lexer, &Intrinsics, &Definitions, &mut program);
     match program.typ.as_str() {
         "nasm_x86_64" => {
+            //println!("Build: {:#?}",build);
             to_nasm_x86_64(&build, &program).expect("Could not build to nasm_x86_64");
             if program.should_build {
                 //println!("Building program!");
