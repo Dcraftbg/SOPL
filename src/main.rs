@@ -1811,7 +1811,7 @@ fn main() {
 
     match program.typ.as_str() {
         "nasm_x86_64" => {
-            println!("Build: {:#?}",build.constdefs);
+            //println!("Build: {:#?}",build.constdefs);
             to_nasm_x86_64(&build, &program).expect("Could not build to nasm_x86_64");
             if program.should_build {
                 //println!("Building program!");
