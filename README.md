@@ -15,7 +15,13 @@ For more info on current versions checkout `version.txt`
 - [x] register access
 - [x] includes
 - [x] functions
+- [x] constants
 - [ ] control flow
+  - [x] if statements
+  - [ ] else statements
+  - [ ] else if statements
+  - [ ] while statements
+  - [ ] for statements
 - [ ] type checking
 - [ ] structs
 - [ ] struct methods
@@ -154,13 +160,14 @@ RBX RCX + // Adds RCX to RBX
 
 Currently supported register operations:
 ```
-(REG1) (REG2) + -> adds the two registers together (RESULT IN REG1)
-(REG1) (REG2) - -> subtracts the second register from the first register (RESULT IN REG1)
-(REG1) (REG2) * -> multiples the two registers     (RESULT IN REG1)
-(REG1) push     -> pushes register onto the stack                          (WARNING: currently does not support 32 bit registers)
-(REG1) pop      -> pops the value off the stack and loads it into register (WARNING: currently does not support 32 bit registers)
-pop             -> pops 64 bit value off the stack and loads it into RAX
-push            -> pushes RAX onto the stack
+(REG1) (REG2) +  -> adds the two registers together (RESULT IN REG1)
+(REG1) (REG2) -  -> subtracts the second register from the first register (RESULT IN REG1)
+(REG1) (REG2) *  -> multiples the two registers     (RESULT IN REG1)
+(REG1) (REG2) == -> compares two registers (Output in flags register)
+(REG1) push      -> pushes register onto the stack                          (WARNING: currently does not support 32 bit registers)
+(REG1) pop       -> pops the value off the stack and loads it into register (WARNING: currently does not support 32 bit registers)
+pop              -> pops 64 bit value off the stack and loads it into RAX
+push             -> pushes RAX onto the stack
 ```
 #### managing C functions and their return values
 
@@ -178,5 +185,39 @@ As you can see the parameters get passed in a reversed order (thats because of h
 
 As for returning values that are higher than 8 bytes, C pushes them on the stack together with everything else. 
 
+#### control flow
+
+**Syntax:**
+```sopl
+if (condition) {(Body)}
+```
+
+**Examples:**
+```sopl
+RBX = 4
+RCX = 5
+if RBX RCX == {
+    "Nice!" pop printf
+}
+```
 
 
+#### constants
+
+**Syntax:**
+```sopl
+const (name) = (your constant expersion goes here) ;
+```
+
+As in many other languages, Sopl also has a constant system. Constants are expressions that are evaluated at compile time and are therefor very useful for anything that can be evaluated at compile time. The name can be any normal name and the expression is a set of operations that the program can evaluate. The quickest way to understand how they work is to check out the examples:
+
+```sopl
+const World = "World"
+const HelloWorld = "Hello" World +      // Concatenates strings and expressions can use constants
+const A = 4;
+const B = 5;
+const C = A B + ;                       
+const HelloWorldNine = HelloWorld C + ; // Concatenates the integers and strings together
+```
+
+In a constants expression can only be things that can be evaluated at compile time, such as Strings, Integers, Longs and other constants. If you try to use something like a function it would tell you that it doesn't recognise it as a constant value. 
