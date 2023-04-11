@@ -18,7 +18,7 @@ For more info on current versions checkout `version.txt`
 - [x] constants
 - [ ] control flow
   - [x] if statements
-  - [ ] else statements
+  - [x] else statements
   - [ ] else if statements
   - [ ] while statements
   - [ ] for statements
@@ -197,7 +197,10 @@ if (condition) {(Body)}
 RBX = 4
 RCX = 5
 if RBX RCX == {
-    "Nice!" pop printf
+  "Nice!" pop printf pop
+}
+else {
+  "Not nice!" pop printf pop
 }
 ```
 
