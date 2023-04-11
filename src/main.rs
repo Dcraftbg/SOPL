@@ -697,6 +697,109 @@ impl Register {
             Register::R8D => 4,
         }
     }
+    fn to_byte_size(&self, size: usize) -> Self {
+        match size {
+            8 => {
+              match self {
+                Register::RAX | Register::EAX  | Register::AX | Register::AH | Register::AL => {
+                    return Register::RAX;
+                } 
+                Register::RBX | Register::EBX  | Register::BX | Register::BH | Register::BL => {
+                    return Register::RBX;
+                }
+                Register::RCX | Register::ECX  | Register::CX | Register::CH | Register::CL => {
+                    return Register::RCX;
+                }
+                Register::RDX | Register::EDX  | Register::DX | Register::DH | Register::DL => {
+                    return Register::RDX;
+                }
+                Register::RSP | Register::ESP  | Register::SP => {
+                    return Register::RSP;
+                }
+                Register::RBP | Register::EBP  | Register::BP => {
+                    return Register::RBP;
+                }
+                Register::R8 => todo!(),
+                Register::R8D => todo!(),
+              }  
+            },
+            4 => {
+                match self {
+                    Register::RAX | Register::EAX  | Register::AX | Register::AH | Register::AL => {
+                        return Register::EAX;
+                    } 
+                    Register::RBX | Register::EBX  | Register::BX | Register::BH | Register::BL => {
+                        return Register::EBX;
+                    }
+                    Register::RCX | Register::ECX  | Register::CX | Register::CH | Register::CL => {
+                        return Register::ECX;
+                    }
+                    Register::RDX | Register::EDX  | Register::DX | Register::DH | Register::DL => {
+                        return Register::EDX;
+                    }
+                    Register::RSP | Register::ESP  | Register::SP => {
+                        return Register::ESP;
+                    }
+                    Register::RBP | Register::EBP  | Register::BP => {
+                        return Register::EBP;
+                    }
+                    Register::R8 => todo!(),
+                    Register::R8D => todo!(),
+                  }  
+            },
+            2 => {
+                match self {
+                    Register::RAX | Register::EAX  | Register::AX | Register::AH | Register::AL => {
+                        return Register::AX;
+                    } 
+                    Register::RBX | Register::EBX  | Register::BX | Register::BH | Register::BL => {
+                        return Register::BX;
+                    }
+                    Register::RCX | Register::ECX  | Register::CX | Register::CH | Register::CL => {
+                        return Register::CX;
+                    }
+                    Register::RDX | Register::EDX  | Register::DX | Register::DH | Register::DL => {
+                        return Register::DX;
+                    }
+                    Register::RSP | Register::ESP  | Register::SP => {
+                        return Register::SP;
+                    }
+                    Register::RBP | Register::EBP  | Register::BP => {
+                        return Register::BP;
+                    }
+                    Register::R8 => todo!(),
+                    Register::R8D => todo!(),
+                  }  
+            },
+            1 => {
+                match self {
+                    Register::RAX | Register::EAX  | Register::AX | Register::AH | Register::AL => {
+                        return Register::AL;
+                    } 
+                    Register::RBX | Register::EBX  | Register::BX | Register::BH | Register::BL => {
+                        return Register::BL;
+                    }
+                    Register::RCX | Register::ECX  | Register::CX | Register::CH | Register::CL => {
+                        return Register::CL;
+                    }
+                    Register::RDX | Register::EDX  | Register::DX | Register::DH | Register::DL => {
+                        return Register::DL;
+                    }
+                    Register::RSP | Register::ESP  | Register::SP => {
+                        todo!("Handle rsp error case");
+                    }
+                    Register::RBP | Register::EBP  | Register::BP => {
+                        todo!("Handle rbp error case");
+                    }
+                    Register::R8 => todo!(),
+                    Register::R8D => todo!(),
+                  }  
+            },
+            _ => {
+                panic!("Unexpected use case for to_bit_size!");
+            }
+        }
+    }
 }
 fn size_to_nasm_type(size: usize) -> String {
     match size {
@@ -714,7 +817,7 @@ fn size_to_nasm_type(size: usize) -> String {
         }
 
         _ => {
-            panic!("Invalid size for nasm type!");
+            panic!("Invalid size  nasm type!");
             
         }
     }
@@ -729,8 +832,11 @@ enum Instruction {
     POP     (Register),
     CALLRAW (String),
     ADD     (Register, Register),
+    ADDVAL  (Register, i64),
     SUB     (Register, Register),
+    SUBVAL  (Register, i64),
     MUL     (Register, Register),
+    MULVAL  (Register, i64),
     DIV     (Register, Register),
     EQUALS  (Register, Register),
     CALL    (String),
@@ -1301,7 +1407,7 @@ fn parse_tokens_to_build(lexer: &mut Lexer, _Intrinsics: &HashMap<String,Intrins
                             
                             let currentFunc = build.functions.get_mut(currentFunction.as_mut().unwrap()).unwrap();
                             match sc.typ {
-                                ScopeOpenerType::FUNC => {;
+                                ScopeOpenerType::FUNC => {
                                     build.functions.get_mut(currentFunction.as_mut().unwrap()).unwrap().body.push((token.location.clone(),Instruction::SCOPEEND));
                                     currentFunction = None;
                                 },
@@ -1587,8 +1693,8 @@ fn to_nasm_x86_64(build: &BuildProgram, program: &CmdProgram) -> io::Result<()>{
                     //writeln!(&mut f, "   push {} {}",size_to_nasm_type(Reg.size()),Reg.to_string())?;
                 }
                 Instruction::PUSHSTR(Index) => {
-                    writeln!(&mut f, "   push _STRING_{}",Index.to_string().replace("-", ""))?;
-                    writeln!(&mut f, "   push _LEN_STRING_{}",Index.to_string().replace("-", ""))?;
+                    writeln!(&mut f, "   push _STRING_{}_",Index.to_string().replace("-", ""))?;
+                    writeln!(&mut f, "   push _LEN_STRING_{}_",Index.to_string().replace("-", ""))?;
                 }
                 Instruction::PUSHRAW(Data) => {
                     writeln!(&mut f, "   push {}",Data)?;
@@ -1650,13 +1756,33 @@ fn to_nasm_x86_64(build: &BuildProgram, program: &CmdProgram) -> io::Result<()>{
                     writeln!(&mut f, "   _{}_S_{}:",function_name,i)?;
                 }
                 Instruction::CONDITIONAL_JUMP(ni) => {
+                    let (loc,prev) = function.body.get(i-1).unwrap();
+                    match prev {
+                        Instruction::EQUALS(Reg, _) => {
+                            writeln!(&mut f, "   cmp {}, 1",Reg.to_byte_size(1).to_string())?;        
+                        }
+                        _ => {
+                            todo!("Implement parsing of if:\nif RBX {{}}\n")
+                        }
+                    }
                     writeln!(&mut f, "   jz _{}_S_{}",function_name,ni)?;
                 }
                 Instruction::JUMP(ni) => {
                     writeln!(&mut f, "   jmp _{}_S_{}",function_name,ni)?;
                 }
                 Instruction::EQUALS(Reg1, Reg2) => {
-                    writeln!(&mut f, "   cmp {}, {}",Reg1.to_string(),Reg2.to_string())?;
+                    writeln!(&mut f, "   cmp  {}, {}",Reg1.to_string(),Reg2.to_string())?;
+                    writeln!(&mut f, "   sete  {}",Reg1.to_byte_size(1).to_string())?;
+                    //writeln!(&mut f, "   setz {}",Reg1.to_string())?;
+                },
+                Instruction::ADDVAL(Reg1, val) => {
+                    writeln!(&mut f, "   add {}, {}",Reg1.to_string(),val)?;
+                }
+                Instruction::SUBVAL(Reg1, val) => {
+                    writeln!(&mut f, "   sub {}, {}",Reg1.to_string(),val)?;
+                }
+                Instruction::MULVAL(Reg1, val) => {
+                    writeln!(&mut f, "   mul {}, {}",Reg1.to_string(),val)?;
                 },
             }
         }
@@ -1670,13 +1796,13 @@ fn to_nasm_x86_64(build: &BuildProgram, program: &CmdProgram) -> io::Result<()>{
     writeln!(&mut f, "   _CALLSTACK_BUF_PTR: dq _CALLSTACK_TOP")?;
     for (UUID,stridef) in build.stringdefs.iter(){        
         //writeln!(&mut f, "   _STRING_{}: db \"{}\", 0",i,stridef.Data)?;
-        write!(&mut f, "   _STRING_{}: db ",UUID.to_string().replace("-", ""))?;
+        write!(&mut f, "   _STRING_{}_: db ",UUID.to_string().replace("-", ""))?;
         for chr in stridef.Data.chars() {
             write!(&mut f, "{}, ",(chr as u8))?;
         }
         writeln!(&mut f, "0    ; {}",stridef.Data)?;
         match stridef.Typ {
-            ProgramStringType::STR  => writeln!(&mut f, "   _LEN_STRING_{}: dq {}",UUID.to_string().replace("-", ""),stridef.Data.len())?,
+            ProgramStringType::STR  => writeln!(&mut f, "   _LEN_STRING_{}_: dq {}",UUID.to_string().replace("-", ""),stridef.Data.len())?,
             ProgramStringType::CSTR => todo!(),
         }
     }

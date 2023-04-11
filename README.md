@@ -163,7 +163,7 @@ Currently supported register operations:
 (REG1) (REG2) +  -> adds the two registers together (RESULT IN REG1)
 (REG1) (REG2) -  -> subtracts the second register from the first register (RESULT IN REG1)
 (REG1) (REG2) *  -> multiples the two registers     (RESULT IN REG1)
-(REG1) (REG2) == -> compares two registers (Output in flags register)
+(REG1) (REG2) == -> compares two registers (RESULT IN REG1)
 (REG1) push      -> pushes register onto the stack                          (WARNING: currently does not support 32 bit registers)
 (REG1) pop       -> pops the value off the stack and loads it into register (WARNING: currently does not support 32 bit registers)
 pop              -> pops 64 bit value off the stack and loads it into RAX

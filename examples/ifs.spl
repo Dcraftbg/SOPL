@@ -2,7 +2,7 @@ extern "C" printf
 extern "C" exit
 func main(int, ptr : int) { 
     RBX = 5
-    R8 = 4
+    R8 = 5
     if RBX R8 == {
         "Hello World!" pop printf pop
     }
