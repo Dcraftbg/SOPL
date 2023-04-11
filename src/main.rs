@@ -5,7 +5,7 @@
 #![allow(unused_imports)]
 #![allow(unreachable_patterns)]
 
-use std::{env, process::{exit, Command}, path::{Path, PathBuf}, ffi::OsStr, str::FromStr, collections::HashMap, hash::Hash, fs::{File, self}, io::{Read, Write, self}, fmt::format, os::windows::{process::CommandExt, self}, arch::x86_64::_mm_testz_pd};
+use std::{env, process::{exit, Command}, path::{Path, PathBuf}, ffi::OsStr, str::FromStr, collections::HashMap, hash::Hash, fs::{File, self}, io::{Read, Write, self}, fmt::format, os::windows::{process::CommandExt, self}, arch::x86_64::_mm_testz_pd, borrow::BorrowMut};
 use uuid::Uuid;
 
 macro_rules! par_error {
@@ -165,6 +165,7 @@ enum IntrinsicType {
     RET,
     INCLUDE,
     IF,
+    ELSE,
 }
 impl IntrinsicType {
     fn to_string(&self,isplural: bool) -> String{
@@ -228,8 +229,10 @@ impl IntrinsicType {
             },
             IntrinsicType::DOTCOMA => {
                 if isplural {"Dotcomas".to_string()} else {"Dotcoma".to_string()}
-            }
-            ,
+            },
+            IntrinsicType::ELSE => {
+                if isplural {"Else".to_string()} else {"Else".to_string()}
+            },
         }
     }
 }
@@ -244,6 +247,7 @@ impl IntrinsicType {
 struct Intrinsic {
     operand: i64,
 }
+// TODO: implement booleans
 #[derive(Debug)]
 enum TokenType {
     WordType      (String),
@@ -330,8 +334,6 @@ impl<'a> Lexer<'a> {
         }
         while self.is_not_empty() && self.source.chars().nth(self.cursor).unwrap().is_whitespace() {
             //println!("Skipping '{}'",self.source.chars().nth(self.cursor).unwrap());
-            self.cursor += 1;
-            self.currentLocation.character+=1;
             if self.source.chars().nth(self.cursor).unwrap() == '\n' {
                 self.currentLocation.linenumber += 1;
                 self.currentLocation.character = 0;
@@ -339,6 +341,8 @@ impl<'a> Lexer<'a> {
             if self.cursor >= self.source.len(){
                 break;
             }
+            self.cursor += 1;
+            self.currentLocation.character+=1;
         }
         true
         
@@ -732,13 +736,9 @@ enum Instruction {
     CALL    (String),
     FNBEGIN (),
     RET     (),
-    SCOPEBEGIN, // Theoretically in the future we might have something like a vector of variable definitions
+    SCOPEBEGIN,
     SCOPEEND,
-    CONDITIONAL_JUMP(usize), // offset
-    //if x {
-    //        
-    //}
-    //CONDITIONAL_JUMP 0 (condition) SCOPEBEGIN
+    CONDITIONAL_JUMP(usize),
     JUMP(usize),
 }
 
@@ -925,6 +925,7 @@ enum ScopeOpenerType {
     FUNC,
     IF,
     EMPTY,
+    ELSE,
 }
 #[derive(Debug)]
 struct ScopeOpener {
@@ -1269,7 +1270,7 @@ fn parse_tokens_to_build(lexer: &mut Lexer, _Intrinsics: &HashMap<String,Intrins
                         if ln != 0 {
                             let s = scopeStack.get_mut(ln-1).unwrap();
                             //s.hasBeenOpened = !s.hasBeenOpened;
-                            par_assert!(token,!s.hasBeenOpened, "Scope already opened!");
+                            par_assert!(token,!s.hasBeenOpened, "Scope already opened! {:?}",scopeStack);
                             s.hasBeenOpened = true;
                             let currentFunc = build.functions.get_mut(currentFunction.as_mut().unwrap()).unwrap();
                             
@@ -1281,6 +1282,7 @@ fn parse_tokens_to_build(lexer: &mut Lexer, _Intrinsics: &HashMap<String,Intrins
                                     currentFunc.body.push(( token.location.clone(),Instruction::JUMP(0) ));
                                 }
                                 ScopeOpenerType::EMPTY => {}
+                                ScopeOpenerType::ELSE => {},
                             }
                             currentFunc.body.push(( token.location.clone(),Instruction::SCOPEBEGIN));
                         }
@@ -1296,27 +1298,69 @@ fn parse_tokens_to_build(lexer: &mut Lexer, _Intrinsics: &HashMap<String,Intrins
                     IntrinsicType::CLOSECURLY => {
                         if let Some(sc) = scopeStack.pop(){
                             par_assert!(token,sc.hasBeenOpened, "Error: scope closed but never opened!");
-                            build.functions.get_mut(currentFunction.as_mut().unwrap()).unwrap().body.push((token.location.clone(),Instruction::SCOPEEND));
+                            
                             let currentFunc = build.functions.get_mut(currentFunction.as_mut().unwrap()).unwrap();
                             match sc.typ {
-                                ScopeOpenerType::FUNC => {
+                                ScopeOpenerType::FUNC => {;
+                                    build.functions.get_mut(currentFunction.as_mut().unwrap()).unwrap().body.push((token.location.clone(),Instruction::SCOPEEND));
                                     currentFunction = None;
                                 },
                                 ScopeOpenerType::IF => {
+                                    let mut len: usize = 0;
+                                    {
+                                        let mut body = &mut currentFunc.body;
+                                        
+                                        //let l = currentFunc.body.get_mut(sc.cinstruct_size);
+                                        //println!("{:#?}",body);
+                                        let (_, p) = par_expect!(token.location.clone(),body.get_mut(sc.cinstruct_size+1), "Error");
+                                        let offset = 0;
+                                        if let Some(ntok) = lexer.peekable().peek() {
+                                            match ntok.typ {
+                                                TokenType::IntrinsicType(typ,_) => {
+                                                    match typ {
+                                                        IntrinsicType::ELSE => {
+                                                            body.push((token.location.clone(),Instruction::JUMP(0)));
+                                                            scopeStack.push( ScopeOpener { hasBeenOpened: false, typ: ScopeOpenerType::ELSE, cinstruct_size: body.len() });
+                                                        },
+                                                        _ => {}
+                                                    }
+                                                }
+                                                _ => {}
+                                            } 
+                                        }
+                                        len = body.len();
+                                    }
                                     let mut body = &mut currentFunc.body;
-                                    let len = body.len();
-                                    //let l = currentFunc.body.get_mut(sc.cinstruct_size);
-                                    println!("{:#?}",body);
                                     let (_, p) = par_expect!(token.location.clone(),body.get_mut(sc.cinstruct_size+1), "Error");
                                     match p {
                                         Instruction::JUMP(loc) => {
-                                            *loc = len-1;
+                                            *loc = len;
                                         }
                                         _ => par_error!(token,"Unexpected Instruction! This is probably due to a bug inside the program! {:?}",p)
                                     }
+
+                                    build.functions.get_mut(currentFunction.as_mut().unwrap()).unwrap().body.push((token.location.clone(),Instruction::SCOPEEND))
                                 },
-                                ScopeOpenerType::EMPTY => {}
+                                ScopeOpenerType::EMPTY => {
+                                    build.functions.get_mut(currentFunction.as_mut().unwrap()).unwrap().body.push((token.location.clone(),Instruction::SCOPEEND))
+                                }
+                                ScopeOpenerType::ELSE => {
+                                    let body = &mut currentFunc.body;
+                                    let len = body.len();
+                                    //println!("[DEBUG] Len {} Trace: {:#?} Stringdefs: {:#?}",sc.cinstruct_size,body,build.stringdefs);
+                                    let (_,toc) = body.get_mut(sc.cinstruct_size-1).unwrap();
+                                    match toc {
+                                        Instruction::JUMP(data) => {
+                                            *data = len;
+                                        }
+                                        _ => {
+                                            par_error!(token, "Invalid instruction for else token! Expected jump! This is probably due to a bug in the system {:?}",toc)
+                                        }
+                                    }
+                                    build.functions.get_mut(currentFunction.as_mut().unwrap()).unwrap().body.push((token.location.clone(),Instruction::SCOPEEND))
+                                },
                             }
+                            
                         }
                         else {
                             par_error!(token, "Scope closed but never opened!!!");
@@ -1464,6 +1508,7 @@ fn parse_tokens_to_build(lexer: &mut Lexer, _Intrinsics: &HashMap<String,Intrins
                         
                     },
                     IntrinsicType::DOTCOMA => {},
+                    IntrinsicType::ELSE => todo!(),
                 }
             }
             TokenType::StringType(Word) => {
@@ -1522,6 +1567,7 @@ fn to_nasm_x86_64(build: &BuildProgram, program: &CmdProgram) -> io::Result<()>{
     for (function_name,function) in build.functions.iter() {
         //writeln!(&mut f,"global _{}",function_name)?;
         if function_name == "main" {
+            
             writeln!(&mut f, "_{}:",function_name)?;
         }
         else {
@@ -1604,7 +1650,7 @@ fn to_nasm_x86_64(build: &BuildProgram, program: &CmdProgram) -> io::Result<()>{
                     writeln!(&mut f, "   _{}_S_{}:",function_name,i)?;
                 }
                 Instruction::CONDITIONAL_JUMP(ni) => {
-                    writeln!(&mut f, "   je _{}_S_{}",function_name,ni)?;
+                    writeln!(&mut f, "   jz _{}_S_{}",function_name,ni)?;
                 }
                 Instruction::JUMP(ni) => {
                     writeln!(&mut f, "   jmp _{}_S_{}",function_name,ni)?;
@@ -1709,6 +1755,7 @@ fn main() {
     Intrinsics.insert("*".to_string(),IntrinsicType::MUL);
     Intrinsics.insert("ret".to_string(),IntrinsicType::RET);
     Intrinsics.insert("if".to_string(), IntrinsicType::IF);
+    Intrinsics.insert("else".to_string(), IntrinsicType::ELSE);
     Intrinsics.insert("==".to_string(),IntrinsicType::EQ);
     let mut Definitions: HashMap<String,VarType> = HashMap::new();
     Definitions.insert("int".to_string(), VarType::INT);

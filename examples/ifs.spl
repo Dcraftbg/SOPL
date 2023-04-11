@@ -1,9 +1,13 @@
 extern "C" printf
+extern "C" exit
 func main(int, ptr : int) { 
     RBX = 5
-    R8 = 5
-
+    R8 = 4
     if RBX R8 == {
         "Hello World!" pop printf pop
     }
+    else {
+        "Goodbye World!" pop printf pop
+    }
+    0l exit
 }

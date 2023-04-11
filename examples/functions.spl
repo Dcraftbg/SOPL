@@ -4,3 +4,4 @@ extern "C" exit
 func sayHelloWorld() {
     "Hello World\n" pop printf pop
 }
+
