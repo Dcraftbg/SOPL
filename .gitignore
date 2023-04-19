@@ -1,5 +1,6 @@
 /target
 /syntax
+/.idea
 /examples/bin/
 /examples/int/
 /examples/raw/
