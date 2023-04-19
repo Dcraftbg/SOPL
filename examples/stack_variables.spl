@@ -1,0 +1,7 @@
+extern "C" printf
+extern "C" exit
+func main(int, ptr : int) {
+    5l 4l + 
+    "%ld" pop printf
+    0 exit
+}

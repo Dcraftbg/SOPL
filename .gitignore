@@ -2,6 +2,7 @@
 /syntax
 /examples/bin/
 /examples/int/
+/examples/raw/
 names.txt
 ideas.txt
 build.py

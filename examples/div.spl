@@ -1,0 +1,12 @@
+extern "C" printf
+func main(int, ptr : int) {
+    "Got to here\n" pop printf pop 
+    RBX = 4
+    RCX = 2
+    RBX RCX /
+    push RBX
+    push RCX
+    "Got to here 3\n" pop printf pop 
+    "%ld Wha\n" pop printf pop pop
+    "%ld\n"       pop printf pop pop
+}

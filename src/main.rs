@@ -5,7 +5,7 @@
 #![allow(unused_imports)]
 #![allow(unreachable_patterns)]
 
-use std::{env, process::{exit, Command}, path::{Path, PathBuf}, ffi::OsStr, str::FromStr, collections::HashMap, hash::Hash, fs::{File, self}, io::{Read, Write, self}, fmt::format, os::windows::{process::CommandExt, self}, arch::x86_64::_mm_testz_pd, borrow::BorrowMut};
+use std::{env, process::{exit, Command}, path::{Path, PathBuf}, ffi::OsStr, str::FromStr, collections::HashMap, hash::Hash, fs::{File, self}, io::{Read, Write, self}, fmt::format, os::windows::{process::CommandExt, self}, arch::x86_64::_mm_testz_pd, borrow::BorrowMut, clone};
 use uuid::Uuid;
 
 macro_rules! par_error {
@@ -51,6 +51,16 @@ macro_rules! par_expect {
         //exit(1);
     });
 }
+macro_rules! com_expect {
+    ($location:expr, $expector:expr, $($arg:tt)*) => ({
+
+        let message = format!($($arg)*);
+        let message = format!("(C) [ERROR] {}:{}:{}: {}", $location.file, $location.linenumber, $location.character, message);
+        $expector.expect(&message)
+        //eprintln!("(P) [ERROR] {}:{}:{}: {}", $token.location.file, $token.location.linenumber, $token.location.character, message);
+        //exit(1);
+    });
+}
 macro_rules! par_info {
     ($token:expr, $($arg:tt)*) => ({
         let message = format!($($arg)*);
@@ -65,27 +75,34 @@ macro_rules! par_warn {
 }
 
 macro_rules! com_error {
-    ($token:expr, $($arg:tt)*) => ({
+    ($location:expr, $($arg:tt)*) => ({
         let message = format!($($arg)*);
-        eprintln!("(C) [ERROR] {}:{}:{}: {}", $token.location.file, $token.location.linenumber, $token.location.character, message);
+        eprintln!("(C) [ERROR] {}:{}:{}: {}", $location.file, $location.linenumber, $location.character, message);
         exit(1);
     });
 }
 macro_rules! com_info {
-    ($token:expr, $($arg:tt)*) => ({
+    ($location:expr, $($arg:tt)*) => ({
         let message = format!($($arg)*);
-        println!("(C) [INFO] {}:{}:{}: {}", $token.location.file, $token.location.linenumber, $token.location.character, message);
+        println!("(C) [INFO] {}:{}:{}: {}", $location.file, $location.linenumber, $location.character, message);
+    });
+}
+macro_rules! com_warn {
+    ($location:expr, $($arg:tt)*) => ({
+        let message = format!($($arg)*);
+        println!("(C) [WARN] {}:{}:{}: {}", $location.file, $location.linenumber, $location.character, message);
     });
 }
 macro_rules! com_assert {
-    ($token:expr, $condition:expr, $($arg:tt)*) => ({
+    ($location:expr, $condition:expr, $($arg:tt)*) => ({
         if !$condition {
             let message = format!($($arg)*);
-            eprintln!("(C) [ERROR] {}:{}:{}: {}", $token.location.file, $token.location.linenumber, $token.location.character, message);
+            eprintln!("(C) [ERROR] {}:{}:{}: {}", $location.file, $location.linenumber, $location.character, message);
             exit(1);
         }
     });
 }
+
 
 
 
@@ -138,11 +155,12 @@ fn usage() {
     todo!("Unimplemented usage function!");
 }
 #[repr(u32)]
-#[derive(Clone, Copy,Debug)]
+#[derive(Clone, Copy,Debug,PartialEq )]
 
 enum IntrinsicType {
     Extern = 0,
     Func,
+    Let,
     CONSTANT,
     OPENPAREN,
     CLOSEPAREN,
@@ -154,12 +172,13 @@ enum IntrinsicType {
     // REGISTER OPERATIONS
     POP,
     PUSH,
-    MOV_REG,
+    SET,
 
     // REGISTER MATH
     ADD,
     SUB,
     MUL,
+    DIV,
     // BOOLEAN OPERATIONS
     EQ,
     RET,
@@ -200,7 +219,7 @@ impl IntrinsicType {
             IntrinsicType::PUSH => {
                 if isplural {"Push".to_string()} else {"Push".to_string()}
             }
-            IntrinsicType::MOV_REG => {
+            IntrinsicType::SET => {
                 if isplural {"Move registers".to_string()} else {"Move register".to_string()}
             }
             IntrinsicType::ADD => {
@@ -233,6 +252,12 @@ impl IntrinsicType {
             IntrinsicType::ELSE => {
                 if isplural {"Else".to_string()} else {"Else".to_string()}
             },
+            IntrinsicType::DIV => {
+                if isplural {"Div".to_string()} else {"Div".to_string()}
+            },
+            IntrinsicType::Let => {
+                if isplural {"Let".to_string()} else {"Let".to_string()}
+            },
         }
     }
 }
@@ -243,15 +268,12 @@ impl IntrinsicType {
 //     map
 // };
 //mut Intrinsics: HashMap<&str,IntrinsicType> = HashMap::new();
-#[derive(Debug)]
-struct Intrinsic {
-    operand: i64,
-}
 // TODO: implement booleans
-#[derive(Debug)]
+#[derive(Debug,PartialEq)]
 enum TokenType {
     WordType      (String),
-    IntrinsicType (IntrinsicType, Intrinsic),
+    IntrinsicType (IntrinsicType),
+    Definition    (VarType),
     StringType    (String),
     CharType      (String),
     Number32      (i32),
@@ -260,23 +282,26 @@ enum TokenType {
 impl TokenType {
     fn to_string(&self,isplural:bool) -> String{
         match self {
-            TokenType::WordType(_) => {
-                if isplural {"Words".to_string()} else {"Word".to_string()}
+            TokenType::WordType(word) => {
+                if isplural {format!("Words").to_string()} else {format!("Word {}",word).to_string()}
             },
-            TokenType::IntrinsicType(_, _) => {
-                if isplural {"Intrinsics".to_string()} else {"Intrinsic".to_string()}
+            TokenType::IntrinsicType(typ) => {
+                if isplural {format!("Intrinsics").to_string()} else {format!("Intrinsic {}",typ.to_string(false)).to_string()}
             }
-            TokenType::StringType(_) => {
-                if isplural {"Strings".to_string()} else {"String".to_string()}
+            TokenType::StringType(st) => {
+                if isplural {format!("String").to_string()} else {format!("String {}",st).to_string()}
             }
-            TokenType::CharType(_) => {
-                if isplural {"Chars".to_string()} else {"Char".to_string()}
+            TokenType::CharType(chr) => {
+                if isplural {"Chars".to_string()} else {format!("Char {}",chr).to_string()}
             }
-            TokenType::Number32(_) => {
-                if isplural {"Numbers(32)".to_string()} else {"Number(32)".to_string()}
+            TokenType::Number32(num) => {
+                if isplural {"Numbers(32)".to_string()} else {format!("Number(32) {}",num).to_string()}
             }
-            TokenType::Number64(_) => {
-                if isplural {"Numbers(64)".to_string()} else {"Number(64)".to_string()}
+            TokenType::Number64(num) => {
+                if isplural {"Numbers(64)".to_string()} else {format!("Number(64) {}",num).to_string()}
+            }
+            TokenType::Definition(typ) => {
+                if isplural {"Definitions".to_string()} else {format!("Definition {}",typ.to_string(false)).to_string()}
             }
         }
     }
@@ -324,7 +349,8 @@ struct Lexer<'a> {
     source: String,
     cursor: usize,
     currentLocation: ProgramLocation,
-    Intrinsics: &'a HashMap<String,IntrinsicType>
+    Intrinsics: &'a HashMap<String,IntrinsicType>,
+    Definitions: &'a HashMap<String,VarType>
 }
 
 impl<'a> Lexer<'a> {
@@ -350,12 +376,13 @@ impl<'a> Lexer<'a> {
     fn is_not_empty(&self) -> bool {
         self.cursor < self.source.len()
     }
-    fn new(source: String, Intrinsics: &'a HashMap<String, IntrinsicType>) -> Self {
+    fn new(source: String, Intrinsics: &'a HashMap<String, IntrinsicType>, Definitions: &'a HashMap<String,VarType>) -> Self {
         Self { 
             source: source.clone(), 
             cursor: 0, 
             currentLocation: ProgramLocation { file: String::from(""), linenumber: 1, character: 0 },
-            Intrinsics 
+            Intrinsics,
+            Definitions,
         }
     }
 }
@@ -440,7 +467,8 @@ impl Iterator for Lexer<'_> {
                             return self.next();
                         }
                         else {
-                            todo!("Check for any intrinsics thatm might include this")
+                            self.cursor += 1;
+                            return Some(Token { typ: TokenType::IntrinsicType(IntrinsicType::DIV), location: self.currentLocation.clone() });
                         }
                     }
                     else {
@@ -468,7 +496,7 @@ impl Iterator for Lexer<'_> {
                         
                         if let Some(o) = self.Intrinsics.get(&outstr) {
                             //println!("Got intrinsic: {}",o.to_string(false));
-                            return Some(Token { typ: TokenType::IntrinsicType(o.clone(), Intrinsic { operand: 0 }), location: self.currentLocation.clone() });
+                            return Some(Token { typ: TokenType::IntrinsicType(o.clone()), location: self.currentLocation.clone() });
                         }
                         else{
                             //println!("Got word: {}",outstr);
@@ -485,13 +513,14 @@ impl Iterator for Lexer<'_> {
                         self.currentLocation.character += 1;
                     }       
                     if c.is_alphabetic(){
-                        let o = self.Intrinsics.get(&outstr);
-                        if o.is_none() {
-                            return Some(Token { typ: TokenType::WordType(outstr), location: self.currentLocation.clone() });
+                        if let Some(o) = self.Intrinsics.get(&outstr){                        
+                            return Some(Token { typ: TokenType::IntrinsicType((*o).clone()), location: self.currentLocation.clone() });
+                        }
+                        else if let Some(o) = self.Definitions.get(&outstr){                        
+                            return Some(Token { typ: TokenType::Definition((*o).clone()), location: self.currentLocation.clone() });
                         }
                         else {
-                            //TODO: implement operand
-                            return Some(Token { typ: TokenType::IntrinsicType((*o.unwrap()).clone(),Intrinsic { operand: 0 }), location: self.currentLocation.clone() });
+                            return Some(Token { typ: TokenType::WordType(outstr), location: self.currentLocation.clone() });
                         }
                     }
                     else {
@@ -598,6 +627,7 @@ enum Register {
     // General Purpose registers
     R8,
     R8D,
+    
 }
 impl Register {
     fn to_string(&self) -> String {
@@ -822,23 +852,31 @@ fn size_to_nasm_type(size: usize) -> String {
         }
     }
 }
+
+
+
+// TODO: Introduce this for ADD, SUB, MUL, DIV
+#[derive(Debug)]
+enum OfP {
+    REGISTER (Register),
+    LOCALVAR (String),
+    RAW      (i64),
+    STR      (Uuid)
+    // etc.
+
+}
 #[derive(Debug)]
 enum Instruction {
-    PUSH    (Register),
-    PUSHSTR (Uuid),
-    PUSHRAW (i64),
-    MOV     (Register, i64),
-    MOV_REG (Register, Register),
-    POP     (Register),
+    PUSH    (OfP),
+    DEFVAR  (String),
+    MOV     (OfP, OfP),
+    POP     (OfP),
     CALLRAW (String),
-    ADD     (Register, Register),
-    ADDVAL  (Register, i64),
-    SUB     (Register, Register),
-    SUBVAL  (Register, i64),
-    MUL     (Register, Register),
-    MULVAL  (Register, i64),
-    DIV     (Register, Register),
-    EQUALS  (Register, Register),
+    ADD     (OfP, OfP),
+    SUB     (OfP, OfP),
+    MUL     (OfP, OfP),
+    DIV     (OfP, OfP),
+    EQUALS  (OfP, OfP),
     CALL    (String),
     FNBEGIN (),
     RET     (),
@@ -846,6 +884,7 @@ enum Instruction {
     SCOPEEND,
     CONDITIONAL_JUMP(usize),
     JUMP(usize),
+
 }
 
 #[derive(Debug,Clone)]
@@ -858,9 +897,15 @@ struct ProgramString {
     Typ:  ProgramStringType,
     Data: String
 }
+#[derive(Debug,Clone)]
+struct LocalVariable {
+    typ: VarType,
+    operand: usize
+}
 #[derive(Debug)]
 struct Function {
     contract: FunctionContract,
+    locals: HashMap<String,LocalVariable>,
     location: ProgramLocation,
     body: Vec<(ProgramLocation,Instruction)>,
 }
@@ -1015,7 +1060,7 @@ struct BuildProgram {
 }
 // Functions: Vec<Function>
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 enum VarType {
     CHAR,
     SHORT,
@@ -1024,7 +1069,49 @@ enum VarType {
     LONG,
     STR,
     PTR,
-    CUSTOM(u64)   
+    CUSTOM(Uuid)   
+}
+impl VarType {
+    fn to_string(&self, isplural: bool) -> String {
+        match self {
+            VarType::CHAR => {
+                if isplural {"chars".to_string()} else {"char".to_string()}
+            },
+            VarType::SHORT => {
+                if isplural {"shorts".to_string()} else {"short".to_string()}
+            }
+            VarType::BOOLEAN => {
+                if isplural {"booleans".to_string()} else {"bool".to_string()}
+            },
+            VarType::INT => {
+                if isplural {"ints".to_string()} else {"int".to_string()}
+            }
+            VarType::LONG => {
+                if isplural {"longs".to_string()} else {"long".to_string()}
+            }
+            VarType::STR => {
+                if isplural {"strings".to_string()} else {"string".to_string()}
+            }
+            VarType::PTR => {
+                if isplural {"chars".to_string()} else {"char".to_string()}
+            }
+            VarType::CUSTOM(_) => {
+                todo!("Implement custom")
+            }
+        }
+    }
+    fn get_size(&self) -> usize{
+        match self {
+            VarType::CHAR => 1,
+            VarType::SHORT => 2,
+            VarType::BOOLEAN => 1,
+            VarType::INT => 4,
+            VarType::LONG => 8,
+            VarType::STR => 16,
+            VarType::PTR => 8,
+            VarType::CUSTOM(_) => todo!(),
+        }
+    }
 }
 #[derive(Debug)]
 enum ScopeOpenerType {
@@ -1049,7 +1136,7 @@ fn eval_const_def(lexer: &mut Lexer, build: &mut BuildProgram) -> ConstValue {
     let mut varStack: Vec<ConstValue> = vec![];
     while let Some(token) = lexer.next() {
         match token.typ {
-            TokenType::IntrinsicType(typ, _) => {
+            TokenType::IntrinsicType(typ) => {
                 match typ {
                     IntrinsicType::ADD => {
                         let valTwo = par_expect!(token.location,varStack.pop(),"Stack underflow in constant definition");
@@ -1111,7 +1198,7 @@ fn eval_const_def(lexer: &mut Lexer, build: &mut BuildProgram) -> ConstValue {
     lpar_assert!(lexer.currentLocation,varStack.len() == 1,"Error: Lazy constant stack handling! You need to correctly handle your constants");
     varStack.pop().unwrap()
 }
-fn parse_function_contract(lexer: &mut Lexer, Definitions: &HashMap<String,VarType>) -> FunctionContract {
+fn parse_function_contract(lexer: &mut Lexer) -> FunctionContract {
     let mut out = FunctionContract {Inputs: vec![], Outputs: vec![]};
     let mut is_input = true;
     let first = lexer.next();
@@ -1119,7 +1206,7 @@ fn parse_function_contract(lexer: &mut Lexer, Definitions: &HashMap<String,VarTy
     let mut expectNextSY = false;
     //println!("Parsing function contract....");
     match first.typ {
-        TokenType::IntrinsicType(typ, _) => {
+        TokenType::IntrinsicType(typ) => {
             match typ {
                 IntrinsicType::OPENPAREN => {
                     //println!("Got open paren!")
@@ -1135,7 +1222,7 @@ fn parse_function_contract(lexer: &mut Lexer, Definitions: &HashMap<String,VarTy
     }
     while let Some(token) = lexer.next() {
         match token.typ {
-            TokenType::IntrinsicType(Typ,_ ) => {
+            TokenType::IntrinsicType(Typ) => {
                 match Typ {
                     IntrinsicType::COMA => {
                         assert!(expectNextSY, "undefined coma placed inside function contract! Comas only seperate Input or Output parameters");
@@ -1150,28 +1237,18 @@ fn parse_function_contract(lexer: &mut Lexer, Definitions: &HashMap<String,VarTy
                     other => par_error!(token, "Unexpected intrinsic in function contract! {}",other.to_string(false))
                 }
             }
-            TokenType::WordType(Word) => {
-                par_assert!(token,!expectNextSY, "Definitions inside function contracts must be seperated by either , or :");
-                expectNextSY = true;
-                match Word {
-                    Word => {
-                        if let Some(var) = Definitions.get(&Word) {
-                            if is_input {out.Inputs.push(var.clone())} else {out.Outputs.push(var.clone())};
-                        }
-                        else {
-                            par_error!(token, "Unexpected Word: {} found in function contract",Word)
-                        }
-                    }
-                }
+            TokenType::Definition(Def) => {
+                expectNextSY = true;    
+                if is_input {out.Inputs.push(Def.clone())} else {out.Outputs.push(Def.clone())};   
             }
             Other => {
-                par_error!(token, "Unexpected Token Type in Function Contract. Expected Word but found: {}",Other.to_string(false))
+                par_error!(token, "Unexpected Token Type in Function Contract. Expected Definition but found: {}",Other.to_string(false))
             }
         }
     }
     out
 }
-fn parse_tokens_to_build(lexer: &mut Lexer, _Intrinsics: &HashMap<String,IntrinsicType>, Definitions: &HashMap<String,VarType>, program: &mut CmdProgram) -> BuildProgram {
+fn parse_tokens_to_build(lexer: &mut Lexer, program: &mut CmdProgram) -> BuildProgram {
     let mut build: BuildProgram = BuildProgram { externals: vec![], functions: HashMap::new(),stringdefs: HashMap::new(), constdefs: HashMap::new()};
     let mut scopeStack: Vec<ScopeOpener> = vec![];
     let mut currentFunction: Option<String> = None;
@@ -1208,26 +1285,26 @@ fn parse_tokens_to_build(lexer: &mut Lexer, _Intrinsics: &HashMap<String,Intrins
                         program.warn_rax_usage = false
                     }
                     match regOp.typ {
-                        TokenType::IntrinsicType(typ,_) => {
+                        TokenType::IntrinsicType(typ) => {
                             match typ {
                                 
                                 IntrinsicType::POP => {
-                                    build.functions.get_mut(currentFunction.as_mut().unwrap()).unwrap().body.push((token.location.clone(),Instruction::POP(reg)));
+                                    build.functions.get_mut(currentFunction.as_mut().unwrap()).unwrap().body.push((token.location.clone(),Instruction::POP(OfP::REGISTER(reg))));
                                 }
                                 IntrinsicType::PUSH => {
-                                    build.functions.get_mut(currentFunction.as_mut().unwrap()).unwrap().body.push((token.location.clone(),Instruction::PUSH(reg)));
+                                    build.functions.get_mut(currentFunction.as_mut().unwrap()).unwrap().body.push((token.location.clone(),Instruction::PUSH(OfP::REGISTER(reg))));
                                 }
-                                IntrinsicType::MOV_REG => {
+                                IntrinsicType::SET => {
                                     let token = par_expect!(lexer.currentLocation,lexer.next(),"abruptly ran out of tokens");//.expect(&format!("abruptly ran out of tokens"));
                                     match token.typ {
                                         TokenType::Number32(data) => {
                                             if reg.size() >= 4 {
-                                                build.functions.get_mut(currentFunction.as_mut().unwrap()).unwrap().body.push((token.location,Instruction::MOV(reg, data as i64)))
+                                                build.functions.get_mut(currentFunction.as_mut().unwrap()).unwrap().body.push((token.location,Instruction::MOV(OfP::REGISTER(reg), OfP::RAW(data as i64))))
                                             }
                                         }
                                         TokenType::Number64(data) => {
                                             if reg.size() >= 8 {
-                                                build.functions.get_mut(currentFunction.as_mut().unwrap()).unwrap().body.push((token.location,Instruction::MOV(reg, data)))
+                                                build.functions.get_mut(currentFunction.as_mut().unwrap()).unwrap().body.push((token.location,Instruction::MOV(OfP::REGISTER(reg), OfP::RAW(data))))
                                             }
                                         }
                                         other => par_error!(token,"Unexpected Type for Mov Intrinsic. Expected Number32/Number64 but found {}",other.to_string(false))//token.location.par_error(&format!("Unexpected Type for Mov Intrinsic. Expected Number32/Number64 but found {}",other.to_string(false)))
@@ -1244,20 +1321,23 @@ fn parse_tokens_to_build(lexer: &mut Lexer, _Intrinsics: &HashMap<String,Intrins
                                 par_assert!(token,reg.size()==reg2.size(),"Gotten two differently sized registers to one op!");
                                 let regOp = lexer.next().expect(&format!("(P) [ERROR] {}:{}:{}: Unexpected register operation!",token.location.clone().file,&token.location.clone().linenumber,&token.location.clone().character));
                                 match regOp.typ {
-                                    TokenType::IntrinsicType(typ, _) => {
+                                    TokenType::IntrinsicType(typ) => {
                                         
                                         match typ {
                                             IntrinsicType::ADD => {
-                                                build.functions.get_mut(currentFunction.as_mut().unwrap()).unwrap().body.push((token.location.clone(),Instruction::ADD(reg, reg2)))
+                                                build.functions.get_mut(currentFunction.as_mut().unwrap()).unwrap().body.push((token.location.clone(),Instruction::ADD(OfP::REGISTER(reg), OfP::REGISTER(reg2))))
                                             }
                                             IntrinsicType::SUB => {
-                                                build.functions.get_mut(currentFunction.as_mut().unwrap()).unwrap().body.push((token.location.clone(),Instruction::SUB(reg, reg2)))
+                                                build.functions.get_mut(currentFunction.as_mut().unwrap()).unwrap().body.push((token.location.clone(),Instruction::SUB(OfP::REGISTER(reg), OfP::REGISTER(reg2))))
                                             }
                                             IntrinsicType::MUL => {
-                                                build.functions.get_mut(currentFunction.as_mut().unwrap()).unwrap().body.push((token.location.clone(),Instruction::MUL(reg, reg2)))
+                                                build.functions.get_mut(currentFunction.as_mut().unwrap()).unwrap().body.push((token.location.clone(),Instruction::MUL(OfP::REGISTER(reg), OfP::REGISTER(reg2))))
                                             }
                                             IntrinsicType::EQ => {
-                                                build.functions.get_mut(currentFunction.as_mut().unwrap()).unwrap().body.push((token.location.clone(),Instruction::EQUALS(reg, reg2)))
+                                                build.functions.get_mut(currentFunction.as_mut().unwrap()).unwrap().body.push((token.location.clone(),Instruction::EQUALS(OfP::REGISTER(reg), OfP::REGISTER(reg2))))
+                                            }
+                                            IntrinsicType::DIV => {
+                                                build.functions.get_mut(currentFunction.as_mut().unwrap()).unwrap().body.push((token.location.clone(),Instruction::DIV(OfP::REGISTER(reg), OfP::REGISTER(reg2))))
                                             }
                                             other => token.location.par_error(&format!("Unexpected Intrinsic! Expected Register Intrinsic but found {}",other.to_string(false)))//panic!("Unexpected Intrinsic! Expected Register Intrinsic but found {}",other.to_string(false))
                                         }
@@ -1268,11 +1348,90 @@ fn parse_tokens_to_build(lexer: &mut Lexer, _Intrinsics: &HashMap<String,Intrins
                                 }
                             }
                             else{
-                                par_error!(token, "unknown word {} found after Register",Word);
+                                par_error!(token, "unknown word {} found after Register operation",Word);
                             }
                         }
                         typ => {
                             par_error!(token,"Unexpected register operation! Expected Intrinsic or another Register but found {}",typ.to_string(false));
+                        }
+                    }
+                }
+                if !isvalid {
+                    let func = build.functions.get_mut(currentFunction.as_mut().unwrap()).unwrap();
+                    isvalid = func.locals.contains_key(&word);
+                    if isvalid {
+                        let regOp = par_expect!(lexer.currentLocation,lexer.next(),"Unexpected variable operation or another variable!");
+                        match regOp.typ {
+                            TokenType::IntrinsicType(Typ) => {
+                                match Typ {
+                                    IntrinsicType::POP => {
+                                        func.body.push((regOp.location,Instruction::POP(OfP::LOCALVAR(word.clone()))));
+                                    },
+                                    IntrinsicType::PUSH => {
+                                        func.body.push((regOp.location,Instruction::PUSH(OfP::LOCALVAR(word.clone()))));
+                                    },
+                                    IntrinsicType::SET => {
+                                        let operand = par_expect!(lexer.currentLocation,lexer.next(),"Expected another variable, a constant integer or a (string: not yet implemented)!");
+                                        match operand.typ {
+                                            TokenType::WordType(other) => {
+                                                par_assert!(operand,func.locals.contains_key(&other),"Could not find variable {}",other);
+                                                func.body.push((operand.location,Instruction::MOV(OfP::LOCALVAR(word.clone()), OfP::LOCALVAR(other.clone()))))
+                                            },
+                                            TokenType::StringType(_) => todo!("Implement strings with local variables"),
+                                            TokenType::Number32(val) => {
+                                                func.body.push((operand.location,Instruction::MOV(OfP::LOCALVAR(word.clone()), OfP::RAW(val as i64))))
+                                            },
+                                            TokenType::Number64(val) => {
+                                                func.body.push((operand.location,Instruction::MOV(OfP::LOCALVAR(word.clone()), OfP::RAW(val))))
+                                            },
+                                            other => {
+                                                par_error!(operand,"Unexpected operand for = intrinsic! Expected either a constant integer, another variable or a (string: not yet implemented) but found {}",other.to_string(false))
+                                            }
+                                        }
+                                    },
+                                    _ => {
+                                        par_error!(regOp,"Error: Unexpected intrinsic type for a local variable! Expected POP/PUSH/SET or another local variable but found {}",Typ.to_string(false))
+                                    }
+                                }
+                            },
+                            TokenType::WordType(Word) => {
+                                if func.locals.contains_key(&Word) {
+                                    //par_assert!(token,reg.size()==reg2.size(),"Gotten two differently sized registers to one op!");
+                                    let regOp = lexer.next().expect(&format!("(P) [ERROR] {}:{}:{}: Unexpected register operation!",token.location.clone().file,&token.location.clone().linenumber,&token.location.clone().character));
+                                    match regOp.typ {
+                                        TokenType::IntrinsicType(typ) => {
+                                            
+                                            match typ {
+                                                IntrinsicType::ADD => {
+                                                    build.functions.get_mut(currentFunction.as_mut().unwrap()).unwrap().body.push((token.location.clone(),Instruction::ADD(OfP::LOCALVAR(word.clone()), OfP::LOCALVAR(Word.clone()))))
+                                                }
+                                                IntrinsicType::SUB => {
+                                                    build.functions.get_mut(currentFunction.as_mut().unwrap()).unwrap().body.push((token.location.clone(),Instruction::SUB(OfP::LOCALVAR(word.clone()), OfP::LOCALVAR(Word.clone()))))
+                                                }
+                                                IntrinsicType::MUL => {
+                                                    build.functions.get_mut(currentFunction.as_mut().unwrap()).unwrap().body.push((token.location.clone(),Instruction::MUL(OfP::LOCALVAR(word.clone()), OfP::LOCALVAR(Word.clone()))))
+                                                }
+                                                IntrinsicType::EQ => {
+                                                    build.functions.get_mut(currentFunction.as_mut().unwrap()).unwrap().body.push((token.location.clone(),Instruction::EQUALS(OfP::LOCALVAR(word.clone()), OfP::LOCALVAR(Word.clone()))))
+                                                }
+                                                IntrinsicType::DIV => {
+                                                    build.functions.get_mut(currentFunction.as_mut().unwrap()).unwrap().body.push((token.location.clone(),Instruction::DIV(OfP::LOCALVAR(word.clone()), OfP::LOCALVAR(Word.clone()))))
+                                                }
+                                                other => token.location.par_error(&format!("Unexpected Intrinsic! Expected Register Intrinsic but found {}",other.to_string(false)))//panic!("Unexpected Intrinsic! Expected Register Intrinsic but found {}",other.to_string(false))
+                                            }
+                                        }
+                                        other => {
+                                            par_error!(token, "Unexpected token type: Expected Intrinsic but found {}",other.to_string(false));
+                                        }
+                                    }
+                                }
+                                else{
+                                    par_error!(token, "unknown word {} found after Variable operation",Word);
+                                }
+                            }
+                            _ => {
+                                par_error!(regOp,"Error: Unexpected token type for a local variable! Expected Intrinsic or another local but found {}",regOp.typ.to_string(false))
+                            }
                         }
                     }
                 }
@@ -1291,22 +1450,22 @@ fn parse_tokens_to_build(lexer: &mut Lexer, _Intrinsics: &HashMap<String,Intrins
                         let cons = build.constdefs.get(&word).unwrap();
                         match cons {
                             RawConstValue::INT(val) => {
-                                func.body.push((token.location.clone(),Instruction::MOV(Register::RAX, *val as i64)));
-                                func.body.push((token.location.clone(),Instruction::PUSH(Register::RAX)));
+                                func.body.push((token.location.clone(),Instruction::MOV(OfP::REGISTER(Register::RAX), OfP::RAW(*val as i64))));
+                                func.body.push((token.location.clone(),Instruction::PUSH(OfP::REGISTER(Register::RAX))));
                             }
                             RawConstValue::LONG(val) => {
-                                func.body.push((token.location.clone(),Instruction::MOV(Register::RAX, *val as i64)));
-                                func.body.push((token.location.clone(),Instruction::PUSH(Register::RAX)));
+                                func.body.push((token.location.clone(),Instruction::MOV(OfP::REGISTER(Register::RAX), OfP::RAW(*val as i64))));
+                                func.body.push((token.location.clone(),Instruction::PUSH(OfP::REGISTER(Register::RAX))));
                             }
                             RawConstValue::STR(val) => {
-                                func.body.push((token.location.clone(),Instruction::PUSHSTR(val.clone())));
+                                func.body.push((token.location.clone(),Instruction::PUSH(OfP::STR(val.clone()))));
                             }
                         }
                     }
                 }
                 par_assert!(token,isvalid,"Unknown word type: {}",word);
             }
-            TokenType::IntrinsicType(Type, _Data) => {
+            TokenType::IntrinsicType(Type) => {
                 match Type {
                     IntrinsicType::Extern => {
                         let externType = lexer.next();
@@ -1315,7 +1474,7 @@ fn parse_tokens_to_build(lexer: &mut Lexer, _Intrinsics: &HashMap<String,Intrins
                             TokenType::WordType(Word) => {
                                 build.externals.push(External::RawExternal(Word));
                             }
-                            TokenType::IntrinsicType(_, _) => assert!(false,"Unexpected behaviour! expected type Word or String but found Intrinsic"),
+                            TokenType::IntrinsicType(_) => assert!(false,"Unexpected behaviour! expected type Word or String but found Intrinsic"),
                             TokenType::StringType(Type) => {
                                 match Type.as_str() {
                                     "C" => {
@@ -1341,6 +1500,7 @@ fn parse_tokens_to_build(lexer: &mut Lexer, _Intrinsics: &HashMap<String,Intrins
                             TokenType::CharType(_) => par_error!(token,"Unexpected behaviour! expected type Word or String but found Char"),
                             TokenType::Number32(_) => par_error!(token,"Unexpected behaviour! expected type Word or String but found Number32"),
                             TokenType::Number64(_) => par_error!(token,"Unexpected behaviour! expected type Word or String but found Number64"),
+                            TokenType::Definition(_) => todo!(),
 
                         }
                     }
@@ -1352,13 +1512,13 @@ fn parse_tokens_to_build(lexer: &mut Lexer, _Intrinsics: &HashMap<String,Intrins
                             TokenType::WordType(Word) => {
                                 //println!("Func name {}",Word);
                                 par_assert!(token,build.functions.get(&Word).is_none(),"Multiply defined symbols {}!",Word);
-                                let _contract = parse_function_contract(lexer, &Definitions);
+                                let _contract = parse_function_contract(lexer);
                                 currentFunction = Some(Word.clone());
                                 if Word != "main" {
-                                    build.functions.insert(Word.clone(), Function { contract: _contract, body: vec![(token.location.clone(),Instruction::FNBEGIN())], location: token.location.clone()});
+                                    build.functions.insert(Word.clone(), Function { contract: _contract, body: vec![(token.location.clone(),Instruction::FNBEGIN())], location: token.location.clone(), locals: HashMap::new() });
                                 }
                                 else {
-                                    build.functions.insert(Word.clone(), Function { contract: _contract, body: vec![], location: token.location.clone() });
+                                    build.functions.insert(Word.clone(), Function { contract: _contract, body: vec![], location: token.location.clone(), locals: HashMap::new() });
                                 }
                                 scopeStack.push(ScopeOpener{typ: ScopeOpenerType::FUNC, hasBeenOpened: false, cinstruct_size: 0});
                                 // TODO: push func onto the scope stack
@@ -1369,7 +1529,7 @@ fn parse_tokens_to_build(lexer: &mut Lexer, _Intrinsics: &HashMap<String,Intrins
                     }
                     IntrinsicType::OPENPAREN => todo!(),
                     IntrinsicType::CLOSEPAREN => todo!(),
-                    IntrinsicType::DOUBLE_COLIN => todo!(),
+                    IntrinsicType::DOUBLE_COLIN => todo!("Context {:#?}",build),
                     IntrinsicType::COMA => todo!(),
                     IntrinsicType::OPENCURLY => {
                         let ln = scopeStack.len();
@@ -1412,17 +1572,16 @@ fn parse_tokens_to_build(lexer: &mut Lexer, _Intrinsics: &HashMap<String,Intrins
                                     currentFunction = None;
                                 },
                                 ScopeOpenerType::IF => {
+                                    #[allow(unused_assignments)]
                                     let mut len: usize = 0;
                                     {
-                                        let mut body = &mut currentFunc.body;
+                                        let body = &mut currentFunc.body;
                                         
                                         //let l = currentFunc.body.get_mut(sc.cinstruct_size);
                                         //println!("{:#?}",body);
-                                        let (_, p) = par_expect!(token.location.clone(),body.get_mut(sc.cinstruct_size+1), "Error");
-                                        let offset = 0;
                                         if let Some(ntok) = lexer.peekable().peek() {
                                             match ntok.typ {
-                                                TokenType::IntrinsicType(typ,_) => {
+                                                TokenType::IntrinsicType(typ) => {
                                                     match typ {
                                                         IntrinsicType::ELSE => {
                                                             body.push((token.location.clone(),Instruction::JUMP(0)));
@@ -1436,7 +1595,7 @@ fn parse_tokens_to_build(lexer: &mut Lexer, _Intrinsics: &HashMap<String,Intrins
                                         }
                                         len = body.len();
                                     }
-                                    let mut body = &mut currentFunc.body;
+                                    let body = &mut currentFunc.body;
                                     let (_, p) = par_expect!(token.location.clone(),body.get_mut(sc.cinstruct_size+1), "Error");
                                     match p {
                                         Instruction::JUMP(loc) => {
@@ -1474,28 +1633,28 @@ fn parse_tokens_to_build(lexer: &mut Lexer, _Intrinsics: &HashMap<String,Intrins
                         }
                     }
                     IntrinsicType::POP => {
-                        build.functions.get_mut(currentFunction.as_mut().unwrap()).unwrap().body.push((token.location.clone(),Instruction::POP(Register::RAX)));
+                        build.functions.get_mut(currentFunction.as_mut().unwrap()).unwrap().body.push((token.location.clone(),Instruction::POP(OfP::REGISTER(Register::RAX))));
                     }
                     IntrinsicType::PUSH => todo!(),
-                    IntrinsicType::MOV_REG => todo!(),
+                    IntrinsicType::SET => todo!(),
                     // TODO: implement math ops
                     IntrinsicType::ADD => {
                         par_assert!(token,currentFunction.is_some(), "Unexpected ADD operation of entry point!");
-                        build.functions.get_mut(currentFunction.as_mut().unwrap()).unwrap().body.push((token.location.clone(),Instruction::POP(Register::EAX)));
-                        build.functions.get_mut(currentFunction.as_mut().unwrap()).unwrap().body.push((token.location.clone(),Instruction::POP(Register::R8D)));
-                        build.functions.get_mut(currentFunction.as_mut().unwrap()).unwrap().body.push((token.location.clone(),Instruction::ADD(Register::EAX, Register::R8D)))
+                        build.functions.get_mut(currentFunction.as_mut().unwrap()).unwrap().body.push((token.location.clone(),Instruction::POP(OfP::REGISTER(Register::EAX))));
+                        build.functions.get_mut(currentFunction.as_mut().unwrap()).unwrap().body.push((token.location.clone(),Instruction::POP(OfP::REGISTER(Register::R8D))));
+                        build.functions.get_mut(currentFunction.as_mut().unwrap()).unwrap().body.push((token.location.clone(),Instruction::ADD(OfP::REGISTER(Register::EAX), OfP::REGISTER(Register::R8D))))
                     }
                     IntrinsicType::SUB => {
                         par_assert!(token,currentFunction.is_some(), "Unexpected SUB operation of entry point!");
-                        build.functions.get_mut(currentFunction.as_mut().unwrap()).unwrap().body.push((token.location.clone(),Instruction::POP(Register::EAX)));
-                        build.functions.get_mut(currentFunction.as_mut().unwrap()).unwrap().body.push((token.location.clone(),Instruction::POP(Register::R8D)));
-                        build.functions.get_mut(currentFunction.as_mut().unwrap()).unwrap().body.push((token.location.clone(),Instruction::SUB(Register::EAX, Register::R8D)))
+                        build.functions.get_mut(currentFunction.as_mut().unwrap()).unwrap().body.push((token.location.clone(),Instruction::POP(OfP::REGISTER(Register::EAX))));
+                        build.functions.get_mut(currentFunction.as_mut().unwrap()).unwrap().body.push((token.location.clone(),Instruction::POP(OfP::REGISTER(Register::R8D))));
+                        build.functions.get_mut(currentFunction.as_mut().unwrap()).unwrap().body.push((token.location.clone(),Instruction::SUB(OfP::REGISTER(Register::EAX), OfP::REGISTER(Register::R8D))))
                     }
                     IntrinsicType::MUL => {
                         par_assert!(token,currentFunction.is_some(), "Unexpected MUL operation of entry point!");
-                        build.functions.get_mut(currentFunction.as_mut().unwrap()).unwrap().body.push((token.location.clone(),Instruction::POP(Register::EAX)));
-                        build.functions.get_mut(currentFunction.as_mut().unwrap()).unwrap().body.push((token.location.clone(),Instruction::POP(Register::R8D)));
-                        build.functions.get_mut(currentFunction.as_mut().unwrap()).unwrap().body.push((token.location.clone(),Instruction::MUL(Register::EAX, Register::R8D)))
+                        build.functions.get_mut(currentFunction.as_mut().unwrap()).unwrap().body.push((token.location.clone(),Instruction::POP(OfP::REGISTER(Register::EAX))));
+                        build.functions.get_mut(currentFunction.as_mut().unwrap()).unwrap().body.push((token.location.clone(),Instruction::POP(OfP::REGISTER(Register::R8D))));
+                        build.functions.get_mut(currentFunction.as_mut().unwrap()).unwrap().body.push((token.location.clone(),Instruction::MUL(OfP::REGISTER(Register::EAX), OfP::REGISTER(Register::R8D))))
                     }
                     IntrinsicType::RET => {
                         build.functions.get_mut(currentFunction.as_mut().unwrap()).unwrap().body.push((token.location.clone(),Instruction::RET()));
@@ -1508,11 +1667,11 @@ fn parse_tokens_to_build(lexer: &mut Lexer, _Intrinsics: &HashMap<String,Intrins
                                 let p = p.parent().unwrap();
                                 let include_p  = PathBuf::from(path);
                                 //println!("Path {}",String::from(p.join(&include_p).to_str().unwrap()).replace("\\", "/"));
-                                let mut lf = Lexer::new(fs::read_to_string(String::from(p.join(&include_p).to_str().unwrap().replace("\\", "/"))).expect(&format!("Error: could not open file: {}",String::from(p.join(&include_p).to_str().unwrap()).replace("\\", "/"))),_Intrinsics);
+                                let mut lf = Lexer::new(fs::read_to_string(String::from(p.join(&include_p).to_str().unwrap().replace("\\", "/"))).expect(&format!("Error: could not open file: {}",String::from(p.join(&include_p).to_str().unwrap()).replace("\\", "/"))),lexer.Intrinsics,lexer.Definitions);
                                 lf.currentLocation.file = String::from(p.join(&include_p).to_str().unwrap().replace("\\", "/"));
                                 let mut nprogram = CmdProgram::new();
                                 nprogram.path = String::from(p.join(&include_p).to_str().unwrap().replace("\\", "/"));
-                                let mut build2 = parse_tokens_to_build(&mut lf, _Intrinsics, Definitions, &mut nprogram);
+                                let mut build2 = parse_tokens_to_build(&mut lf, &mut nprogram);
                                 build.externals.extend(build2.externals);
                                 for (strdefId,_strdef) in build2.stringdefs.iter() {
                                     let orgstrdefId  = strdefId.clone();
@@ -1527,9 +1686,14 @@ fn parse_tokens_to_build(lexer: &mut Lexer, _Intrinsics: &HashMap<String,Intrins
                                         for (_floc, funcDef) in build2.functions.iter_mut() {
                                             for (_iloc,Inst) in funcDef.body.iter_mut() {
                                                 match Inst {
-                                                    Instruction::PUSHSTR(strid) => {
-                                                        if strid.clone() == orgstrdefId {
-                                                            *strid = strdefId.clone();
+                                                    Instruction::PUSH(strid) => {
+                                                        match strid {
+                                                            OfP::STR(strid) => {
+                                                                if strid.clone() == orgstrdefId {
+                                                                    *strid = strdefId.clone();
+                                                                }
+                                                            }
+                                                            _ => {}
                                                         }
                                                     }
                                                     _ => {}
@@ -1562,15 +1726,15 @@ fn parse_tokens_to_build(lexer: &mut Lexer, _Intrinsics: &HashMap<String,Intrins
                     },
                     IntrinsicType::EQ => {
                         let currentFunc = build.functions.get_mut(currentFunction.as_mut().unwrap()).unwrap();
-                        currentFunc.body.push((token.location.clone(),Instruction::POP(Register::RAX)));
-                        currentFunc.body.push((token.location.clone(),Instruction::POP(Register::R8)));
-                        currentFunc.body.push((token.location.clone(),Instruction::EQUALS(Register::RAX, Register::R8)));
+                        currentFunc.body.push((token.location.clone(),Instruction::POP(OfP::REGISTER(Register::RAX))));
+                        currentFunc.body.push((token.location.clone(),Instruction::POP(OfP::REGISTER(Register::R8))));
+                        currentFunc.body.push((token.location.clone(),Instruction::EQUALS(OfP::REGISTER(Register::RAX), OfP::REGISTER(Register::R8))));
                         
                     },
                     IntrinsicType::CONSTANT => {
                         let first = lexer.next();
                         let first = par_expect!(lexer.currentLocation,first,"abruptly ran out of tokens in constant name definition");//first.expect("Error: abruptly ran out of tokens in function contract");
-                        let mut name: String = match first.typ {
+                        let name: String = match first.typ {
                             TokenType::WordType(word) => {
                                 par_assert!(first, !build.constdefs.contains_key(&word) && !build.functions.contains_key(&word), "Error: multiple constant symbol definitions");
                                 word
@@ -1582,9 +1746,9 @@ fn parse_tokens_to_build(lexer: &mut Lexer, _Intrinsics: &HashMap<String,Intrins
                         let first = lexer.next();
                         let first = par_expect!(lexer.currentLocation,first,"abruptly ran out of tokens in constant name definition");//first.expect("Error: abruptly ran out of tokens in function contract");
                         match first.typ {
-                            TokenType::IntrinsicType(typ, _) => {
+                            TokenType::IntrinsicType(typ) => {
                                 match typ {
-                                    IntrinsicType::MOV_REG => {}
+                                    IntrinsicType::SET => {}
                                     _ => {
                                         par_error!(first, "Error: expected = but found {}",typ.to_string(false));
                                     }
@@ -1615,6 +1779,33 @@ fn parse_tokens_to_build(lexer: &mut Lexer, _Intrinsics: &HashMap<String,Intrins
                     },
                     IntrinsicType::DOTCOMA => {},
                     IntrinsicType::ELSE => todo!(),
+                    IntrinsicType::DIV => todo!("{:#?}",build),
+                    IntrinsicType::Let => {
+                        // let a: int = 5
+                        let nametok = par_expect!(lexer.currentLocation, lexer.next(), "Error: abruptly ran out of tokens for Let");
+
+                        match nametok.typ {
+                            TokenType::WordType(name) => {
+                                par_assert!(nametok, !build.constdefs.contains_key(&name) && !build.functions.contains_key(&name), "Error: multiply defined symbols");
+                                let currentFunc = build.functions.get_mut(&currentFunction.clone().expect("Todo: Global variables are not yet implemented :|")).unwrap();
+                                let typ = par_expect!(lexer.currentLocation, lexer.next(), "Error: abruptly ran out of tokens for let type");                                
+                                par_assert!(typ,typ.typ==TokenType::IntrinsicType(IntrinsicType::DOUBLE_COLIN), "Error: You probably forgot to put a : after the name!");
+                                let typ = par_expect!(lexer.currentLocation, lexer.next(), "Error: abruptly ran out of tokens for let type");
+                                match typ.typ {
+                                    TokenType::Definition(def) => {
+                                        currentFunc.locals.insert(name.clone(), LocalVariable { typ: def, operand: 0 });
+                                        currentFunc.body.push((lexer.currentLocation.clone(),Instruction::DEFVAR(name)))
+                                    }
+                                    _ => {
+                                        par_error!(typ, "Error: unexpected token type in let definition. Expected VarType but found {}",typ.typ.to_string(false))
+                                    }
+                                }
+                            },
+                            _ => {
+                                par_error!(nametok, "Unexpected name type, Expected Word but found {}", nametok.typ.to_string(false))
+                            }
+                        }
+                    },
                 }
             }
             TokenType::StringType(Word) => {
@@ -1625,7 +1816,7 @@ fn parse_tokens_to_build(lexer: &mut Lexer, _Intrinsics: &HashMap<String,Intrins
                 while build.stringdefs.insert(UUID,ProgramString {Data: Word.clone(), Typ: ProgramStringType::STR}).is_some() {
                     UUID = Uuid::new_v4();
                 }
-                build.functions.get_mut(currentFunction.as_mut().unwrap()).unwrap().body.push((token.location,Instruction::PUSHSTR(UUID)));
+                build.functions.get_mut(currentFunction.as_mut().unwrap()).unwrap().body.push((token.location,Instruction::PUSH(OfP::STR(UUID))));
             }
             TokenType::CharType(_) => {
                 par_assert!(token,currentFunction.is_some(), "Unexpected char definition outside of entry point!");
@@ -1633,167 +1824,32 @@ fn parse_tokens_to_build(lexer: &mut Lexer, _Intrinsics: &HashMap<String,Intrins
             TokenType::Number32(val) => {
                 par_assert!(token,currentFunction.is_some(), "Unexpected number (64) definition outside of entry point!");
                 // TODO: implement this
-                build.functions.get_mut(currentFunction.as_mut().unwrap()).unwrap().body.push((token.location.clone(),Instruction::MOV(Register::EAX, val as i64)));
-                build.functions.get_mut(currentFunction.as_mut().unwrap()).unwrap().body.push((token.location.clone(),Instruction::PUSH(Register::EAX)));
+                build.functions.get_mut(currentFunction.as_mut().unwrap()).unwrap().body.push((token.location.clone(),Instruction::MOV(OfP::REGISTER(Register::EAX), OfP::RAW(val as i64))));
+                build.functions.get_mut(currentFunction.as_mut().unwrap()).unwrap().body.push((token.location.clone(),Instruction::PUSH(OfP::REGISTER(Register::EAX))));
             }
             TokenType::Number64(val) => {
                 par_assert!(token,currentFunction.is_some(), "Unexpected number (64) definition outside of entry point!");
-                build.functions.get_mut(currentFunction.as_mut().unwrap()).unwrap().body.push((token.location.clone(),Instruction::MOV(Register::RAX, val)));
-                build.functions.get_mut(currentFunction.as_mut().unwrap()).unwrap().body.push((token.location.clone(),Instruction::PUSH(Register::RAX)));
+                build.functions.get_mut(currentFunction.as_mut().unwrap()).unwrap().body.push((token.location.clone(),Instruction::MOV(OfP::REGISTER(Register::RAX), OfP::RAW(val))));
+                build.functions.get_mut(currentFunction.as_mut().unwrap()).unwrap().body.push((token.location.clone(),Instruction::PUSH(OfP::REGISTER(Register::RAX))));
             }
+            TokenType::Definition(_) => todo!(),
         }
     }
+    println!("Functions {:#?}",build.functions);
     for (fn_name, fn_fn)in build.functions.iter_mut() {
-        if fn_name != "main" {
+        if fn_name != "main" && fn_fn.location.file == lexer.currentLocation.file {
+            println!("-----------------\n\n\n\nAdded Ret for {} with body: {:#?}--------\n\n\n\n",fn_name,fn_fn.body);
             fn_fn.body.push((fn_fn.location.clone(),Instruction::RET()))
         }
     }
     build
 }
-fn to_nasm_x86_64(build: &BuildProgram, program: &CmdProgram) -> io::Result<()>{
+fn to_nasm_x86_64(build: &mut BuildProgram, program: &CmdProgram) -> io::Result<()>{
     let mut f = File::create(&program.opath).expect(&format!("Error: could not open output file {}",program.opath.as_str()));
     writeln!(&mut f,"BITS 64")?;
-    for function_name in build.functions.keys() {
-        writeln!(&mut f,"global _{}",function_name)?;
-    }
-    //writeln!(&mut f,"global _main")?;
-    for exter in build.externals.iter() {
-        match exter {
-            External::RawExternal(Word) => {
-                writeln!(&mut f,"  extern {}{}{}",exter.prefix(),Word,exter.suffix())?;
-            }
-            External::CExternal(Word) => {
-                writeln!(&mut f,"  extern {}{}{}",exter.prefix(),Word,exter.suffix())?;
-            },
-        }
-    }
-    writeln!(&mut f, "section .text")?;
-    //writeln!(&mut f, "_main:")?;
-    //_STRING_(INDEX)
-    for (function_name,function) in build.functions.iter() {
-        //writeln!(&mut f,"global _{}",function_name)?;
-        if function_name == "main" {
-            
-            writeln!(&mut f, "_{}:",function_name)?;
-        }
-        else {
-            writeln!(&mut f, "F_{}:",function_name)?;
-        }
-        for (i,(_location, instruction)) in function.body.iter().enumerate(){
-            match instruction {
-                Instruction::PUSH(Reg) => {
-                    if Reg.size() == 4 {
-                        //writeln!(&mut f, "   sub rsp, 4")?;
-                        //writeln!(&mut f, "   mov dword [rsp], {}", Reg.to_string())?;
-                        todo!("{:?}\n{:#?}",Reg,build);
-                    }
-                    else{
-                        writeln!(&mut f, "   push {} {}",size_to_nasm_type(Reg.size()),Reg.to_string())?;
-                    }
-                    //writeln!(&mut f, "   push {} {}",size_to_nasm_type(Reg.size()),Reg.to_string())?;
-                }
-                Instruction::PUSHSTR(Index) => {
-                    writeln!(&mut f, "   push _STRING_{}_",Index.to_string().replace("-", ""))?;
-                    writeln!(&mut f, "   push _LEN_STRING_{}_",Index.to_string().replace("-", ""))?;
-                }
-                Instruction::PUSHRAW(Data) => {
-                    writeln!(&mut f, "   push {}",Data)?;
-                }
-                Instruction::MOV(Reg, Data) => {
-                    writeln!(&mut f, "   mov {}, {}",Reg.to_string(), Data)?;
-                }
-                Instruction::POP(Reg) => {
-                    if Reg.size() == 4 {
-                        writeln!(&mut f, "   add rsp, 4")?;
-                        writeln!(&mut f, "   mov {}, dword [rsp]", Reg.to_string())?;
-                    }
-                    else{
-                        writeln!(&mut f, "   pop {} {}",size_to_nasm_type(Reg.size()),Reg.to_string())?;
-                    }
-                }
-                Instruction::CALLRAW(Word) => {
-                    writeln!(&mut f, "   call {}",Word)?;
-                }
-                Instruction::MOV_REG(reg1, reg2) => {
-                    writeln!(&mut f, "   mov {}, {}",reg1.to_string(), reg2.to_string())?;
-                }
-                Instruction::ADD(reg1, reg2) => {
-                    assert!(reg1.size() == reg2.size(), "Two different sized registers passed to add Instruction");
-                    writeln!(&mut f, "   add {} {}, {}", size_to_nasm_type(reg1.size()),reg1.to_string(), reg2.to_string())?;
-                }
-                Instruction::SUB(reg1, reg2) => {
-                    assert!(reg1.size() == reg2.size(), "Two different sized registers passed to sub Instruction");
-                    writeln!(&mut f, "   sub {} {}, {}",size_to_nasm_type(reg1.size()),reg1.to_string(), reg2.to_string())?;
-                }
-                Instruction::MUL(reg1, reg2) => {
-                    assert!(reg1.size() == reg2.size(), "Two different sized registers passed to mul Instruction");
-                    writeln!(&mut f, "   mul {} {}, {}",size_to_nasm_type(reg1.size()),reg1.to_string(), reg2.to_string())?;
-                }
-                Instruction::DIV(reg1, reg2) => {
-                    assert!(reg1.size() == reg2.size(), "Two different sized registers passed to div Instruction");
-                    writeln!(&mut f, "   div {}, {}",reg1.to_string(), reg2.to_string())?;
-                }
-                Instruction::CALL(Func) => {
-                    writeln!(&mut f, "   mov rbp, rsp")?;
-                    writeln!(&mut f, "   mov rsp, [_CALLSTACK_BUF_PTR]")?;
-                    writeln!(&mut f, "   call F_{}",Func)?;
-                    writeln!(&mut f, "   mov [_CALLSTACK_BUF_PTR], rsp")?;
-                    writeln!(&mut f, "   mov rsp, rbp")?;
-                }
-                Instruction::FNBEGIN() => {
-                    writeln!(&mut f, "   mov [_CALLSTACK_BUF_PTR], rsp")?;
-                    writeln!(&mut f, "   mov rsp, rbp")?;
-                }
-                Instruction::RET() => {
-                    writeln!(&mut f, "   mov rbp, rsp")?;
-                    writeln!(&mut f, "   mov rsp, [_CALLSTACK_BUF_PTR]")?;
-                    writeln!(&mut f, "   ret")?;
-                }
-                Instruction::SCOPEBEGIN => {
-                    writeln!(&mut f, "   _{}_S_{}:",function_name,i)?;
-                }
-                Instruction::SCOPEEND => {
-                    writeln!(&mut f, "   _{}_S_{}:",function_name,i)?;
-                }
-                Instruction::CONDITIONAL_JUMP(ni) => {
-                    let (loc,prev) = function.body.get(i-1).unwrap();
-                    match prev {
-                        Instruction::EQUALS(Reg, _) => {
-                            writeln!(&mut f, "   cmp {}, 1",Reg.to_byte_size(1).to_string())?;        
-                        }
-                        _ => {
-                            todo!("Implement parsing of if:\nif RBX {{}}\n")
-                        }
-                    }
-                    writeln!(&mut f, "   jz _{}_S_{}",function_name,ni)?;
-                }
-                Instruction::JUMP(ni) => {
-                    writeln!(&mut f, "   jmp _{}_S_{}",function_name,ni)?;
-                }
-                Instruction::EQUALS(Reg1, Reg2) => {
-                    writeln!(&mut f, "   cmp  {}, {}",Reg1.to_string(),Reg2.to_string())?;
-                    writeln!(&mut f, "   sete  {}",Reg1.to_byte_size(1).to_string())?;
-                    //writeln!(&mut f, "   setz {}",Reg1.to_string())?;
-                },
-                Instruction::ADDVAL(Reg1, val) => {
-                    writeln!(&mut f, "   add {}, {}",Reg1.to_string(),val)?;
-                }
-                Instruction::SUBVAL(Reg1, val) => {
-                    writeln!(&mut f, "   sub {}, {}",Reg1.to_string(),val)?;
-                }
-                Instruction::MULVAL(Reg1, val) => {
-                    writeln!(&mut f, "   mul {}, {}",Reg1.to_string(),val)?;
-                },
-            }
-        }
-        if function_name == "main" {
-            writeln!(&mut f, "   xor rax,rax")?;
-            writeln!(&mut f, "   jmp ENDOFCODE")?;
-        }
-    }
-    writeln!(&mut f, "ENDOFCODE:")?;
     writeln!(&mut f, "section .data")?;
-    writeln!(&mut f, "   _CALLSTACK_BUF_PTR: dq _CALLSTACK_TOP")?;
+    
+
     for (UUID,stridef) in build.stringdefs.iter(){        
         //writeln!(&mut f, "   _STRING_{}: db \"{}\", 0",i,stridef.Data)?;
         write!(&mut f, "   _STRING_{}_: db ",UUID.to_string().replace("-", ""))?;
@@ -1809,6 +1865,359 @@ fn to_nasm_x86_64(build: &BuildProgram, program: &CmdProgram) -> io::Result<()>{
     writeln!(&mut f, "section .bss")?;
     writeln!(&mut f, "   _CALLSTACK: resb {}",program.call_stack_size)?;
     writeln!(&mut f, "   _CALLSTACK_TOP: ")?;
+    writeln!(&mut f, "   _CALLSTACK_BUF_PTR: resd 1")?;
+    for function_name in build.functions.keys() {
+        if function_name == "main" {
+            writeln!(&mut f,"global _{}",function_name)?;
+        }
+        else {
+            writeln!(&mut f,"global F_{}",function_name)?;
+        }
+    }
+    //writeln!(&mut f,"global _main")?;
+    for exter in build.externals.iter() {
+        match exter {
+            External::RawExternal(Word) => {
+                writeln!(&mut f,"  extern {}{}{}",exter.prefix(),Word,exter.suffix())?;
+            }
+            External::CExternal(Word) => {
+                writeln!(&mut f,"  extern {}{}{}",exter.prefix(),Word,exter.suffix())?;
+            },
+        }
+    }
+    writeln!(&mut f, "section .text")?;
+    // TODO: introduce something like mainMEM which won't be bound to the 640 000
+    let mut callstack_size: i64 = 0;
+    for (function_name,function) in build.functions.iter_mut() {
+        let mut hasFoundRet = false;
+        //writeln!(&mut f,"global _{}",function_name)?;
+        if function_name == "main" {
+            writeln!(&mut f, "_{}:",function_name)?;
+            writeln!(&mut f, "   push rbp")?;
+            writeln!(&mut f, "   mov rbp, rsp")?;
+            writeln!(&mut f, "   mov dword [_CALLSTACK_BUF_PTR], _CALLSTACK_TOP")?;
+        }
+        else {
+            writeln!(&mut f, "F_{}:",function_name)?;
+        }
+        
+        for (i,(_location, instruction)) in function.body.iter().enumerate(){
+            match instruction {
+                Instruction::PUSH(Reg) => {
+                    match Reg {
+                        OfP::REGISTER(Reg) => {
+                            if Reg.size() == 4 {
+                                todo!("{:?}\n",Reg);
+                            }
+                            else{
+                                writeln!(&mut f, "   push {} {}",size_to_nasm_type(Reg.size()),Reg.to_string())?;
+                            }
+                        }
+                        OfP::STR(UUID) => {
+                            writeln!(&mut f, "   push _STRING_{}_",UUID.to_string().replace("-", ""))?;
+                            writeln!(&mut f, "   push _LEN_STRING_{}_",UUID.to_string().replace("-", ""))?;
+                        }
+                        OfP::RAW(Data) => {
+                            writeln!(&mut f, "   push {}",Data)?;
+                        }
+                        OfP::LOCALVAR(var) => {
+                            let var = function.locals.get(var).expect(&format!("Error: could not find variable {}",var));
+                            if callstack_size as usize-var.operand-var.typ.get_size() == 0 {
+                                writeln!(&mut f, "   mov r10, [_CALLSTACK_BUF_PTR]")?;
+                            }
+                            else {
+                                writeln!(&mut f, "   mov r10, [_CALLSTACK_BUF_PTR+{}]",callstack_size as usize-var.operand-var.typ.get_size())?;
+                            }
+                            writeln!(&mut f, "   push r10")?;
+                        }
+                        _ => {
+                            todo!("Unsupported")
+                        }
+                    }
+                    
+                }
+                Instruction::MOV(Op, Op2) => {
+                    match Op {
+                        OfP::REGISTER(Reg1) => {
+                            match Op2 {
+                                OfP::REGISTER(Reg2) => {
+                                    writeln!(&mut f, "   mov {}, {}",Reg1.to_string(), Reg2.to_string())?;
+                                },
+                                OfP::LOCALVAR(_) => todo!(),
+                                OfP::RAW(Data) => {
+                                    writeln!(&mut f, "   mov {}, {}",Reg1.to_string(), Data)?;
+                                },
+                                OfP::STR(_) => todo!(),
+                            }
+                        }
+                        OfP::LOCALVAR(varOrg) => {
+                            match Op2 {
+                                OfP::REGISTER(_) => todo!(),
+                                OfP::LOCALVAR(_) => todo!("vars"),
+                                OfP::RAW(val) => {
+                                    let var = com_expect!(_location,function.locals.get(varOrg),"Error: Unknown variable found during compilation {}",varOrg);
+                                    
+                                    if var.typ.get_size() <= 8  {
+                                        println!("Current callstack_size: {} for {} with stack_size: {}",callstack_size,varOrg,var.operand);
+                                        if callstack_size as usize-var.operand-var.typ.get_size() == 0 {
+                                            writeln!(&mut f, "   mov {} [_CALLSTACK_BUF_PTR], {}",size_to_nasm_type(var.typ.get_size()), val)?;
+                                        }
+                                        else {
+                                            writeln!(&mut f, "   mov {} [_CALLSTACK_BUF_PTR+{}], {}",size_to_nasm_type(var.typ.get_size()),callstack_size as usize-var.operand-var.typ.get_size(), val)?;
+                                        }
+                                    }
+                                    else {
+                                        todo!()
+                                    }
+                                },
+                                OfP::STR(_) => todo!(),
+                            }
+                        }
+                        _ => {
+                            todo!("Unsupported");
+                        }
+                    }
+                    
+                }
+                Instruction::POP(Reg) => {
+                    match Reg {
+                        OfP::REGISTER(Reg) => {
+                            if Reg.size() == 4 {
+                                writeln!(&mut f, "   add rsp, 4")?;
+                                writeln!(&mut f, "   mov {}, dword [rsp]", Reg.to_string())?;
+                                
+                            }
+                            else{
+                                writeln!(&mut f, "   pop {} {}",size_to_nasm_type(Reg.size()),Reg.to_string())?;
+                                
+                            }
+                        }
+                        _ => {
+                            todo!("Unsupported")
+                        }
+                    }
+                }
+                Instruction::CALLRAW(Word) => {
+                    writeln!(&mut f, "   xor rax, rax")?;
+                    writeln!(&mut f, "   call {}",Word)?;
+                }
+                Instruction::ADD(op1, op2) => {
+                    match op1 {
+                        OfP::REGISTER(reg1) => {
+                            match op2 {
+                                OfP::REGISTER(reg2) => {
+                                    assert!(reg1.size() == reg2.size(), "Two different sized registers passed to add Instruction");
+                                    writeln!(&mut f, "   add {} {}, {}", size_to_nasm_type(reg1.size()),reg1.to_string(), reg2.to_string())?;
+                                }
+                                OfP::LOCALVAR(_) => todo!(),
+                                OfP::RAW(val) => {
+                                    if val != &0 {
+                                        writeln!(&mut f, "   add {}, {}",reg1.to_string(),val)?;
+                                    }
+                                }
+                                OfP::STR(_) => todo!(),
+                            }
+                        }
+                        OfP::LOCALVAR(var1) => {
+                            match op2 {
+                                OfP::REGISTER(_) => todo!(),
+                                OfP::LOCALVAR(var2) => {
+                                    com_assert!(_location, function.locals.contains_key(var1) && function.locals.contains_key(var2), "Unknown variable");
+                                    let var1 = function.locals.get(var1).unwrap();
+                                    let var2 = function.locals.get(var2).unwrap();
+                                    com_assert!(_location, var1.typ.get_size() == var2.typ.get_size(), "Unknown variable size");
+                                    if callstack_size as usize-var1.operand-var1.typ.get_size() == 0 {
+                                        writeln!(&mut f, "   mov r10, [_CALLSTACK_BUF_PTR]")?;
+                                    }
+                                    else {
+                                        writeln!(&mut f, "   mov r10, [_CALLSTACK_BUF_PTR+{}]",callstack_size as usize-var1.operand-var1.typ.get_size())?;
+                                    }
+                                    if callstack_size as usize-var2.operand-var2.typ.get_size() == 0{
+                                        writeln!(&mut f, "   add r10, [_CALLSTACK_BUF_PTR]")?;  
+                                    }
+                                    else {
+                                        writeln!(&mut f, "   add r10, [_CALLSTACK_BUF_PTR+{}]", callstack_size as usize-var2.operand-var2.typ.get_size())?;  
+                                    }
+                                    if callstack_size as usize-var1.operand-var1.typ.get_size() == 0 {
+                                        writeln!(&mut f, "   mov [_CALLSTACK_BUF_PTR], r10")?;
+                                    }
+                                    else {
+                                        writeln!(&mut f, "   mov [_CALLSTACK_BUF_PTR+{}], r10",callstack_size as usize-var1.operand-var1.typ.get_size())?;
+                                    }
+                                },
+                                OfP::RAW(_) => todo!(),
+                                OfP::STR(_) => todo!(),
+                            }
+                        },
+                        OfP::RAW(_) => todo!(),
+                        OfP::STR(_) => todo!(),
+                        
+                    }
+                    
+                }
+                Instruction::SUB(op1, op2) => {
+                    match op1 {
+                        OfP::REGISTER(reg1) => {
+                            match op2 {
+                                OfP::REGISTER(reg2) => {
+                                    assert!(reg1.size() == reg2.size(), "Two different sized registers passed to sub Instruction");
+                                    writeln!(&mut f, "   sub {} {}, {}",size_to_nasm_type(reg1.size()),reg1.to_string(), reg2.to_string())?;
+                                }
+                                OfP::LOCALVAR(_) => todo!(),
+                                OfP::RAW(val) => {
+                                    writeln!(&mut f, "   sub {}, {}",reg1.to_string(),val)?;
+                                },
+                                OfP::STR(_) => todo!(),
+                            }
+                        }
+                        OfP::LOCALVAR(_) => todo!(),
+                        OfP::RAW(_) => todo!(),
+                        OfP::STR(_) => todo!(),
+                    }
+                }
+                Instruction::MUL(op1, op2) => {
+                    match op1 {
+                        OfP::REGISTER(reg1) => {
+                            match op2 {
+                                OfP::REGISTER(reg2) => {
+                                    assert!(reg1.size() == reg2.size(), "Two different sized registers passed to mul Instruction");
+                                    writeln!(&mut f, "   mul {} {}, {}",size_to_nasm_type(reg1.size()),reg1.to_string(), reg2.to_string())?;
+                                }
+                                OfP::LOCALVAR(_) => todo!(),
+                                OfP::RAW(val) => {
+                                    writeln!(&mut f, "   mul {}, {}",reg1.to_string(),val)?;
+                                },
+                                OfP::STR(_) => todo!(),
+                            }
+                        }
+                        OfP::LOCALVAR(_) => todo!(),
+                        OfP::RAW(_) => todo!(),
+                        OfP::STR(_) => todo!(),
+                    }
+                    
+                }
+                Instruction::DIV(op1, op2) => {
+                    match op1 {
+                        OfP::REGISTER(reg1) => {
+                            match op2 {
+                                OfP::REGISTER(reg2) => {
+                                    assert!(reg1.size() == reg2.size(), "Two different sized registers passed to div Instruction");
+                                    writeln!(&mut f, "   mov r9, rdx")?;
+                                    writeln!(&mut f, "   xor rdx, rdx")?;
+                                    writeln!(&mut f, "   cqo")?;
+                                    writeln!(&mut f, "   mov rax, {}",reg1.to_string())?;
+                                    writeln!(&mut f, "   idiv {}",reg2.to_string())?;
+                                    writeln!(&mut f, "   mov {}, rax",reg1.to_string())?;
+                                    writeln!(&mut f, "   mov {}, rdx",reg2.to_string())?;
+                                    writeln!(&mut f, "   mov rdx, r9")?;
+                                }
+                                OfP::LOCALVAR(_) => todo!(),
+                                OfP::RAW(_) => todo!(),
+                                OfP::STR(_) => todo!(),
+                            }
+                        }
+                        OfP::LOCALVAR(_) => todo!(),
+                        OfP::RAW(_) => todo!(),
+                        OfP::STR(_) => todo!(),
+                    }
+                    
+                }
+                Instruction::CALL(Func) => {
+                    writeln!(&mut f, "   mov r10, rsp")?;
+                    writeln!(&mut f, "   mov rsp, [_CALLSTACK_BUF_PTR]")?;
+                    writeln!(&mut f, "   call F_{}",Func)?;
+                    writeln!(&mut f, "   mov [_CALLSTACK_BUF_PTR], rsp")?;
+                    writeln!(&mut f, "   mov rsp, r10")?;
+                    println!("Calling :D {} WHATDAFAK\n",Func);
+                    callstack_size += 8;
+                }
+                Instruction::FNBEGIN() => {
+                    writeln!(&mut f, "   mov [_CALLSTACK_BUF_PTR], rsp")?;
+                    writeln!(&mut f, "   mov rsp, r10")?;
+                }
+                Instruction::RET() => {
+                    let mut functionSize: usize = 0;
+                    if !hasFoundRet {
+                        for val in function.locals.values() {
+                            functionSize += val.typ.get_size();
+                        };
+                        if functionSize > 0 {
+                            writeln!(&mut f, "   mov r10, [_CALLSTACK_BUF_PTR]")?;
+                            writeln!(&mut f, "   add r10, {}",functionSize)?;
+                            writeln!(&mut f, "   mov [_CALLSTACK_BUF_PTR], r10")?;
+                        }
+                        writeln!(&mut f, "   mov r10, rsp")?;
+                        writeln!(&mut f, "   mov rsp, [_CALLSTACK_BUF_PTR]")?;
+                        writeln!(&mut f, "   ret")?;
+                        println!("Call stack size {} in function {}, With hasFoundRet {}:\n{:#?}",callstack_size,function_name,hasFoundRet,function.body);
+                        callstack_size -= 8;
+                        hasFoundRet = true;
+                    }
+                }
+                Instruction::SCOPEBEGIN => {
+                    writeln!(&mut f, "   .{}_S_{}:",function_name,i)?;
+                }
+                Instruction::SCOPEEND => {
+                    // TODO: do the same thing we did for functions but for scopes
+                    writeln!(&mut f, "   .{}_S_{}:",function_name,i)?;
+                }
+                Instruction::CONDITIONAL_JUMP(ni) => {
+                    let (_,prev) = function.body.get(i-1).unwrap();
+                    match prev {
+                        Instruction::EQUALS(Reg, _) => {
+                            match Reg {
+                                OfP::REGISTER(Reg) => {
+                                    writeln!(&mut f, "   cmp {}, 1",Reg.to_byte_size(1).to_string())?;        
+                                }
+                                _ => todo!()
+                            }
+                            
+                        }
+                        _ => {
+                            todo!("Implement parsing of if:\nif RBX {{}}\n")
+                        }
+                    }
+                    writeln!(&mut f, "   jz .{}_S_{}",function_name,ni)?;
+                }
+                Instruction::JUMP(ni) => {
+                    writeln!(&mut f, "   jmp .{}_S_{}",function_name,ni)?;
+                }
+                Instruction::EQUALS(op1, op2) => {
+                    match op1 {
+                        OfP::REGISTER(Reg1) => {
+                            match op2 {
+                                OfP::REGISTER(Reg2) => {
+                                    writeln!(&mut f, "   cmp  {}, {}",Reg1.to_string(),Reg2.to_string())?;
+                                    writeln!(&mut f, "   sete  {}",Reg1.to_byte_size(1).to_string())?;
+                                }
+                                OfP::LOCALVAR(_) => todo!(),
+                                OfP::RAW(_) => todo!(),
+                                OfP::STR(_) => todo!(),
+                            }
+                        }
+                        OfP::LOCALVAR(_) => todo!(),
+                        OfP::RAW(_) => todo!(),
+                        OfP::STR(_) => todo!(),
+                    }
+                    
+                },
+                Instruction::DEFVAR(name) => {
+                    let var = function.locals.get_mut(&name.clone()).expect("Error: unknown defvar definition in function! This is most likely due to a bug inside the compiler! Make sure to contact the developer if you encounter this!");
+                    var.operand = callstack_size as usize;
+                    callstack_size += var.typ.get_size() as i64;
+
+                    writeln!(&mut f, "   mov r10, [_CALLSTACK_BUF_PTR]")?;
+                    writeln!(&mut f, "   sub r10, {}",var.typ.get_size())?;
+                    writeln!(&mut f, "   mov [_CALLSTACK_BUF_PTR], r10")?;
+                },
+            }
+        }
+        if function_name == "main" {
+            writeln!(&mut f, "   xor rax,rax")?;
+            writeln!(&mut f, "   pop rbp")?;
+            writeln!(&mut f, "   ret")?;
+        }
+    }
     Ok(())
 
 }
@@ -1863,6 +2272,7 @@ fn main() {
     }
     let mut Intrinsics: HashMap<String,IntrinsicType> = HashMap::new();
     Intrinsics.insert("extern".to_string(), IntrinsicType::Extern);
+    Intrinsics.insert("let".to_string(), IntrinsicType::Let);
     Intrinsics.insert("func".to_string()  , IntrinsicType::Func);
     Intrinsics.insert("include".to_string(), IntrinsicType::INCLUDE);
     Intrinsics.insert("const".to_string(), IntrinsicType::CONSTANT);
@@ -1875,10 +2285,11 @@ fn main() {
     Intrinsics.insert("}".to_string(),IntrinsicType::CLOSECURLY);
     Intrinsics.insert("push".to_string(),IntrinsicType::PUSH);
     Intrinsics.insert("pop".to_string(),IntrinsicType::POP);
-    Intrinsics.insert("=".to_string(),IntrinsicType::MOV_REG);
+    Intrinsics.insert("=".to_string(),IntrinsicType::SET);
     Intrinsics.insert("+".to_string(),IntrinsicType::ADD);
     Intrinsics.insert("-".to_string(),IntrinsicType::SUB);
     Intrinsics.insert("*".to_string(),IntrinsicType::MUL);
+    Intrinsics.insert("/".to_string(),IntrinsicType::DIV);
     Intrinsics.insert("ret".to_string(),IntrinsicType::RET);
     Intrinsics.insert("if".to_string(), IntrinsicType::IF);
     Intrinsics.insert("else".to_string(), IntrinsicType::ELSE);
@@ -1893,14 +2304,12 @@ fn main() {
     Definitions.insert("str".to_string(), VarType::STR);
     let info = fs::read_to_string(&program.path).expect("Error: could not open file!");
 
-    let mut lexer = Lexer::new(info, & Intrinsics);
+    let mut lexer = Lexer::new(info, & Intrinsics, &Definitions);
     lexer.currentLocation.file = program.path.clone();
-    let build = parse_tokens_to_build(&mut lexer, &Intrinsics, &Definitions, &mut program);
-
+    let mut build = parse_tokens_to_build(&mut lexer, &mut program);
     match program.typ.as_str() {
         "nasm_x86_64" => {
-            //println!("Build: {:#?}",build.constdefs);
-            to_nasm_x86_64(&build, &program).expect("Could not build to nasm_x86_64");
+            to_nasm_x86_64(&mut build, &program).expect("Could not build to nasm_x86_64");
             if program.should_build {
         
                 let nasm = Command::new("nasm").args(["-f","elf",program.opath.as_str()]).output().expect("Could not build nasm!");
