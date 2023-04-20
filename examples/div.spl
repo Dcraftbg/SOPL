@@ -1,12 +1,15 @@
 extern "C" printf
 func main(int, ptr : int) {
+    let a: long
+    let b: long
+
     "Got to here\n" pop printf pop 
     RBX = 4
     RCX = 2
     RBX RCX /
-    push RBX
-    push RCX
+    a RBX =
+    b RCX =
     "Got to here 3\n" pop printf pop 
-    "%ld Wha\n" pop printf pop pop
-    "%ld\n"       pop printf pop pop
+    a push "%ld" pop printf pop pop
+    b push "%ld" pop printf pop pop
 }

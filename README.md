@@ -7,7 +7,25 @@ Stack-oriented Programming Language
 
 Sopl is a lightweight, easily extendable, stack-oriented language.
 It is currently in it's very early stages and is syntacically bound to change over time. I'll try to not change it semantically too much but be warned if you are using it to build projects yourself as things may break over versions.
-For more info on current versions checkout `version.txt`
+For more info on current versions checkout [versions.txt](version.txt)
+
+**Manual:**
+Made for easy navigation around the README.md
+- [Plans](#plans)
+- [Build platforms](#build)
+- [Requirements](#Requirements)
+- [Startup](#startup)
+- [How-to-use](#how-to-use)
+  - [Hello-World](#hello-world)
+  - [Externals](#extern)
+  - [functions](#functions)
+  - [including](#including)
+  - [registers](#registers)
+  - [managing-c-functions](#managing-c-functions-and-their-return-values)
+  - [control-flow](#control-flow)
+  - [constants](#constants)
+  - [locals](#locals)
+
 ## Plans
 > Source
 - [x] externals
@@ -22,12 +40,14 @@ For more info on current versions checkout `version.txt`
   - [ ] else if statements
   - [ ] while statements
   - [ ] for statements
+- [x] locals
 - [ ] type checking
 - [ ] structs
 - [ ] struct methods
 - [ ] interfaces
 
 
+## Build
 > Build platforms: 
 
 Because of how the project is structured, it can easily be expanded to not only NASM assembly but to virtually any stack machine out there.
@@ -36,7 +56,7 @@ Current supports include:
 - [ ] Java bytecode
 - [ ] Native simulation
 
-Ideas that are left for discusion and further expansion:
+Ideas that are left for discussion and further expansion:
 - [ ] ARM assembly
 - [ ] C
 
@@ -49,7 +69,6 @@ Ideas that are left for discusion and further expansion:
 cargo run (PLATFORM) (File path) -o (Output path)
 ```
 ## How to use?
-
 *Note that documentation may not cover all of the latest features tho you might expect updates on them shortly after implementation*
 ### Hello World!
 ```sopl
@@ -66,7 +85,7 @@ func main(int, ptr : int) {
 extern [TYPE] (name)
 ```
 Extern is a way to access outside features of the language or link to functions from other languages such as IO implementations from C etc.
-It has to be noted here that using extern on its own can sometimes lead to unexpected behaviour or program slowdowns as most externs don't get type checked automatically and
+It has to be noted here that using extern on its own can sometimes lead to unexpected behavior or program slowdowns as most externs don't get type checked automatically and
 might not be available for the current mode you are running in like if you try to link to standard C functions when you are in JAVA mode.
 
 Thats also a reason why externs are generally not recommended for direct use (although depending on your version it might be required to use them raw (currently its required)).
@@ -119,7 +138,7 @@ func main(int, ptr : int) {
     sayHello
 }
 ```
-#### registers
+### registers
 Current register support:
 - [x] RAX
   - [x] EAX
@@ -164,12 +183,13 @@ Currently supported register operations:
 (REG1) (REG2) -  -> subtracts the second register from the first register (RESULT IN REG1)
 (REG1) (REG2) *  -> multiples the two registers     (RESULT IN REG1)
 (REG1) (REG2) == -> compares two registers (RESULT IN REG1)
+(REG1) (REG2) =  -> Moves the value from REG2 to REG1
 (REG1) push      -> pushes register onto the stack                          (WARNING: currently does not support 32 bit registers)
 (REG1) pop       -> pops the value off the stack and loads it into register (WARNING: currently does not support 32 bit registers)
 pop              -> pops 64 bit value off the stack and loads it into RAX
 push             -> pushes RAX onto the stack
 ```
-#### managing C functions and their return values
+### managing C functions and their return values
 
 C functions are a little bit different than SOPL ones, As you know C actually copies its parameters when they are passed to a function and DOES NOT CONSUME them off the stack.
 It also returns its integers, longs, shorts or chars (this also includes pointers) in the RAX register. 
@@ -185,7 +205,7 @@ As you can see the parameters get passed in a reversed order (thats because of h
 
 As for returning values that are higher than 8 bytes, C pushes them on the stack together with everything else. 
 
-#### control flow
+### control flow
 
 **Syntax:**
 ```sopl
@@ -205,7 +225,7 @@ else {
 ```
 
 
-#### constants
+### constants
 
 **Syntax:**
 ```sopl
@@ -223,4 +243,21 @@ const C = A B + ;
 const HelloWorldNine = HelloWorld C + ; // Concatenates the integers and strings together
 ```
 
-In a constants expression can only be things that can be evaluated at compile time, such as Strings, Integers, Longs and other constants. If you try to use something like a function it would tell you that it doesn't recognise it as a constant value. 
+In a constants expression can only be things that can be evaluated at compile time, such as Strings, Integers, Longs and other constants. If you try to use something like a function it would tell you that it doesn't recognize it as a constant value. 
+
+### locals
+
+**Syntax:**
+```sopl
+let (name): (type)
+```
+
+Whilst the stack is really flexible and neat, and unlike in most stack-oriented languages pretty customizable with the ability to access registers, having local variables is really important. Local variables in SOPL
+are allocated on the callstack and therefor after the functions end they are removed off the stack. All local variables have a type and a name. Names are bound to a specific **FUNCTION SCOPE**. There aren't yet local variables for
+normal scopes although they are planned for the future. Local variables are planned to be developed along side registers, with the majority of the operations matching in both syntax and usage. Although currently only a few are supported:
+```
+addition (+)
+set (=)
+pop
+push
+```

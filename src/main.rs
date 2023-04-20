@@ -1339,6 +1339,9 @@ fn parse_tokens_to_build(lexer: &mut Lexer, program: &mut CmdProgram) -> BuildPr
                                             IntrinsicType::DIV => {
                                                 build.functions.get_mut(currentFunction.as_mut().unwrap()).unwrap().body.push((token.location.clone(),Instruction::DIV(OfP::REGISTER(reg), OfP::REGISTER(reg2))))
                                             }
+                                            IntrinsicType::SET => {
+                                                build.functions.get_mut(currentFunction.as_mut().unwrap()).unwrap().body.push((token.location.clone(),Instruction::MOV(OfP::REGISTER(reg), OfP::REGISTER(reg2))))
+                                            }
                                             other => token.location.par_error(&format!("Unexpected Intrinsic! Expected Register Intrinsic but found {}",other.to_string(false)))//panic!("Unexpected Intrinsic! Expected Register Intrinsic but found {}",other.to_string(false))
                                         }
                                     }
@@ -1374,8 +1377,17 @@ fn parse_tokens_to_build(lexer: &mut Lexer, program: &mut CmdProgram) -> BuildPr
                                         let operand = par_expect!(lexer.currentLocation,lexer.next(),"Expected another variable, a constant integer or a (string: not yet implemented)!");
                                         match operand.typ {
                                             TokenType::WordType(other) => {
-                                                par_assert!(operand,func.locals.contains_key(&other),"Could not find variable {}",other);
-                                                func.body.push((operand.location,Instruction::MOV(OfP::LOCALVAR(word.clone()), OfP::LOCALVAR(other.clone()))))
+                                                //par_assert!(operand,func.locals.contains_key(&other),"Could not find variable {}",other);
+                                                if func.locals.contains_key(&other) {
+                                                    func.body.push((operand.location,Instruction::MOV(OfP::LOCALVAR(word.clone()), OfP::LOCALVAR(other.clone()))))
+                                                }
+                                                else if let Some(reg) = Register::from_string(&other) {
+                                                    par_assert!(operand,reg.size() == func.locals.get(&word).unwrap().typ.get_size(), "Register assigned to differently sized variable, Variable size: {}, Register size: {}",reg.size(),func.locals.get(&word).unwrap().typ.get_size());
+                                                    func.body.push((operand.location,Instruction::MOV(OfP::LOCALVAR(word.clone()), OfP::REGISTER(reg))))
+                                                }
+                                                else {
+                                                    par_error!(operand,"Could not find variable or register {}",other);
+                                                }
                                             },
                                             TokenType::StringType(_) => todo!("Implement strings with local variables"),
                                             TokenType::Number32(val) => {
@@ -1984,12 +1996,10 @@ fn to_nasm_x86_64(build: &mut BuildProgram, program: &CmdProgram) -> io::Result<
                         OfP::REGISTER(Reg) => {
                             if Reg.size() == 4 {
                                 writeln!(&mut f, "   add rsp, 4")?;
-                                writeln!(&mut f, "   mov {}, dword [rsp]", Reg.to_string())?;
-                                
+                                writeln!(&mut f, "   mov dword [rsp], {}", Reg.to_string())?;
                             }
                             else{
                                 writeln!(&mut f, "   pop {} {}",size_to_nasm_type(Reg.size()),Reg.to_string())?;
-                                
                             }
                         }
                         _ => {
