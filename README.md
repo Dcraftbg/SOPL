@@ -22,6 +22,7 @@ Made for easy navigation around the README.md
   - [including](#including)
   - [registers](#registers)
   - [managing-c-functions](#managing-c-functions-and-their-return-values)
+  - [strings](#strings)
   - [control-flow](#control-flow)
   - [constants](#constants)
   - [locals](#locals)
@@ -75,11 +76,11 @@ cargo run (PLATFORM) (File path) -o (Output path)
 extern "C" printf
 
 func main(int, ptr : int) {
-    "Hello World!\n" pop printf
+  "Hello World!\n"c printf pop
 }
 ```
 ### extern
-
+> -> Pre 0.0.1A
 **Syntax**:
 ```
 extern [TYPE] (name)
@@ -108,7 +109,7 @@ Inside of functions you can use the "ret" keyword to return although it is autom
 **Example(s)**:
 ```sopl
 func sayHello() {
-   "Hello World!\n" pop printf pop
+   "Hello World!\n"c printf pop
 }
 func counter(long : long) {
     RBX pop
@@ -119,7 +120,7 @@ func counter(long : long) {
 ```
 
 ### including
-
+> -> Pre 0.0.1A
 **Syntax**
 ```spl
 include "Path/To/File"
@@ -128,17 +129,18 @@ Functions.spl:
 ```spl
 extern "C" printf
 func sayHello() {
-   "Hello World!\n" pop printf pop
+  "Hello World!\n"c printf pop
 }
 ```
 HelloWorld.spl:
 ```spl
 include "./Functions.spl"
 func main(int, ptr : int) {
-    sayHello
+  sayHello
 }
 ```
 ### registers
+> -> Pre 0.0.1A
 Current register support:
 - [x] RAX
   - [x] EAX
@@ -199,14 +201,30 @@ printf("%ld", 5);
 ```
 And here is the same code in sopl:
 ```sopl
-5l "%ld" pop printf
+5l "%ld"c printf
 ```
 As you can see the parameters get passed in a reversed order (thats because of how your parameters in C get passed to functions normally)
 
 As for returning values that are higher than 8 bytes, C pushes them on the stack together with everything else. 
 
+
+
+### strings
+> Strings  -> Pre 0.0.1A 
+> CStrings -> 0.0.2A
+In sopl there are 2 different types of strings. There are:
+```
+cstrings 
+strings
+```
+With the main difference being that cstrings don't push their length after the pointer to the string unlike normal strings.
+To define a string we use "" (escaping is supported)
+
+
 ### control flow
 
+> If     -> Pre 0.0.1A
+> Else   -> Pre 0.0.1A
 **Syntax:**
 ```sopl
 if (condition) {(Body)}
@@ -217,16 +235,16 @@ if (condition) {(Body)}
 RBX = 4
 RCX = 5
 if RBX RCX == {
-  "Nice!" pop printf pop
+  "Nice!"c printf pop
 }
 else {
-  "Not nice!" pop printf pop
+  "Not nice!"c printf pop
 }
 ```
 
 
 ### constants
-
+> -> Pre 0.0.1A
 **Syntax:**
 ```sopl
 const (name) = (your constant expersion goes here) ;
@@ -246,6 +264,11 @@ const HelloWorldNine = HelloWorld C + ; // Concatenates the integers and strings
 In a constants expression can only be things that can be evaluated at compile time, such as Strings, Integers, Longs and other constants. If you try to use something like a function it would tell you that it doesn't recognize it as a constant value. 
 
 ### locals
+> -> Pre 0.0.1A
+  > Add  -> Pre 0.0.1A
+  > Set  -> Pre 0.0.1A
+  > Push -> Pre 0.0.1A
+  > Pop  -> Pre 0.0.1A
 
 **Syntax:**
 ```sopl

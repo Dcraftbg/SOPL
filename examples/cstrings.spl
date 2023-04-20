@@ -1,0 +1,4 @@
+extern "C" printf
+func main(int, ptr : int) {
+    "Hello World!"c printf pop
+}

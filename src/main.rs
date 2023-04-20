@@ -138,17 +138,23 @@ fn unescape(stri: &String) -> String {
     out
 }
 
+
+enum OptimizationMode {
+    RELEASE,
+    DEBUG
+}
 struct CmdProgram {
     path: String,
     opath: String,
     typ: String,
     should_build: bool,
     warn_rax_usage: bool,
+    in_mode: OptimizationMode,
     call_stack_size: usize
 }
 impl CmdProgram {
     fn new() -> Self {
-        Self { path: "".to_string(), opath: "".to_string(), should_build: false, typ: "".to_string(), warn_rax_usage: true, call_stack_size: 64000 }
+        Self { path: "".to_string(), opath: "".to_string(), should_build: false, typ: "".to_string(), warn_rax_usage: true, call_stack_size: 64000, in_mode: OptimizationMode::DEBUG }
     }
 }
 fn usage() {
@@ -275,6 +281,7 @@ enum TokenType {
     IntrinsicType (IntrinsicType),
     Definition    (VarType),
     StringType    (String),
+    CStringType   (String),
     CharType      (String),
     Number32      (i32),
     Number64      (i64)
@@ -303,6 +310,9 @@ impl TokenType {
             TokenType::Definition(typ) => {
                 if isplural {"Definitions".to_string()} else {format!("Definition {}",typ.to_string(false)).to_string()}
             }
+            TokenType::CStringType(st) => {
+                if isplural {format!("CString").to_string()} else {format!("CString {}",st).to_string()}
+            },
         }
     }
 }
@@ -425,9 +435,17 @@ impl Iterator for Lexer<'_> {
                         self.currentLocation.character += 1;
                     }
                     //println!("Parsing string: {}",outstr);
-                    let u_outstr = unescape(&outstr);
-                    self.cursor += 1;
-                    return Some(Token { typ: TokenType::StringType(u_outstr.clone()), location: self.currentLocation.clone() });
+                    if self.is_not_empty() {
+                        let u_outstr = unescape(&outstr);
+                        self.cursor += 1;
+                        if self.source.chars().nth(self.cursor).unwrap() == 'c' {
+                            self.cursor += 1;
+                            return Some(Token { typ: TokenType::CStringType(u_outstr.clone()), location: self.currentLocation.clone() });
+                        }
+                        else {
+                            return Some(Token { typ: TokenType::StringType(u_outstr.clone()), location: self.currentLocation.clone() });
+                        }
+                    }
                 }
                 '\'' => {
                     let mut shouldIgnoreNext: bool = true;
@@ -861,7 +879,7 @@ enum OfP {
     REGISTER (Register),
     LOCALVAR (String),
     RAW      (i64),
-    STR      (Uuid)
+    STR      (Uuid, ProgramStringType)
     // etc.
 
 }
@@ -889,7 +907,7 @@ enum Instruction {
 
 #[derive(Debug,Clone)]
 enum ProgramStringType {
-    STR ,
+    STR,
     CSTR
 }
 #[derive(Debug,Clone)]
@@ -1470,7 +1488,7 @@ fn parse_tokens_to_build(lexer: &mut Lexer, program: &mut CmdProgram) -> BuildPr
                                 func.body.push((token.location.clone(),Instruction::PUSH(OfP::REGISTER(Register::RAX))));
                             }
                             RawConstValue::STR(val) => {
-                                func.body.push((token.location.clone(),Instruction::PUSH(OfP::STR(val.clone()))));
+                                func.body.push((token.location.clone(),Instruction::PUSH(OfP::STR(val.clone(), ProgramStringType::STR))));
                             }
                         }
                     }
@@ -1509,10 +1527,9 @@ fn parse_tokens_to_build(lexer: &mut Lexer, program: &mut CmdProgram) -> BuildPr
                                     }
                                 }
                             },
-                            TokenType::CharType(_) => par_error!(token,"Unexpected behaviour! expected type Word or String but found Char"),
-                            TokenType::Number32(_) => par_error!(token,"Unexpected behaviour! expected type Word or String but found Number32"),
-                            TokenType::Number64(_) => par_error!(token,"Unexpected behaviour! expected type Word or String but found Number64"),
-                            TokenType::Definition(_) => todo!(),
+                            other => {
+                                par_error!(token,"Unexpected behaviour! expected type Word or String but found {}",other.to_string(false));
+                            }
 
                         }
                     }
@@ -1700,7 +1717,7 @@ fn parse_tokens_to_build(lexer: &mut Lexer, program: &mut CmdProgram) -> BuildPr
                                                 match Inst {
                                                     Instruction::PUSH(strid) => {
                                                         match strid {
-                                                            OfP::STR(strid) => {
+                                                            OfP::STR(strid,_) => {
                                                                 if strid.clone() == orgstrdefId {
                                                                     *strid = strdefId.clone();
                                                                 }
@@ -1828,8 +1845,19 @@ fn parse_tokens_to_build(lexer: &mut Lexer, program: &mut CmdProgram) -> BuildPr
                 while build.stringdefs.insert(UUID,ProgramString {Data: Word.clone(), Typ: ProgramStringType::STR}).is_some() {
                     UUID = Uuid::new_v4();
                 }
-                build.functions.get_mut(currentFunction.as_mut().unwrap()).unwrap().body.push((token.location,Instruction::PUSH(OfP::STR(UUID))));
+                build.functions.get_mut(currentFunction.as_mut().unwrap()).unwrap().body.push((token.location,Instruction::PUSH(OfP::STR(UUID,ProgramStringType::STR))));
             }
+            TokenType::CStringType(Word) => {
+                par_assert!(token,currentFunction.is_some(), "Unexpected string definition outside of entry point!");
+
+                //build.stringdefs.push(ProgramString {Word.clone());
+                let mut UUID = Uuid::new_v4();
+                while build.stringdefs.insert(UUID,ProgramString {Data: Word.clone(), Typ: ProgramStringType::CSTR}).is_some() {
+                    UUID = Uuid::new_v4();
+                }
+                build.functions.get_mut(currentFunction.as_mut().unwrap()).unwrap().body.push((token.location,Instruction::PUSH(OfP::STR(UUID,ProgramStringType::CSTR))));
+            }
+            
             TokenType::CharType(_) => {
                 par_assert!(token,currentFunction.is_some(), "Unexpected char definition outside of entry point!");
             }
@@ -1845,18 +1873,58 @@ fn parse_tokens_to_build(lexer: &mut Lexer, program: &mut CmdProgram) -> BuildPr
                 build.functions.get_mut(currentFunction.as_mut().unwrap()).unwrap().body.push((token.location.clone(),Instruction::PUSH(OfP::REGISTER(Register::RAX))));
             }
             TokenType::Definition(_) => todo!(),
+            TokenType::CStringType(_) => todo!(),
         }
     }
-    println!("Functions {:#?}",build.functions);
+    //println!("Functions {:#?}",build.functions);
     for (fn_name, fn_fn)in build.functions.iter_mut() {
         if fn_name != "main" && fn_fn.location.file == lexer.currentLocation.file {
-            println!("-----------------\n\n\n\nAdded Ret for {} with body: {:#?}--------\n\n\n\n",fn_name,fn_fn.body);
+            //println!("-----------------\n\n\n\nAdded Ret for {} with body: {:#?}--------\n\n\n\n",fn_name,fn_fn.body);
             fn_fn.body.push((fn_fn.location.clone(),Instruction::RET()))
         }
     }
     build
 }
+
+struct optim_ops {
+    should_use_callstack: bool
+}
+impl optim_ops {
+    fn new() -> Self{
+        Self { should_use_callstack: false }
+    }
+}
+fn optimization_ops(build: &mut BuildProgram, program: &CmdProgram) -> optim_ops{
+    match program.in_mode {
+        OptimizationMode::RELEASE => {
+            let mut out = optim_ops::new();
+            for (_, func) in build.functions.iter() {
+                if !out.should_use_callstack {
+                    for (_,op) in func.body.iter() {
+                        match op {
+                            Instruction::CALL(_) => {                                
+                                out.should_use_callstack = true;
+                                break
+                            },
+                            Instruction::DEFVAR(_) => {
+                                out.should_use_callstack = true;
+                                break
+                            }
+                            _ => {}
+                        }
+                    }
+                }
+                else {
+                    break;
+                }
+            }
+            out
+        },
+        OptimizationMode::DEBUG => optim_ops { should_use_callstack: true },
+    }
+}
 fn to_nasm_x86_64(build: &mut BuildProgram, program: &CmdProgram) -> io::Result<()>{
+    
     let mut f = File::create(&program.opath).expect(&format!("Error: could not open output file {}",program.opath.as_str()));
     writeln!(&mut f,"BITS 64")?;
     writeln!(&mut f, "section .data")?;
@@ -1871,13 +1939,16 @@ fn to_nasm_x86_64(build: &mut BuildProgram, program: &CmdProgram) -> io::Result<
         writeln!(&mut f, "0    ; {}",stridef.Data)?;
         match stridef.Typ {
             ProgramStringType::STR  => writeln!(&mut f, "   _LEN_STRING_{}_: dq {}",UUID.to_string().replace("-", ""),stridef.Data.len())?,
-            ProgramStringType::CSTR => todo!(),
+            ProgramStringType::CSTR => {},
         }
     }
-    writeln!(&mut f, "section .bss")?;
-    writeln!(&mut f, "   _CALLSTACK: resb {}",program.call_stack_size)?;
-    writeln!(&mut f, "   _CALLSTACK_TOP: ")?;
-    writeln!(&mut f, "   _CALLSTACK_BUF_PTR: resd 1")?;
+    let optimization = optimization_ops(build, program);
+    if optimization.should_use_callstack {
+        writeln!(&mut f, "section .bss")?;
+        writeln!(&mut f, "   _CALLSTACK: resb {}",program.call_stack_size)?;
+        writeln!(&mut f, "   _CALLSTACK_TOP: ")?;
+        writeln!(&mut f, "   _CALLSTACK_BUF_PTR: resd 1")?;
+    }
     for function_name in build.functions.keys() {
         if function_name == "main" {
             writeln!(&mut f,"global _{}",function_name)?;
@@ -1907,7 +1978,9 @@ fn to_nasm_x86_64(build: &mut BuildProgram, program: &CmdProgram) -> io::Result<
             writeln!(&mut f, "_{}:",function_name)?;
             writeln!(&mut f, "   push rbp")?;
             writeln!(&mut f, "   mov rbp, rsp")?;
-            writeln!(&mut f, "   mov dword [_CALLSTACK_BUF_PTR], _CALLSTACK_TOP")?;
+            if optimization.should_use_callstack {
+                writeln!(&mut f, "   mov dword [_CALLSTACK_BUF_PTR], _CALLSTACK_TOP")?;
+            }
         }
         else {
             writeln!(&mut f, "F_{}:",function_name)?;
@@ -1925,9 +1998,17 @@ fn to_nasm_x86_64(build: &mut BuildProgram, program: &CmdProgram) -> io::Result<
                                 writeln!(&mut f, "   push {} {}",size_to_nasm_type(Reg.size()),Reg.to_string())?;
                             }
                         }
-                        OfP::STR(UUID) => {
-                            writeln!(&mut f, "   push _STRING_{}_",UUID.to_string().replace("-", ""))?;
-                            writeln!(&mut f, "   push _LEN_STRING_{}_",UUID.to_string().replace("-", ""))?;
+                        OfP::STR(UUID,typ) => {
+                            match typ {
+                                ProgramStringType::STR => {
+                                    writeln!(&mut f, "   push _STRING_{}_",UUID.to_string().replace("-", ""))?;
+                                    writeln!(&mut f, "   push _LEN_STRING_{}_",UUID.to_string().replace("-", ""))?;
+                                },
+                                ProgramStringType::CSTR => {
+                                    writeln!(&mut f, "   push _STRING_{}_",UUID.to_string().replace("-", ""))?;
+                                },
+                            }
+                            
                         }
                         OfP::RAW(Data) => {
                             writeln!(&mut f, "   push {}",Data)?;
@@ -1959,7 +2040,7 @@ fn to_nasm_x86_64(build: &mut BuildProgram, program: &CmdProgram) -> io::Result<
                                 OfP::RAW(Data) => {
                                     writeln!(&mut f, "   mov {}, {}",Reg1.to_string(), Data)?;
                                 },
-                                OfP::STR(_) => todo!(),
+                                OfP::STR(_, _) => todo!(),
                             }
                         }
                         OfP::LOCALVAR(varOrg) => {
@@ -1982,7 +2063,7 @@ fn to_nasm_x86_64(build: &mut BuildProgram, program: &CmdProgram) -> io::Result<
                                         todo!()
                                     }
                                 },
-                                OfP::STR(_) => todo!(),
+                                OfP::STR(_,_) => todo!(),
                             }
                         }
                         _ => {
@@ -2025,7 +2106,7 @@ fn to_nasm_x86_64(build: &mut BuildProgram, program: &CmdProgram) -> io::Result<
                                         writeln!(&mut f, "   add {}, {}",reg1.to_string(),val)?;
                                     }
                                 }
-                                OfP::STR(_) => todo!(),
+                                OfP::STR(_,_) => todo!(),
                             }
                         }
                         OfP::LOCALVAR(var1) => {
@@ -2056,11 +2137,11 @@ fn to_nasm_x86_64(build: &mut BuildProgram, program: &CmdProgram) -> io::Result<
                                     }
                                 },
                                 OfP::RAW(_) => todo!(),
-                                OfP::STR(_) => todo!(),
+                                OfP::STR(_,_) => todo!(),
                             }
                         },
                         OfP::RAW(_) => todo!(),
-                        OfP::STR(_) => todo!(),
+                        OfP::STR(_,_) => todo!(),
                         
                     }
                     
@@ -2077,12 +2158,12 @@ fn to_nasm_x86_64(build: &mut BuildProgram, program: &CmdProgram) -> io::Result<
                                 OfP::RAW(val) => {
                                     writeln!(&mut f, "   sub {}, {}",reg1.to_string(),val)?;
                                 },
-                                OfP::STR(_) => todo!(),
+                                OfP::STR(_,_) => todo!(),
                             }
                         }
                         OfP::LOCALVAR(_) => todo!(),
                         OfP::RAW(_) => todo!(),
-                        OfP::STR(_) => todo!(),
+                        OfP::STR(_,_) => todo!(),
                     }
                 }
                 Instruction::MUL(op1, op2) => {
@@ -2097,12 +2178,12 @@ fn to_nasm_x86_64(build: &mut BuildProgram, program: &CmdProgram) -> io::Result<
                                 OfP::RAW(val) => {
                                     writeln!(&mut f, "   mul {}, {}",reg1.to_string(),val)?;
                                 },
-                                OfP::STR(_) => todo!(),
+                                OfP::STR(_,_) => todo!(),
                             }
                         }
                         OfP::LOCALVAR(_) => todo!(),
                         OfP::RAW(_) => todo!(),
-                        OfP::STR(_) => todo!(),
+                        OfP::STR(_,_) => todo!(),
                     }
                     
                 }
@@ -2123,12 +2204,12 @@ fn to_nasm_x86_64(build: &mut BuildProgram, program: &CmdProgram) -> io::Result<
                                 }
                                 OfP::LOCALVAR(_) => todo!(),
                                 OfP::RAW(_) => todo!(),
-                                OfP::STR(_) => todo!(),
+                                OfP::STR(_,_) => todo!(),
                             }
                         }
                         OfP::LOCALVAR(_) => todo!(),
                         OfP::RAW(_) => todo!(),
-                        OfP::STR(_) => todo!(),
+                        OfP::STR(_,_) => todo!(),
                     }
                     
                 }
@@ -2202,12 +2283,12 @@ fn to_nasm_x86_64(build: &mut BuildProgram, program: &CmdProgram) -> io::Result<
                                 }
                                 OfP::LOCALVAR(_) => todo!(),
                                 OfP::RAW(_) => todo!(),
-                                OfP::STR(_) => todo!(),
+                                OfP::STR(_,_) => todo!(),
                             }
                         }
                         OfP::LOCALVAR(_) => todo!(),
                         OfP::RAW(_) => todo!(),
-                        OfP::STR(_) => todo!(),
+                        OfP::STR(_,_) => todo!(),
                     }
                     
                 },
@@ -2262,6 +2343,9 @@ fn main() {
                 },
                 "-r" => {
                     program.should_build = true
+                }
+                "-release" => {
+                    program.in_mode = OptimizationMode::RELEASE
                 }
                 "-noRaxWarn" => {
 
