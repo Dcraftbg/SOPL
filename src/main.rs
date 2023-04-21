@@ -5,7 +5,7 @@
 #![allow(unused_imports)]
 #![allow(unreachable_patterns)]
 
-use std::{env, process::{exit, Command}, path::{Path, PathBuf}, ffi::OsStr, str::FromStr, collections::HashMap, hash::Hash, fs::{File, self}, io::{Read, Write, self}, fmt::format, os::windows::{process::CommandExt, self}, arch::x86_64::_mm_testz_pd, borrow::BorrowMut, clone};
+use std::{env, process::{exit, Command}, path::{Path, PathBuf}, ffi::OsStr, str::FromStr, collections::{HashMap, HashSet}, hash::Hash, fs::{File, self}, io::{Read, Write, self}, fmt::format, os::windows::{process::CommandExt, self}, arch::x86_64::_mm_testz_pd, borrow::BorrowMut, clone};
 use uuid::Uuid;
 
 macro_rules! par_error {
@@ -138,7 +138,7 @@ fn unescape(stri: &String) -> String {
     out
 }
 
-
+#[derive(PartialEq)]
 enum OptimizationMode {
     RELEASE,
     DEBUG
@@ -1887,21 +1887,31 @@ fn parse_tokens_to_build(lexer: &mut Lexer, program: &mut CmdProgram) -> BuildPr
 }
 
 struct optim_ops {
-    should_use_callstack: bool
+    should_use_callstack: bool,
+    usedStrings: HashSet<Uuid>,
 }
 impl optim_ops {
     fn new() -> Self{
-        Self { should_use_callstack: false }
+        Self { should_use_callstack: false, usedStrings: HashSet::new() }
     }
 }
 fn optimization_ops(build: &mut BuildProgram, program: &CmdProgram) -> optim_ops{
     match program.in_mode {
         OptimizationMode::RELEASE => {
             let mut out = optim_ops::new();
+
             for (_, func) in build.functions.iter() {
                 if !out.should_use_callstack {
                     for (_,op) in func.body.iter() {
                         match op {
+                            Instruction::PUSH(d) => {
+                                match d {
+                                    OfP::STR(UUID,_) => {
+                                        out.usedStrings.insert(UUID.clone());
+                                    }
+                                    _ => {}
+                                }
+                            }
                             Instruction::CALL(_) => {                                
                                 out.should_use_callstack = true;
                                 break
@@ -1920,29 +1930,46 @@ fn optimization_ops(build: &mut BuildProgram, program: &CmdProgram) -> optim_ops
             }
             out
         },
-        OptimizationMode::DEBUG => optim_ops { should_use_callstack: true },
+        OptimizationMode::DEBUG => optim_ops { should_use_callstack: true, usedStrings: HashSet::new()},
     }
 }
 fn to_nasm_x86_64(build: &mut BuildProgram, program: &CmdProgram) -> io::Result<()>{
     
+    //
+    // TODO: Finish work on used strings!
+    //
+    //
+    //
+    //
+    
+
+
+    
+    
+    let optimization = optimization_ops(build, program);
     let mut f = File::create(&program.opath).expect(&format!("Error: could not open output file {}",program.opath.as_str()));
     writeln!(&mut f,"BITS 64")?;
     writeln!(&mut f, "section .data")?;
     
-
-    for (UUID,stridef) in build.stringdefs.iter(){        
-        //writeln!(&mut f, "   _STRING_{}: db \"{}\", 0",i,stridef.Data)?;
-        write!(&mut f, "   _STRING_{}_: db ",UUID.to_string().replace("-", ""))?;
-        for chr in stridef.Data.chars() {
-            write!(&mut f, "{}, ",(chr as u8))?;
-        }
-        writeln!(&mut f, "0    ; {}",stridef.Data)?;
-        match stridef.Typ {
-            ProgramStringType::STR  => writeln!(&mut f, "   _LEN_STRING_{}_: dq {}",UUID.to_string().replace("-", ""),stridef.Data.len())?,
-            ProgramStringType::CSTR => {},
+    
+    for (UUID,stridef) in build.stringdefs.iter(){                
+        if program.in_mode == OptimizationMode::DEBUG || optimization.usedStrings.contains(UUID) {
+            write!(&mut f, "   _STRING_{}_: db ",UUID.to_string().replace("-", ""))?;
+            for chr in stridef.Data.chars() {
+                write!(&mut f, "{}, ",(chr as u8))?;
+            }
+            if program.in_mode == OptimizationMode::DEBUG {
+                writeln!(&mut f, "0    ; {}",stridef.Data)?;
+            }
+            else {
+                writeln!(&mut f, "0")?;
+            }
+            match stridef.Typ {
+                ProgramStringType::STR  => writeln!(&mut f, "   _LEN_STRING_{}_: dq {}",UUID.to_string().replace("-", ""),stridef.Data.len())?,
+                ProgramStringType::CSTR => {},
+            }
         }
     }
-    let optimization = optimization_ops(build, program);
     if optimization.should_use_callstack {
         writeln!(&mut f, "section .bss")?;
         writeln!(&mut f, "   _CALLSTACK: resb {}",program.call_stack_size)?;
@@ -1987,6 +2014,9 @@ fn to_nasm_x86_64(build: &mut BuildProgram, program: &CmdProgram) -> io::Result<
         }
         
         for (i,(_location, instruction)) in function.body.iter().enumerate(){
+            if program.in_mode == OptimizationMode::DEBUG {
+                writeln!(&mut f,"   ; --- {} ",i)?
+            }
             match instruction {
                 Instruction::PUSH(Reg) => {
                     match Reg {
