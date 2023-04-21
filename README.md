@@ -81,6 +81,7 @@ func main(int, ptr : int) {
 ```
 ### extern
 > -> Pre 0.0.1A
+
 **Syntax**:
 ```
 extern [TYPE] (name)
@@ -121,6 +122,7 @@ func counter(long : long) {
 
 ### including
 > -> Pre 0.0.1A
+
 **Syntax**
 ```spl
 include "Path/To/File"
@@ -225,6 +227,7 @@ To define a string we use "" (escaping is supported)
 
 > If     -> Pre 0.0.1A
 > Else   -> Pre 0.0.1A
+
 **Syntax:**
 ```sopl
 if (condition) {(Body)}
@@ -245,6 +248,7 @@ else {
 
 ### constants
 > -> Pre 0.0.1A
+
 **Syntax:**
 ```sopl
 const (name) = (your constant expersion goes here) ;
