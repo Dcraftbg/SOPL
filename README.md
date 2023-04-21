@@ -220,7 +220,18 @@ cstrings
 strings
 ```
 With the main difference being that cstrings don't push their length after the pointer to the string unlike normal strings.
-To define a string we use "" (escaping is supported)
+To define a string we use "" (escaping is supported). To define a cstring just add the letter C after the string.
+
+**Examples**
+
+```sopl
+func main(int,ptr: int) {
+  "Hello World!" pop printf pop
+  "Foo Bar!"c printf pop
+}
+```
+
+**[NOTE] It is generally recommended to use cstrings whenever possible if the function doesn't use the length as a parameter. In < 0.0.1A strings had to be pushed and then the length of them popped which is no longer sufficient and may cause your code to be inefficient**
 
 
 ### control flow
