@@ -26,6 +26,7 @@ Made for easy navigation around the README.md
   - [control-flow](#control-flow)
   - [constants](#constants)
   - [locals](#locals)
+  - [interrupts](#interrupts)
 
 ## Plans
 > Source
@@ -61,6 +62,11 @@ Ideas that are left for discussion and further expansion:
 - [ ] ARM assembly
 - [ ] C
 
+[NOTE] that whilst registers are really powerful and useful for building with x86 64, they might get 'discontinued' after Java integration. They will have support for nasm but in the future their usage will be warned and their features replaced by more modern ones. Deprecation isn't expected any time soon but when the majority of the boxes under 'plans' are ticked off you probably will expect deprecation of them. 
+For anyone wandering things like interrupts are probably going to be handled like so:
+```sopl
+interrupt 128, 1, 1, "Hello World!" // Print Hello World! on linux
+```
 ## Requirements
 **NASM**:
 - Any nasm version that can support 64 bit assembly.
@@ -280,10 +286,10 @@ In a constants expression can only be things that can be evaluated at compile ti
 
 ### locals
 > -> Pre 0.0.1A
-  > Add  -> Pre 0.0.1A
-  > Set  -> Pre 0.0.1A
-  > Push -> Pre 0.0.1A
-  > Pop  -> Pre 0.0.1A
+  Add  -> Pre 0.0.1A
+  Set  -> Pre 0.0.1A
+  Push -> Pre 0.0.1A
+  Pop  -> Pre 0.0.1A
 
 **Syntax:**
 ```sopl
@@ -298,4 +304,14 @@ addition (+)
 set (=)
 pop
 push
+```
+
+### interrupts
+> -> 0.0.4A
+  
+Interrupts are essential for anything you build on platforms such as linux if you don't want to use libc. Whilst they aren't useful as much on windows machines WSL could be used to make linux syscalls into something which can run on windows.
+
+To use interrupts you can do 'interrupt' followed by the number of the interrupt. So syscall (int 128) is 
+```sopl
+interrupt 128
 ```
