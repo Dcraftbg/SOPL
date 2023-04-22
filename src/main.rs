@@ -157,9 +157,6 @@ impl CmdProgram {
         Self { path: "".to_string(), opath: "".to_string(), should_build: false, typ: "".to_string(), warn_rax_usage: true, call_stack_size: 64000, in_mode: OptimizationMode::DEBUG }
     }
 }
-fn usage() {
-    todo!("Unimplemented usage function!");
-}
 #[repr(u32)]
 #[derive(Clone, Copy,Debug,PartialEq )]
 
@@ -175,6 +172,7 @@ enum IntrinsicType {
     DOTCOMA,
     OPENCURLY,
     CLOSECURLY,
+    INTERRUPT,
     // REGISTER OPERATIONS
     POP,
     PUSH,
@@ -263,6 +261,9 @@ impl IntrinsicType {
             },
             IntrinsicType::Let => {
                 if isplural {"Let".to_string()} else {"Let".to_string()}
+            },
+            IntrinsicType::INTERRUPT => {
+                if isplural {"Interrupts".to_string()} else {"Interrupt".to_string()}
             },
         }
     }
@@ -615,6 +616,8 @@ enum Register {
     RDX,
     RSP,
     RBP,
+    RSI,
+    RDI,
     // 32 bit
     EAX,
     EBX,
@@ -656,6 +659,8 @@ impl Register {
             Register::RDX => "rdx".to_string(),
             Register::RSP => "rsp".to_string(),
             Register::RBP => "rbp".to_string(),
+            Register::RSI => "rsi".to_string(),
+            Register::RDI => "rdi".to_string(),
             Register::EAX => "eax".to_string(),
             Register::EBX => "ebx".to_string(),
             Register::ECX => "ecx".to_string(),
@@ -710,6 +715,8 @@ impl Register {
              "DH"  | "dh"  => Some(Register::DH ), 
              "R8"  | "r8"  => Some(Register::R8),
              "R8D" | "r8d" => Some(Register::R8D),
+             "RSI" | "rsi" => Some(Register::RSI),
+             "RDI" | "rdi" => Some(Register::RDI),
             _ => None 
         }
     }
@@ -743,6 +750,8 @@ impl Register {
             Register::DH  => 1,
             Register::R8 => 8,
             Register::R8D => 4,
+            Register::RSI => 8,
+            Register::RDI => 8,
         }
     }
     fn to_byte_size(&self, size: usize) -> Self {
@@ -767,8 +776,10 @@ impl Register {
                 Register::RBP | Register::EBP  | Register::BP => {
                     return Register::RBP;
                 }
-                Register::R8 => todo!(),
+                Register::R8  => todo!(),
                 Register::R8D => todo!(),
+                Register::RSI => todo!(),
+                Register::RDI => todo!(),
               }  
             },
             4 => {
@@ -793,6 +804,8 @@ impl Register {
                     }
                     Register::R8 => todo!(),
                     Register::R8D => todo!(),
+                    Register::RSI => todo!(),
+                    Register::RDI => todo!(),
                   }  
             },
             2 => {
@@ -817,6 +830,8 @@ impl Register {
                     }
                     Register::R8 => todo!(),
                     Register::R8D => todo!(),
+                    Register::RSI => todo!(),
+                    Register::RDI => todo!(),
                   }  
             },
             1 => {
@@ -841,6 +856,8 @@ impl Register {
                     }
                     Register::R8 => todo!(),
                     Register::R8D => todo!(),
+                    Register::RSI => todo!(),
+                    Register::RDI => todo!(),
                   }  
             },
             _ => {
@@ -902,7 +919,7 @@ enum Instruction {
     SCOPEEND,
     CONDITIONAL_JUMP(usize),
     JUMP(usize),
-
+    INTERRUPT(i64),
 }
 
 #[derive(Debug,Clone)]
@@ -1835,6 +1852,22 @@ fn parse_tokens_to_build(lexer: &mut Lexer, program: &mut CmdProgram) -> BuildPr
                             }
                         }
                     },
+                    IntrinsicType::INTERRUPT => {
+                        let currentFunc = build.functions.get_mut(&currentFunction.clone().expect("Error: Can not have interrupt outside of functions!")).unwrap();
+                        let lexerNext = par_expect!(lexer.currentLocation,lexer.next(),"Stream of tokens ended abruptly at INTERRUPT call");
+                        match lexerNext.typ {
+                            TokenType::Number32(val) => {
+                                currentFunc.body.push((lexer.currentLocation.clone(),Instruction::INTERRUPT(val as i64)));
+                            }
+                            TokenType::Number64(val) => {
+                                currentFunc.body.push((lexer.currentLocation.clone(),Instruction::INTERRUPT(val)));
+                            }
+                            _ => {
+                                par_error!(lexerNext, "Unexpected token type for INTERRUPT, {}",lexerNext.typ.to_string(false))
+                            }
+                        }
+                        
+                    },
                 }
             }
             TokenType::StringType(Word) => {
@@ -2331,6 +2364,9 @@ fn to_nasm_x86_64(build: &mut BuildProgram, program: &CmdProgram) -> io::Result<
                     writeln!(&mut f, "   sub r10, {}",var.typ.get_size())?;
                     writeln!(&mut f, "   mov [_CALLSTACK_BUF_PTR], r10")?;
                 },
+                Instruction::INTERRUPT(val) => {
+                    writeln!(&mut f, "   int 0x{:x}",val)?;
+                },
             }
         }
         if function_name == "main" {
@@ -2345,14 +2381,25 @@ fn to_nasm_x86_64(build: &mut BuildProgram, program: &CmdProgram) -> io::Result<
 
 
 
-
+fn usage(program: &String) {
+    println!("--------------------------------------------");
+    println!("{} (output language) (input path) [flags]",program);
+    println!("     Output Language: ");
+    println!("         - nasm_x86_64");
+    println!("     flags: ");
+    println!("         -o (output path) -> outputs to that file (example: hello.asm in nasm_x86_64 mode). If not output path is specified it defaults to the modes default (for nasm_x86_64 thats a.asm)");
+    println!("         -r               -> builds the program for you if the option is available for that language mode (for example in nasm_x86_64 it calls nasm with gcc to link it to an executeable)");
+    println!("         -noRaxWarn       -> removes the RAX usage warning for nasm");
+    println!("         -release         -> builds the program in release mode");
+    println!("--------------------------------------------");
+}
 fn main() {
     let mut args: Vec<_> = env::args().collect();
+    let program_n = args.remove(0);
     if args.len() < 2 {
-        usage();
+        usage(&program_n);
         exit(1);
     }
-    args.remove(0);
     let mut program = CmdProgram::new();
     program.typ  = args.remove(0);
     program.path = args.remove(0);
@@ -2382,7 +2429,9 @@ fn main() {
                     program.warn_rax_usage = false
                 }
                 flag => {
-                    eprintln!("Error: undefined flag: {flag}")
+                    eprintln!("Error: undefined flag: {flag}\nUsage: ");
+                    usage(&program_n);
+                    exit(1);
                 }
             }
             i+=1;
@@ -2400,6 +2449,7 @@ fn main() {
     Intrinsics.insert("func".to_string()  , IntrinsicType::Func);
     Intrinsics.insert("include".to_string(), IntrinsicType::INCLUDE);
     Intrinsics.insert("const".to_string(), IntrinsicType::CONSTANT);
+    Intrinsics.insert("interrupt".to_string(), IntrinsicType::INTERRUPT);
     Intrinsics.insert("(".to_string(),IntrinsicType::OPENPAREN);
     Intrinsics.insert(")".to_string(),IntrinsicType::CLOSEPAREN);
     Intrinsics.insert(":".to_string(),IntrinsicType::DOUBLE_COLIN);
