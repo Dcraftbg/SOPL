@@ -157,9 +157,6 @@ impl CmdProgram {
         Self { path: "".to_string(), opath: "".to_string(), should_build: false, typ: "".to_string(), warn_rax_usage: true, call_stack_size: 64000, in_mode: OptimizationMode::DEBUG }
     }
 }
-fn usage() {
-    todo!("Unimplemented usage function!");
-}
 #[repr(u32)]
 #[derive(Clone, Copy,Debug,PartialEq )]
 
@@ -2345,14 +2342,25 @@ fn to_nasm_x86_64(build: &mut BuildProgram, program: &CmdProgram) -> io::Result<
 
 
 
-
+fn usage(program: &String) {
+    println!("--------------------------------------------");
+    println!("{} (output language) (input path) [flags]",program);
+    println!("     Output Language: ");
+    println!("         - nasm_x86_64");
+    println!("     flags: ");
+    println!("         -o (output path) -> outputs to that file (example: hello.asm in nasm_x86_64 mode). If not output path is specified it defaults to the modes default (for nasm_x86_64 thats a.asm)");
+    println!("         -r               -> builds the program for you if the option is available for that language mode (for example in nasm_x86_64 it calls nasm with gcc to link it to an executeable)");
+    println!("         -noRaxWarn       -> removes the RAX usage warning for nasm");
+    println!("         -release         -> builds the program in release mode");
+    println!("--------------------------------------------");
+}
 fn main() {
     let mut args: Vec<_> = env::args().collect();
+    let program_n = args.remove(0);
     if args.len() < 2 {
-        usage();
+        usage(&program_n);
         exit(1);
     }
-    args.remove(0);
     let mut program = CmdProgram::new();
     program.typ  = args.remove(0);
     program.path = args.remove(0);
@@ -2382,7 +2390,9 @@ fn main() {
                     program.warn_rax_usage = false
                 }
                 flag => {
-                    eprintln!("Error: undefined flag: {flag}")
+                    eprintln!("Error: undefined flag: {flag}\nUsage: ");
+                    usage(&program_n);
+                    exit(1);
                 }
             }
             i+=1;
