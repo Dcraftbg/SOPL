@@ -172,6 +172,7 @@ func main(int, ptr : int) {
 ```
 ### registers
 > -> Pre 0.0.1A
+
 Current register support:
 - [x] RAX
   - [x] EAX
@@ -242,7 +243,9 @@ As for returning values that are higher than 8 bytes, C pushes them on the stack
 
 ### strings
 > Strings  -> Pre 0.0.1A 
+
 > CStrings -> 0.0.2A
+
 In sopl there are 2 different types of strings. There are:
 ```
 cstrings 
@@ -266,6 +269,7 @@ func main(int,ptr: int) {
 ### control flow
 
 > If     -> Pre 0.0.1A
+
 > Else   -> Pre 0.0.1A
 
 **Syntax:**
