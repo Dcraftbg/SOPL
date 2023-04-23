@@ -1838,9 +1838,10 @@ fn parse_tokens_to_build(lexer: &mut Lexer, program: &mut CmdProgram) -> BuildPr
                             }
                             ConstValueType::STR(rval) => {
                                 let mut UUID = Uuid::new_v4();
-                                while build.stringdefs.insert(UUID,ProgramString {Data: rval.clone(), Typ: ProgramStringType::STR}).is_some() {
+                                while build.stringdefs.contains_key(&UUID) {
                                     UUID = Uuid::new_v4();
                                 }
+                                build.stringdefs.insert(UUID,ProgramString {Data: rval.clone(), Typ: ProgramStringType::STR});
                                 RawConstValue {typ: RawConstValueType::STR(UUID), loc: val.loc}
                                 
                             }
@@ -1899,9 +1900,10 @@ fn parse_tokens_to_build(lexer: &mut Lexer, program: &mut CmdProgram) -> BuildPr
 
                 //build.stringdefs.push(ProgramString {Word.clone());
                 let mut UUID = Uuid::new_v4();
-                while build.stringdefs.insert(UUID,ProgramString {Data: Word.clone(), Typ: ProgramStringType::STR}).is_some() {
+                while build.stringdefs.contains_key(&UUID) {
                     UUID = Uuid::new_v4();
                 }
+                build.stringdefs.insert(UUID,ProgramString {Data: Word.clone(), Typ: ProgramStringType::STR});
                 build.functions.get_mut(currentFunction.as_mut().unwrap()).unwrap().body.push((token.location,Instruction::PUSH(OfP::STR(UUID,ProgramStringType::STR))));
             }
             TokenType::CStringType(ref Word) => {
@@ -1909,9 +1911,10 @@ fn parse_tokens_to_build(lexer: &mut Lexer, program: &mut CmdProgram) -> BuildPr
 
                 //build.stringdefs.push(ProgramString {Word.clone());
                 let mut UUID = Uuid::new_v4();
-                while build.stringdefs.insert(UUID,ProgramString {Data: Word.clone(), Typ: ProgramStringType::CSTR}).is_some() {
+                while build.stringdefs.contains_key(&UUID) {
                     UUID = Uuid::new_v4();
                 }
+                build.stringdefs.insert(UUID,ProgramString {Data: Word.clone(), Typ: ProgramStringType::CSTR}); 
                 build.functions.get_mut(currentFunction.as_mut().unwrap()).unwrap().body.push((token.location,Instruction::PUSH(OfP::STR(UUID,ProgramStringType::CSTR))));
             }
             
