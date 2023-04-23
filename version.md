@@ -1,7 +1,8 @@
 **(Latest patch versions in github history)**
 
 V:
-
+ **0.0.5.3A**
+ > Changed compiler build to now include information of const definition declaration, external location declaration and more. Added '-nuw' flag for disabling unused warnings when running in release. 
  **0.0.5.2A** 
  > Changed version.txt to version.md for easier reading
  

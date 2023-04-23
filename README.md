@@ -84,7 +84,7 @@ It also gives you a timeline of the most recent changes (newest -> oldest).
 
 Flags are really important and if not updated here, you can always check out what flag support there is by just running the compiler without anything (This will display information such as the usage, the currently supported builds and any flags you might want to use).
 
-As of **0.0.5A** flags consist of:
+As of **0.0.5.3A** flags consist of:
 ```
 --------------------------------------------
 (output language) (input path) [flags]
@@ -96,6 +96,7 @@ As of **0.0.5A** flags consist of:
          -noRaxWarn       -> removes the RAX usage warning for nasm
          -release         -> builds the program in release mode
          -ntc             -> (NoTypeChecking) Disable type checking
+         -nuw             -> No unused warn. Disable warning abouts unused strings, constants externals etc. when running in release mode
 --------------------------------------------
 ```
 ## How to use?

@@ -150,12 +150,13 @@ struct CmdProgram {
     should_build: bool,
     warn_rax_usage: bool,
     use_type_checking: bool,
+    print_unused_warns: bool,
     in_mode: OptimizationMode,
     call_stack_size: usize
 }
 impl CmdProgram {
     fn new() -> Self {
-        Self { path: String::new(), opath: String::new(), should_build: false, typ: String::new(), warn_rax_usage: true, call_stack_size: 64000, in_mode: OptimizationMode::DEBUG, use_type_checking: true }
+        Self { path: String::new(), opath: String::new(), should_build: false, typ: String::new(), warn_rax_usage: true, call_stack_size: 64000, in_mode: OptimizationMode::DEBUG, use_type_checking: true, print_unused_warns: true }
     }
 }
 #[repr(u32)]
@@ -326,7 +327,7 @@ struct ProgramLocation {
 }
 impl ProgramLocation {
     fn loc_display(&self) -> String{
-        format!("{}:{}:{}: ",self.file,self.linenumber,self.character)
+        format!("{}:{}:{}",self.file,self.linenumber,self.character)
     }
 }
 #[derive(Debug, Clone)]
@@ -349,7 +350,7 @@ struct Lexer<'a> {
 
 impl<'a> Lexer<'a> {
     fn trim_left(&mut self) -> bool {
-        if self.cursor >= self.source.len(){
+        if !self.is_not_empty(){
             return false;
         }
         while self.is_not_empty() && self.source.chars().nth(self.cursor).unwrap().is_whitespace() {
@@ -365,7 +366,6 @@ impl<'a> Lexer<'a> {
             self.currentLocation.character+=1;
         }
         true
-        
     }
     fn is_not_empty(&self) -> bool {
         self.cursor < self.source.len()
@@ -392,9 +392,10 @@ impl Iterator for Lexer<'_> {
         //println!("Next {}",self.source.chars().nth(self.cursor).unwrap());
         //if self.is_not_empty() && self.source.chars().nth(self.cursor).unwrap()
         
-        
         if self.is_not_empty() {
+            //println!("'{}'Cursor: {}, CurrentLoc.char: {}",self.source.chars().nth(self.cursor).unwrap(),self.cursor, self.currentLocation.loc_display());
             let c = self.source.chars().nth(self.cursor).unwrap();
+            
             match c {
                 '\"' => {
                     let mut shouldIgnoreNext: bool = true;
@@ -422,8 +423,10 @@ impl Iterator for Lexer<'_> {
                     if self.is_not_empty() {
                         let u_outstr = unescape(&outstr);
                         self.cursor += 1;
+                        self.currentLocation.character += 1;
                         if self.source.chars().nth(self.cursor).unwrap() == 'c' {
                             self.cursor += 1;
+                            self.currentLocation.character += 1;
                             return Some(Token { typ: TokenType::CStringType(u_outstr.clone()), location: self.currentLocation.clone() });
                         }
                         else {
@@ -433,6 +436,8 @@ impl Iterator for Lexer<'_> {
                 }
                 '\'' => {
                     let mut shouldIgnoreNext: bool = true;
+                    self.cursor += 1;
+                    self.currentLocation.character += 1;
                     while self.is_not_empty() && (self.source.chars().nth(self.cursor).unwrap() != '\'' && shouldIgnoreNext){
                         let c = self.source.chars().nth(self.cursor).unwrap();
                         // if c.is_alphabetic() {
@@ -458,11 +463,13 @@ impl Iterator for Lexer<'_> {
                     //return Some(Token { typ: TokenType::StringType(outstr.clone()), location: self.currentLocation.clone() });
                 }
                 '/' => {
+                    self.cursor += 1;
                     if let Some(nc) = self.source.chars().nth(self.cursor+1) {
                         if nc == '/' {
                             self.cursor += 1;
                             while self.is_not_empty() && self.source.chars().nth(self.cursor).unwrap() != '\n' {
                                 //println!("Char: '{}'",self.source.chars().nth(self.cursor).unwrap());
+                                self.currentLocation.character += 1;
                                 self.cursor += 1;
                             }
                             self.currentLocation.character = 0;
@@ -479,13 +486,13 @@ impl Iterator for Lexer<'_> {
                     
                 }
                 _    => {
-
                     let _orgcursor = self.cursor;
                     if !self.source.chars().nth(self.cursor).unwrap().is_alphanumeric() {
                         // ->
                         // ()
                         outstr.push(c);
                         self.cursor += 1;
+                        self.currentLocation.character += 1;
                         //println!("-----\nCurrent char: {} and C is {}",self.source.chars().nth(self.cursor).unwrap(), c);
                         while self.is_not_empty() && (self.source.chars().nth(self.cursor).unwrap() != '(' && self.source.chars().nth(self.cursor).unwrap() != ')' && self.source.chars().nth(self.cursor).unwrap() != '[' && self.source.chars().nth(self.cursor).unwrap() != ']') && !self.source.chars().nth(self.cursor).unwrap().is_alphanumeric() && !self.source.chars().nth(self.cursor).unwrap().is_whitespace() {
                             outstr.push(self.source.chars().nth(self.cursor).unwrap());
@@ -493,7 +500,6 @@ impl Iterator for Lexer<'_> {
                             self.currentLocation.character += 1;
                         }
                         
-                        self.currentLocation.character += 1;
                         //println!("------\nStr: '{}'",outstr);
                         
                         if let Some(o) = self.Intrinsics.get(&outstr) {
@@ -562,29 +568,34 @@ impl Iterator for Lexer<'_> {
     }
 }
 #[derive(Debug)]
-enum External {
+enum ExternalType {
     RawExternal(String),
     CExternal(String)
 }
-impl External {
+#[derive(Debug)]
+struct External {
+    typ: ExternalType,
+    loc: ProgramLocation
+}
+impl ExternalType {
     fn prefix(&self) -> String {
         match self {
-            External::RawExternal(_) => String::new(),
-            External::CExternal(_) => "_".to_string(),
+            ExternalType::RawExternal(_) => String::new(),
+            ExternalType::CExternal(_) => "_".to_string(),
             _ => String::new()
         }
     }
     fn suffix(&self) -> String {
         match self {
-            External::RawExternal(_) => String::new(),
-            External::CExternal(_)   => String::new(),
+            ExternalType::RawExternal(_) => String::new(),
+            ExternalType::CExternal(_)   => String::new(),
             _ => String::new()
         }
     }
     fn to_string(&self) -> String{
         match self {
-            External::RawExternal(_) => "RawExternal".to_string(),
-            External::CExternal(_) => "CExternal".to_string()
+            ExternalType::RawExternal(_) => "RawExternal".to_string(),
+            ExternalType::CExternal(_) => "CExternal".to_string()
         }
     }
 }
@@ -930,43 +941,47 @@ struct Function {
 
 
 #[derive(Debug, Clone)]
-enum ConstValue {
+enum ConstValueType {
     INT(i32),
     LONG(i64),
     STR(String),
 }
-impl ConstValue {
-    fn mul(&self, Other: &ConstValue) -> Result<ConstValue,String> {
+struct ConstValue {
+    typ: ConstValueType,
+    loc: ProgramLocation
+}
+impl ConstValueType {
+    fn mul(&self, Other: &ConstValueType) -> Result<ConstValueType,String> {
         match self {
-            ConstValue::INT(val) => {
+            ConstValueType::INT(val) => {
                 match Other {
-                    ConstValue::INT(nval) => {
-                        return Ok(ConstValue::INT(val*nval));
+                    ConstValueType::INT(nval) => {
+                        return Ok(ConstValueType::INT(val*nval));
                     }
-                    ConstValue::LONG(nval) => {
-                        return Ok(ConstValue::LONG((*val as i64)*nval));
+                    ConstValueType::LONG(nval) => {
+                        return Ok(ConstValueType::LONG((*val as i64)*nval));
                     }
-                    ConstValue::STR(_nval) => {
+                    ConstValueType::STR(_nval) => {
                         return Err("Error: Unexpected - operation on int and string".to_string());
-                        //return Ok(ConstValue::STR(val.to_string()+nval));
+                        //return Ok(ConstValueType::STR(val.to_string()+nval));
                     },
                 }
             }
-            ConstValue::LONG(val) => {
+            ConstValueType::LONG(val) => {
                 match Other {
-                    ConstValue::INT(nval) => {
-                        return Ok(ConstValue::LONG(val*(*nval as i64)));
+                    ConstValueType::INT(nval) => {
+                        return Ok(ConstValueType::LONG(val*(*nval as i64)));
                     }
-                    ConstValue::LONG(nval) => {
-                        return Ok(ConstValue::LONG(val*nval));
+                    ConstValueType::LONG(nval) => {
+                        return Ok(ConstValueType::LONG(val*nval));
                     }
-                    ConstValue::STR(_nval) => {
+                    ConstValueType::STR(_nval) => {
                         return Err("Error: Unexpected * operation on long and string".to_string());
-                        //return Ok(ConstValue::STR(val.to_string()+nval));
+                        //return Ok(ConstValueType::STR(val.to_string()+nval));
                     },
                 }
             }
-            ConstValue::STR(_) => {
+            ConstValueType::STR(_) => {
                 match Other {
                     // TODO:
                     // Implement:
@@ -978,37 +993,37 @@ impl ConstValue {
             },
         }
     }
-    fn sub(&self, Other: &ConstValue) -> Result<ConstValue,String> {
+    fn sub(&self, Other: &ConstValueType) -> Result<ConstValueType,String> {
         match self {
-            ConstValue::INT(val) => {
+            ConstValueType::INT(val) => {
                 match Other {
-                    ConstValue::INT(nval) => {
-                        return Ok(ConstValue::INT(val-nval));
+                    ConstValueType::INT(nval) => {
+                        return Ok(ConstValueType::INT(val-nval));
                     }
-                    ConstValue::LONG(nval) => {
-                        return Ok(ConstValue::LONG((*val as i64)-nval));
+                    ConstValueType::LONG(nval) => {
+                        return Ok(ConstValueType::LONG((*val as i64)-nval));
                     }
-                    ConstValue::STR(_nval) => {
+                    ConstValueType::STR(_nval) => {
                         return Err("Error: Unexpected - operation on int and string".to_string());
-                        //return Ok(ConstValue::STR(val.to_string()+nval));
+                        //return Ok(ConstValueType::STR(val.to_string()+nval));
                     },
                 }
             }
-            ConstValue::LONG(val) => {
+            ConstValueType::LONG(val) => {
                 match Other {
-                    ConstValue::INT(nval) => {
-                        return Ok(ConstValue::LONG(val-(*nval as i64)));
+                    ConstValueType::INT(nval) => {
+                        return Ok(ConstValueType::LONG(val-(*nval as i64)));
                     }
-                    ConstValue::LONG(nval) => {
-                        return Ok(ConstValue::LONG(val-nval));
+                    ConstValueType::LONG(nval) => {
+                        return Ok(ConstValueType::LONG(val-nval));
                     }
-                    ConstValue::STR(_nval) => {
+                    ConstValueType::STR(_nval) => {
                         return Err("Error: Unexpected - operation on long and string".to_string());
-                        //return Ok(ConstValue::STR(val.to_string()+nval));
+                        //return Ok(ConstValueType::STR(val.to_string()+nval));
                     },
                 }
             }
-            ConstValue::STR(_) => {
+            ConstValueType::STR(_) => {
                 match Other {
                     _ => {
                         return Err("Error: Cannot do - operation on a string".to_string());
@@ -1017,45 +1032,45 @@ impl ConstValue {
             },
         }
     }
-    fn add(&self, Other: &ConstValue) -> Result<ConstValue,String> {
+    fn add(&self, Other: &ConstValueType) -> Result<ConstValueType,String> {
         match self {
-            ConstValue::INT(val) => {
+            ConstValueType::INT(val) => {
                 match Other {
-                    ConstValue::INT(nval) => {
-                        return Ok(ConstValue::INT(val+nval));
+                    ConstValueType::INT(nval) => {
+                        return Ok(ConstValueType::INT(val+nval));
                     }
-                    ConstValue::LONG(nval) => {
-                        return Ok(ConstValue::LONG((*val as i64)+nval));
+                    ConstValueType::LONG(nval) => {
+                        return Ok(ConstValueType::LONG((*val as i64)+nval));
                     }
-                    ConstValue::STR(nval) => {
-                        return Ok(ConstValue::STR(val.to_string()+nval));
+                    ConstValueType::STR(nval) => {
+                        return Ok(ConstValueType::STR(val.to_string()+nval));
                     },
                 }
             }
-            ConstValue::LONG(val) => {
+            ConstValueType::LONG(val) => {
                 match Other {
-                    ConstValue::INT(nval) => {
-                        return Ok(ConstValue::LONG(val+(*nval as i64)));
+                    ConstValueType::INT(nval) => {
+                        return Ok(ConstValueType::LONG(val+(*nval as i64)));
                     }
-                    ConstValue::LONG(nval) => {
-                        return Ok(ConstValue::LONG(val+nval));
+                    ConstValueType::LONG(nval) => {
+                        return Ok(ConstValueType::LONG(val+nval));
                     }
-                    ConstValue::STR(nval) => {
-                        return Ok(ConstValue::STR(val.to_string()+nval));
+                    ConstValueType::STR(nval) => {
+                        return Ok(ConstValueType::STR(val.to_string()+nval));
                     },
                 }
             }
-            ConstValue::STR(val) => {
+            ConstValueType::STR(val) => {
                 match Other {
-                    ConstValue::INT(nval) => {
-                        return Ok(ConstValue::STR(val.clone()+&nval.to_string()));
+                    ConstValueType::INT(nval) => {
+                        return Ok(ConstValueType::STR(val.clone()+&nval.to_string()));
                     }
-                    ConstValue::LONG(nval) => {
-                        return Ok(ConstValue::STR(val.clone()+&nval.to_string()));
+                    ConstValueType::LONG(nval) => {
+                        return Ok(ConstValueType::STR(val.clone()+&nval.to_string()));
                     }
-                    ConstValue::STR(nval) => {
+                    ConstValueType::STR(nval) => {
                         let out = val.clone()+nval;
-                        return Ok(ConstValue::STR(out));
+                        return Ok(ConstValueType::STR(out));
                     },
                 }
             },
@@ -1063,11 +1078,16 @@ impl ConstValue {
     }
 }
 
-#[derive(Debug)]
-enum RawConstValue {
+#[derive(Debug, Clone)]
+enum RawConstValueType{
     INT(i32),
     LONG(i64),
     STR(Uuid),
+}
+#[derive(Debug, Clone)]
+struct RawConstValue {
+    typ: RawConstValueType,
+    loc: ProgramLocation,
 }
 #[derive(Debug)]
 struct BuildProgram {
@@ -1151,7 +1171,8 @@ struct FunctionContract {
 }
 fn eval_const_def(lexer: &mut Lexer, build: &mut BuildProgram) -> ConstValue {
     
-    let mut varStack: Vec<ConstValue> = vec![];
+    let mut varStack: Vec<ConstValueType> = vec![];
+    let orgLoc = lexer.currentLocation.clone();
     while let Some(token) = lexer.next() {
         match token.typ {
             TokenType::IntrinsicType(typ) => {
@@ -1182,15 +1203,15 @@ fn eval_const_def(lexer: &mut Lexer, build: &mut BuildProgram) -> ConstValue {
             TokenType::WordType(word) => {
                 let def = par_expect!(token.location, build.constdefs.get(&word), "Could not find constant definition {}. You can only have constants inside other constant definitions!",word);
                 //varStack.push(def.clone());
-                match def {
-                    RawConstValue::INT(val)  => {
-                        varStack.push(ConstValue::INT(val.clone()));
+                match def.typ {
+                    RawConstValueType::INT(val)  => {
+                        varStack.push(ConstValueType::INT(val.clone()));
                     }
-                    RawConstValue::LONG(val) => {
-                        varStack.push(ConstValue::LONG(val.clone()));
+                    RawConstValueType::LONG(val) => {
+                        varStack.push(ConstValueType::LONG(val.clone()));
                     }
-                    RawConstValue::STR(UUID)       => {
-                        varStack.push(ConstValue::STR(build.stringdefs.get(UUID).unwrap().Data.clone()));
+                    RawConstValueType::STR(ref UUID)       => {
+                        varStack.push(ConstValueType::STR(build.stringdefs.get(UUID).unwrap().Data.clone()));
                     }
                 }
             }
@@ -1199,13 +1220,13 @@ fn eval_const_def(lexer: &mut Lexer, build: &mut BuildProgram) -> ConstValue {
                 // while build.stringdefs.insert(UUID,ProgramString {Data: word.clone(), Typ: ProgramStringType::STR}).is_some() {
                 //     UUID = Uuid::new_v4();
                 // }
-                varStack.push(ConstValue::STR(word))
+                varStack.push(ConstValueType::STR(word))
             }
             TokenType::Number32(num) => {
-                varStack.push(ConstValue::INT(num));
+                varStack.push(ConstValueType::INT(num));
             }
             TokenType::Number64(num) => {
-                varStack.push(ConstValue::LONG(num));
+                varStack.push(ConstValueType::LONG(num));
             }
             _ => {
                 par_error!(token,"Unexpected token type in const declaration {}",token.typ.to_string(false));
@@ -1214,7 +1235,7 @@ fn eval_const_def(lexer: &mut Lexer, build: &mut BuildProgram) -> ConstValue {
     }
     //lpar_error!(lexer.currentLocation,"Error:")
     lpar_assert!(lexer.currentLocation,varStack.len() == 1,"Error: Lazy constant stack handling! You need to correctly handle your constants");
-    varStack.pop().unwrap()
+    ConstValue {typ: varStack.pop().unwrap(), loc: orgLoc}
 }
 fn parse_function_contract(lexer: &mut Lexer) -> FunctionContract {
     let mut out = FunctionContract {Inputs: vec![], Outputs: vec![]};
@@ -1278,18 +1299,18 @@ fn parse_tokens_to_build(lexer: &mut Lexer, program: &mut CmdProgram) -> BuildPr
                 par_assert!(token,currentFunction.is_some(), "Undefined Word Call outside of entry point! '{}'",word);
                 let mut isvalid = false;
                 for external in build.externals.iter() {
-                    match external {
-                        External::RawExternal(ext) => {
+                    match external.typ {
+                        ExternalType::RawExternal(ref ext) => {
                             if word == ext {
                                 isvalid = true;
                                 build.functions.get_mut(currentFunction.as_mut().unwrap()).unwrap().body.push((token.location.clone(),Instruction::CALLRAW(ext.clone())));
                                 break;
                             }
                         }
-                        External::CExternal(ext) => {
+                        ExternalType::CExternal(ref ext) => {
                             if word == ext {
                                 isvalid = true;
-                                build.functions.get_mut(currentFunction.as_mut().unwrap()).unwrap().body.push((token.location.clone(),Instruction::CALLRAW(external.prefix().clone()+&ext.clone()+&external.suffix())));
+                                build.functions.get_mut(currentFunction.as_mut().unwrap()).unwrap().body.push((token.location.clone(),Instruction::CALLRAW(external.typ.prefix().clone()+&ext.clone()+&external.typ.suffix())));
                                 break;
                             }
                         }
@@ -1478,16 +1499,16 @@ fn parse_tokens_to_build(lexer: &mut Lexer, program: &mut CmdProgram) -> BuildPr
                     if isvalid {
                         let func = build.functions.get_mut(currentFunction.as_mut().unwrap()).unwrap();
                         let cons = build.constdefs.get(word).unwrap();
-                        match cons {
-                            RawConstValue::INT(val) => {
+                        match cons.typ {
+                            RawConstValueType::INT(ref val) => {
                                 func.body.push((token.location.clone(),Instruction::MOV(OfP::REGISTER(Register::RAX), OfP::RAW(*val as i64))));
                                 func.body.push((token.location.clone(),Instruction::PUSH(OfP::REGISTER(Register::RAX))));
                             }
-                            RawConstValue::LONG(val) => {
+                            RawConstValueType::LONG(ref val) => {
                                 func.body.push((token.location.clone(),Instruction::MOV(OfP::REGISTER(Register::RAX), OfP::RAW(*val as i64))));
                                 func.body.push((token.location.clone(),Instruction::PUSH(OfP::REGISTER(Register::RAX))));
                             }
-                            RawConstValue::STR(val) => {
+                            RawConstValueType::STR(ref val) => {
                                 func.body.push((token.location.clone(),Instruction::PUSH(OfP::STR(val.clone(), ProgramStringType::STR))));
                             }
                         }
@@ -1502,7 +1523,7 @@ fn parse_tokens_to_build(lexer: &mut Lexer, program: &mut CmdProgram) -> BuildPr
                         let externType = externType.expect("Error: Unexpected abtrupt end of tokens in extern");
                         match externType.typ {
                             TokenType::WordType(Word) => {
-                                build.externals.push(External::RawExternal(Word));
+                                build.externals.push(External { typ: ExternalType::RawExternal(Word), loc: externType.location.clone()});
                             }
                             TokenType::IntrinsicType(_) => assert!(false,"Unexpected behaviour! expected type Word or String but found Intrinsic"),
                             TokenType::StringType(Type) => {
@@ -1512,7 +1533,7 @@ fn parse_tokens_to_build(lexer: &mut Lexer, program: &mut CmdProgram) -> BuildPr
                                         let externWord = externWord.expect("Error: C type extern defined but stream of tokens abruptly ended!");
                                         match externWord.typ {
                                             TokenType::WordType(Word) => {
-                                                build.externals.push(External::CExternal(Word))
+                                                build.externals.push(External { typ: ExternalType::CExternal(Word), loc: externWord.location.clone()})
                                             }
                                             TokenType::StringType(Word) => {
                                                 par_error!(token, "Error: Expected type Word but found String \"{}\"",Word)
@@ -1713,10 +1734,10 @@ fn parse_tokens_to_build(lexer: &mut Lexer, program: &mut CmdProgram) -> BuildPr
                                     }
                                     if isContaining {
                                         for (_, cn_cn) in build2.constdefs.iter_mut() {
-                                            match cn_cn {
+                                            match cn_cn.typ {
                                                 _ => {}
                                                 _ => {}
-                                                RawConstValue::STR(val) => {
+                                                RawConstValueType::STR(ref mut val) => {
                                                     if &orgstrdefId == val {
                                                         *val = strdefId
                                                     }
@@ -1753,9 +1774,9 @@ fn parse_tokens_to_build(lexer: &mut Lexer, program: &mut CmdProgram) -> BuildPr
                                     }
                                 }
                                 for (cn_name,cn_val) in build2.constdefs{
-                                    match build.constdefs.insert(cn_name.clone(),cn_val) {
+                                    match build.constdefs.insert(cn_name.clone(),cn_val.clone()) {
                                         Some(_Other) => {
-                                            par_error!(lexer.currentLocation,"Error: mulitply defined symbols {}",cn_name);
+                                            par_error!(cn_val.loc,"Error: mulitply defined symbols {}",cn_name);
                                         },
                                         None => {},
                                     }
@@ -1808,19 +1829,20 @@ fn parse_tokens_to_build(lexer: &mut Lexer, program: &mut CmdProgram) -> BuildPr
                         }
                         
                         let val = eval_const_def(lexer,&mut build);
-                        build.constdefs.insert(name, match val {
-                            ConstValue::INT(val) => {
-                                RawConstValue::INT(val)
+                        build.constdefs.insert(name, match val.typ {
+                            ConstValueType::INT(rval) => {
+                               RawConstValue {typ: RawConstValueType::INT(rval), loc: val.loc}
                             }
-                            ConstValue::LONG(val) => {
-                                RawConstValue::LONG(val)
+                            ConstValueType::LONG(rval) => {
+                                RawConstValue {typ: RawConstValueType::LONG(rval), loc: val.loc}
                             }
-                            ConstValue::STR(val) => {
+                            ConstValueType::STR(rval) => {
                                 let mut UUID = Uuid::new_v4();
-                                while build.stringdefs.insert(UUID,ProgramString {Data: val.clone(), Typ: ProgramStringType::STR}).is_some() {
+                                while build.stringdefs.insert(UUID,ProgramString {Data: rval.clone(), Typ: ProgramStringType::STR}).is_some() {
                                     UUID = Uuid::new_v4();
                                 }
-                                RawConstValue::STR(UUID)
+                                RawConstValue {typ: RawConstValueType::STR(UUID), loc: val.loc}
+                                
                             }
                         });
                         
@@ -2009,18 +2031,19 @@ fn to_nasm_x86_64(build: &mut BuildProgram, program: &CmdProgram) -> io::Result<
             }
         }
         else {
-            println!("[NOTE] Unused string:   <{}> \"{}\" - This is probably due to a constant definition that was never used",UUID, stridef.Data.escape_default());
-            for (cd_name, cd) in build.constdefs.iter() {
-                match cd {
-                    RawConstValue::STR(id) => {
-                        if id == UUID {
-                            println!("       ^ Found matching constant definition: \"{}\"",cd_name);
+            if program.print_unused_warns {
+                println!("[NOTE] Unused string:   <{}> \"{}\" - This is probably due to a constant definition that was never used",UUID, stridef.Data.escape_default());
+                for (cd_name, cd) in build.constdefs.iter() {
+                    match cd.typ {
+                        RawConstValueType::STR(ref id) => {
+                            if id == UUID {
+                                println!("       ^ Found matching constant definition: \"{}\" at {}",cd_name,cd.loc.loc_display());
+                            }
                         }
+                        _ => {}
                     }
-                    _ => {}
                 }
             }
-            
         }
     }
     if optimization.should_use_callstack {
@@ -2039,14 +2062,15 @@ fn to_nasm_x86_64(build: &mut BuildProgram, program: &CmdProgram) -> io::Result<
     }
     //writeln!(&mut f,"global _main")?;
     for exter in build.externals.iter() {
-        match exter {
+        match exter.typ {
             
-            External::CExternal(Word) | External::RawExternal(Word) => {
-                if program.in_mode == OptimizationMode::DEBUG || optimization.usedExterns.contains(&format!("{}{}{}",exter.prefix(),Word,exter.suffix())) {
-                    writeln!(&mut f,"  extern {}{}{}",exter.prefix(),Word,exter.suffix())?;
+            ExternalType::CExternal(ref Word) | ExternalType::RawExternal(ref Word) => {
+                if program.in_mode == OptimizationMode::DEBUG || optimization.usedExterns.contains(&format!("{}{}{}",exter.typ.prefix(),Word,exter.typ.suffix())) {
+                    writeln!(&mut f,"  extern {}{}{}",exter.typ.prefix(),Word,exter.typ.suffix())?;
                 }
-                else {
-                    println!("[NOTE] Unused external: \"{}\"",Word)
+                else if program.print_unused_warns {
+                    
+                    println!("[NOTE] {}: Unused external: \"{}\"",exter.loc.loc_display(),Word)
                 }
             },
         }
@@ -2559,6 +2583,7 @@ fn usage(program: &String) {
     println!("         -noRaxWarn       -> removes the RAX usage warning for nasm");
     println!("         -release         -> builds the program in release mode");
     println!("         -ntc             -> (NoTypeChecking) Disable type checking");
+    println!("         -nuw             -> No unused warn");
     println!("--------------------------------------------");
 }
 fn main() {
@@ -2596,6 +2621,9 @@ fn main() {
                 }
                 "-ntc" => {
                     program.use_type_checking = false
+                }
+                "-nuw" => {
+                    program.print_unused_warns = false
                 }
                 flag => {
                     eprintln!("Error: undefined flag: {flag}\nUsage: ");
