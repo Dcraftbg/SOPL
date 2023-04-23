@@ -2535,7 +2535,7 @@ fn usage(program: &String) {
     println!("     Output Language: ");
     println!("         - nasm_x86_64");
     println!("     flags: ");
-    println!("         -o (output path) -> outputs to that file (example: hello.asm in nasm_x86_64 mode). If not output path is specified it defaults to the modes default (for nasm_x86_64 thats a.asm)");
+    println!("         -o (output path) -> outputs to that file (example: hello.asm in nasm_x86_64 mode). If the output path is not specified it defaults to the modes default (for nasm_x86_64 thats a.asm)");
     println!("         -r               -> builds the program for you if the option is available for that language mode (for example in nasm_x86_64 it calls nasm with gcc to link it to an executeable)");
     println!("         -noRaxWarn       -> removes the RAX usage warning for nasm");
     println!("         -release         -> builds the program in release mode");

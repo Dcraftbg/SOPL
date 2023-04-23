@@ -15,6 +15,7 @@ Made for easy navigation around the README.md
 - [Build platforms](#build)
 - [Requirements](#Requirements)
 - [Startup](#startup)
+- [Flags and versions](#flags-and-versions)
 - [How-to-use](#how-to-use)
   - [Hello-World](#hello-world)
   - [Externals](#extern)
@@ -74,6 +75,28 @@ interrupt 128, 1, 1, "Hello World!" // Print Hello World! on linux
 ## Startup
 ```cmd
 cargo run (PLATFORM) (File path) -o (Output path)
+```
+## Flags and Versions
+
+Whenever something gets added you will see that in 99% of the time [version.txt](version.txt) gets updated. Thats because it contains the necessary information about any new versions that come out.
+Whilst the README is updated oftenly, for the most modern features you might have to check out the [version.txt](version.txt) since it contains any information on the latest patches and updates. 
+It also gives you a timeline of the most recent changes (newest -> oldest).
+
+Flags are really important and if not updated here, you can always check out what flag support there is by just running the compiler without anything (This will display information such as the usage, the currently supported builds and any flags you might want to use).
+
+As of **0.0.5A** flags consist of:
+```
+--------------------------------------------
+(output language) (input path) [flags]
+     Output Language: 
+         - nasm_x86_64
+     flags: 
+         -o (output path) -> outputs to that file (example: hello.asm in nasm_x86_64 mode). If the output path is not specified it defaults to the modes default (for nasm_x86_64 thats a.asm)
+         -r               -> builds the program for you if the option is available for that language mode (for example in nasm_x86_64 it calls nasm with gcc to link it to an executeable)
+         -noRaxWarn       -> removes the RAX usage warning for nasm
+         -release         -> builds the program in release mode
+         -ntc             -> (NoTypeChecking) Disable type checking
+--------------------------------------------
 ```
 ## How to use?
 *Note that documentation may not cover all of the latest features tho you might expect updates on them shortly after implementation*
