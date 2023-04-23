@@ -1,5 +1,6 @@
 (Latest patch notes in github history)
 V:
+ 0.0.5A   -> Added basic type checking (without any branching!), The -ntc (No Type Checking) flag, Updated the macros to be more flexible with loc_display(), Changed "".to_string() to String::new() in most places, added Unused externals for release to be folded and for constant strings that were never used (for constants)
  0.0.4A   -> Added interrupts
  0.0.3.1A -> Added usage 
  0.0.3A   -> Added optimization for unused strings as well as debug information for assembly

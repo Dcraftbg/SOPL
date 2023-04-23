@@ -11,14 +11,14 @@ use uuid::Uuid;
 macro_rules! par_error {
     ($token:expr, $($arg:tt)*) => ({
         let message = format!($($arg)*);
-        eprintln!("(P) [ERROR] {}:{}:{}: {}", $token.location.clone().file, $token.location.clone().linenumber, $token.location.clone().character, message);
+        eprintln!("(P) [ERROR] {}: {}", $token.loc_display(), message);
         exit(1);
     });
 }
 macro_rules! lpar_error {
     ($location:expr, $($arg:tt)*) => ({
         let message = format!($($arg)*);
-        eprintln!("(P) [ERROR] {}:{}:{}: {}", $location.clone().file, $location.clone().linenumber, $location.clone().character, message);
+        eprintln!("(P) [ERROR] {}: {}", $location.loc_display(), message);
         exit(1);
     });
 }
@@ -27,7 +27,7 @@ macro_rules! par_assert {
     ($token:expr, $condition:expr, $($arg:tt)*) => ({
         if !$condition {
             let message = format!($($arg)*);
-            eprintln!("(P) [ERROR] {}:{}:{}: {}", $token.location.clone().file, $token.location.clone().linenumber, $token.location.clone().character, message);
+            eprintln!("(P) [ERROR] {}: {}", $token.loc_display(), message);
             exit(1);
         }
     });
@@ -36,7 +36,7 @@ macro_rules! lpar_assert {
     ($location:expr, $condition:expr, $($arg:tt)*) => ({
         if !$condition {
             let message = format!($($arg)*);
-            eprintln!("(P) [ERROR] {}:{}:{}: {}", $location.clone().file, $location.clone().linenumber, $location.clone().character, message);
+            eprintln!("(P) [ERROR] {}: {}", $location.loc_display(), message);
             exit(1);
         }
     });
@@ -45,7 +45,7 @@ macro_rules! par_expect {
     ($location:expr, $expector:expr, $($arg:tt)*) => ({
 
         let message = format!($($arg)*);
-        let message = format!("(P) [ERROR] {}:{}:{}: {}", $location.file, $location.linenumber, $location.character, message);
+        let message = format!("(P) [ERROR] {}: {}", $location.loc_display(), message);
         $expector.expect(&message)
         //eprintln!("(P) [ERROR] {}:{}:{}: {}", $token.location.file, $token.location.linenumber, $token.location.character, message);
         //exit(1);
@@ -55,7 +55,7 @@ macro_rules! com_expect {
     ($location:expr, $expector:expr, $($arg:tt)*) => ({
 
         let message = format!($($arg)*);
-        let message = format!("(C) [ERROR] {}:{}:{}: {}", $location.file, $location.linenumber, $location.character, message);
+        let message = format!("(C) [ERROR] {}: {}", $location.loc_display(), message);
         $expector.expect(&message)
         //eprintln!("(P) [ERROR] {}:{}:{}: {}", $token.location.file, $token.location.linenumber, $token.location.character, message);
         //exit(1);
@@ -64,40 +64,40 @@ macro_rules! com_expect {
 macro_rules! par_info {
     ($token:expr, $($arg:tt)*) => ({
         let message = format!($($arg)*);
-        println!("(P) [INFO] {}:{}:{}: {}", $token.location.file, $token.location.linenumber, $token.location.character, message);
+        println!("(P) [INFO] {}: {}", $token.loc_display(), message);
     });
 }
 macro_rules! par_warn {
     ($token:expr, $($arg:tt)*) => ({
         let message = format!($($arg)*);
-        println!("(P) [WARN] {}:{}:{}: {}", $token.location.file, $token.location.linenumber, $token.location.character, message);
+        println!("(P) [WARN] {}: {}", $token.loc_display(), message);
     });
 }
 
 macro_rules! com_error {
     ($location:expr, $($arg:tt)*) => ({
         let message = format!($($arg)*);
-        eprintln!("(C) [ERROR] {}:{}:{}: {}", $location.file, $location.linenumber, $location.character, message);
+        eprintln!("(C) [ERROR] {}: {}", $location.loc_display(), message);
         exit(1);
     });
 }
 macro_rules! com_info {
     ($location:expr, $($arg:tt)*) => ({
         let message = format!($($arg)*);
-        println!("(C) [INFO] {}:{}:{}: {}", $location.file, $location.linenumber, $location.character, message);
+        println!("(C) [INFO] {}: {}", $location.loc_display(), message);
     });
 }
 macro_rules! com_warn {
     ($location:expr, $($arg:tt)*) => ({
         let message = format!($($arg)*);
-        println!("(C) [WARN] {}:{}:{}: {}", $location.file, $location.linenumber, $location.character, message);
+        println!("(C) [WARN] {}: {}", $location.loc_display(), message);
     });
 }
 macro_rules! com_assert {
     ($location:expr, $condition:expr, $($arg:tt)*) => ({
         if !$condition {
             let message = format!($($arg)*);
-            eprintln!("(C) [ERROR] {}:{}:{}: {}", $location.file, $location.linenumber, $location.character, message);
+            eprintln!("(C) [ERROR] {}: {}", $location.loc_display(), message);
             exit(1);
         }
     });
@@ -149,12 +149,13 @@ struct CmdProgram {
     typ: String,
     should_build: bool,
     warn_rax_usage: bool,
+    use_type_checking: bool,
     in_mode: OptimizationMode,
     call_stack_size: usize
 }
 impl CmdProgram {
     fn new() -> Self {
-        Self { path: "".to_string(), opath: "".to_string(), should_build: false, typ: "".to_string(), warn_rax_usage: true, call_stack_size: 64000, in_mode: OptimizationMode::DEBUG }
+        Self { path: String::new(), opath: String::new(), should_build: false, typ: String::new(), warn_rax_usage: true, call_stack_size: 64000, in_mode: OptimizationMode::DEBUG, use_type_checking: true }
     }
 }
 #[repr(u32)]
@@ -276,7 +277,7 @@ impl IntrinsicType {
 // };
 //mut Intrinsics: HashMap<&str,IntrinsicType> = HashMap::new();
 // TODO: implement booleans
-#[derive(Debug,PartialEq)]
+#[derive(Debug,PartialEq,Clone)]
 enum TokenType {
     WordType      (String),
     IntrinsicType (IntrinsicType),
@@ -324,37 +325,19 @@ struct ProgramLocation {
     character:  i32,
 }
 impl ProgramLocation {
-    fn com_error(&self, msg: &str) {
-        eprintln!("(C) [ERROR] {}:{}:{}: {}",self.file,self.linenumber,self.character,msg);
-        exit(1);
-    }
-    fn par_error(&self, msg: &str) {
-        eprintln!("(P) [ERROR] {}:{}:{}: {}",self.file,self.linenumber,self.character,msg);
-        exit(1);
-    }
-    fn par_info(&self, msg: &str) {
-        println!("(P) [INFO] {}:{}:{}: {}",self.file,self.linenumber,self.character,msg);
-    }
-    fn com_info(&self, msg: &str) {
-        println!("(C) [INFO] {}:{}:{}: {}",self.file,self.linenumber,self.character,msg);
-    }
-    fn assert_com(&self, condition:bool, msg: &str) {
-        if !condition {
-            eprintln!("(C) [ERROR] {}:{}:{}: {}",self.file,self.linenumber,self.character,msg);
-            exit(1);
-        }
-    }
-    fn assert_par(&self, condition:bool, msg: &str) {
-        if !condition {
-            eprintln!("(P) [ERROR] {}:{}:{}: {}",self.file,self.linenumber,self.character,msg);
-            exit(1);
-        }
+    fn loc_display(&self) -> String{
+        format!("{}:{}:{}: ",self.file,self.linenumber,self.character)
     }
 }
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 struct Token {
     typ: TokenType,
     location: ProgramLocation
+}
+impl Token {
+    fn loc_display(&self) -> String {
+        self.location.loc_display()
+    }
 }
 struct Lexer<'a> {
     source: String,
@@ -391,7 +374,7 @@ impl<'a> Lexer<'a> {
         Self { 
             source: source.clone(), 
             cursor: 0, 
-            currentLocation: ProgramLocation { file: String::from(""), linenumber: 1, character: 0 },
+            currentLocation: ProgramLocation { file: String::new(), linenumber: 1, character: 0 },
             Intrinsics,
             Definitions,
         }
@@ -586,16 +569,16 @@ enum External {
 impl External {
     fn prefix(&self) -> String {
         match self {
-            External::RawExternal(_) => "".to_string(),
+            External::RawExternal(_) => String::new(),
             External::CExternal(_) => "_".to_string(),
-            _ => "".to_string()
+            _ => String::new()
         }
     }
     fn suffix(&self) -> String {
         match self {
-            External::RawExternal(_) => "".to_string(),
-            External::CExternal(_) => "".to_string(),
-            _ => "".to_string()
+            External::RawExternal(_) => String::new(),
+            External::CExternal(_)   => String::new(),
+            _ => String::new()
         }
     }
     fn to_string(&self) -> String{
@@ -1128,7 +1111,7 @@ impl VarType {
                 if isplural {"strings".to_string()} else {"string".to_string()}
             }
             VarType::PTR => {
-                if isplural {"chars".to_string()} else {"char".to_string()}
+                if isplural {"pointers".to_string()} else {"pointer".to_string()}
             }
             VarType::CUSTOM(_) => {
                 todo!("Implement custom")
@@ -1191,8 +1174,8 @@ fn eval_const_def(lexer: &mut Lexer, build: &mut BuildProgram) -> ConstValue {
                     IntrinsicType::DOTCOMA => {
                         break;
                     }
-                    Other => {
-                        par_error!(token, "Unexpected Intrinsic: {}\nConstant definitions can only work with ADD,SUB,MUL intrinsics ",Other.to_string(false));
+                    _ => {
+                        par_error!(token, "Unexpected Intrinsic: {}\nConstant definitions can only work with ADD,SUB,MUL intrinsics ",typ.to_string(false));
                     }
                 }
             }
@@ -1276,8 +1259,8 @@ fn parse_function_contract(lexer: &mut Lexer) -> FunctionContract {
                 expectNextSY = true;    
                 if is_input {out.Inputs.push(Def.clone())} else {out.Outputs.push(Def.clone())};   
             }
-            Other => {
-                par_error!(token, "Unexpected Token Type in Function Contract. Expected Definition but found: {}",Other.to_string(false))
+            _ => {
+                par_error!(token, "Unexpected Token Type in Function Contract. Expected Definition but found: {}",token.typ.to_string(false))
             }
         }
     }
@@ -1289,7 +1272,7 @@ fn parse_tokens_to_build(lexer: &mut Lexer, program: &mut CmdProgram) -> BuildPr
     let mut currentFunction: Option<String> = None;
     while let Some(token) = lexer.next(){
         match token.typ {
-            TokenType::WordType(word) => {
+            TokenType::WordType(ref word) => {
                 //HashMap<String, ExternalType>
                 // TODO: Introduce some sort of hashmap for this
                 par_assert!(token,currentFunction.is_some(), "Undefined Word Call outside of entry point! '{}'",word);
@@ -1297,14 +1280,14 @@ fn parse_tokens_to_build(lexer: &mut Lexer, program: &mut CmdProgram) -> BuildPr
                 for external in build.externals.iter() {
                     match external {
                         External::RawExternal(ext) => {
-                            if &word == ext {
+                            if word == ext {
                                 isvalid = true;
                                 build.functions.get_mut(currentFunction.as_mut().unwrap()).unwrap().body.push((token.location.clone(),Instruction::CALLRAW(ext.clone())));
                                 break;
                             }
                         }
                         External::CExternal(ext) => {
-                            if &word == ext {
+                            if word == ext {
                                 isvalid = true;
                                 build.functions.get_mut(currentFunction.as_mut().unwrap()).unwrap().body.push((token.location.clone(),Instruction::CALLRAW(external.prefix().clone()+&ext.clone()+&external.suffix())));
                                 break;
@@ -1342,7 +1325,7 @@ fn parse_tokens_to_build(lexer: &mut Lexer, program: &mut CmdProgram) -> BuildPr
                                                 build.functions.get_mut(currentFunction.as_mut().unwrap()).unwrap().body.push((token.location,Instruction::MOV(OfP::REGISTER(reg), OfP::RAW(data))))
                                             }
                                         }
-                                        other => par_error!(token,"Unexpected Type for Mov Intrinsic. Expected Number32/Number64 but found {}",other.to_string(false))//token.location.par_error(&format!("Unexpected Type for Mov Intrinsic. Expected Number32/Number64 but found {}",other.to_string(false)))
+                                        _ => par_error!(token,"Unexpected Type for Mov Intrinsic. Expected Number32/Number64 but found {}",token.typ.to_string(false))//token.location.par_error(&format!("Unexpected Type for Mov Intrinsic. Expected Number32/Number64 but found {}",other.to_string(false)))
                                     }
                                 }
                                 Other => {
@@ -1377,7 +1360,7 @@ fn parse_tokens_to_build(lexer: &mut Lexer, program: &mut CmdProgram) -> BuildPr
                                             IntrinsicType::SET => {
                                                 build.functions.get_mut(currentFunction.as_mut().unwrap()).unwrap().body.push((token.location.clone(),Instruction::MOV(OfP::REGISTER(reg), OfP::REGISTER(reg2))))
                                             }
-                                            other => token.location.par_error(&format!("Unexpected Intrinsic! Expected Register Intrinsic but found {}",other.to_string(false)))//panic!("Unexpected Intrinsic! Expected Register Intrinsic but found {}",other.to_string(false))
+                                            other => par_error!(token,"Unexpected Intrinsic! Expected Register Intrinsic but found {}",other.to_string(false))
                                         }
                                     }
                                     other => {
@@ -1396,7 +1379,7 @@ fn parse_tokens_to_build(lexer: &mut Lexer, program: &mut CmdProgram) -> BuildPr
                 }
                 if !isvalid {
                     let func = build.functions.get_mut(currentFunction.as_mut().unwrap()).unwrap();
-                    isvalid = func.locals.contains_key(&word);
+                    isvalid = func.locals.contains_key(word);
                     if isvalid {
                         let regOp = par_expect!(lexer.currentLocation,lexer.next(),"Unexpected variable operation or another variable!");
                         match regOp.typ {
@@ -1411,13 +1394,13 @@ fn parse_tokens_to_build(lexer: &mut Lexer, program: &mut CmdProgram) -> BuildPr
                                     IntrinsicType::SET => {
                                         let operand = par_expect!(lexer.currentLocation,lexer.next(),"Expected another variable, a constant integer or a (string: not yet implemented)!");
                                         match operand.typ {
-                                            TokenType::WordType(other) => {
+                                            TokenType::WordType(ref other) => {
                                                 //par_assert!(operand,func.locals.contains_key(&other),"Could not find variable {}",other);
-                                                if func.locals.contains_key(&other) {
+                                                if func.locals.contains_key(other) {
                                                     func.body.push((operand.location,Instruction::MOV(OfP::LOCALVAR(word.clone()), OfP::LOCALVAR(other.clone()))))
                                                 }
                                                 else if let Some(reg) = Register::from_string(&other) {
-                                                    par_assert!(operand,reg.size() == func.locals.get(&word).unwrap().typ.get_size(), "Register assigned to differently sized variable, Variable size: {}, Register size: {}",reg.size(),func.locals.get(&word).unwrap().typ.get_size());
+                                                    par_assert!(operand,reg.size() == func.locals.get(word).unwrap().typ.get_size(), "Register assigned to differently sized variable, Variable size: {}, Register size: {}",reg.size(),func.locals.get(word).unwrap().typ.get_size());
                                                     func.body.push((operand.location,Instruction::MOV(OfP::LOCALVAR(word.clone()), OfP::REGISTER(reg))))
                                                 }
                                                 else {
@@ -1431,8 +1414,8 @@ fn parse_tokens_to_build(lexer: &mut Lexer, program: &mut CmdProgram) -> BuildPr
                                             TokenType::Number64(val) => {
                                                 func.body.push((operand.location,Instruction::MOV(OfP::LOCALVAR(word.clone()), OfP::RAW(val))))
                                             },
-                                            other => {
-                                                par_error!(operand,"Unexpected operand for = intrinsic! Expected either a constant integer, another variable or a (string: not yet implemented) but found {}",other.to_string(false))
+                                            _ => {
+                                                par_error!(operand,"Unexpected operand for = intrinsic! Expected either a constant integer, another variable or a (string: not yet implemented) but found {}",operand.typ.to_string(false))
                                             }
                                         }
                                     },
@@ -1464,7 +1447,7 @@ fn parse_tokens_to_build(lexer: &mut Lexer, program: &mut CmdProgram) -> BuildPr
                                                 IntrinsicType::DIV => {
                                                     build.functions.get_mut(currentFunction.as_mut().unwrap()).unwrap().body.push((token.location.clone(),Instruction::DIV(OfP::LOCALVAR(word.clone()), OfP::LOCALVAR(Word.clone()))))
                                                 }
-                                                other => token.location.par_error(&format!("Unexpected Intrinsic! Expected Register Intrinsic but found {}",other.to_string(false)))//panic!("Unexpected Intrinsic! Expected Register Intrinsic but found {}",other.to_string(false))
+                                                other => par_error!(token, "Unexpected Intrinsic! Expected Register Intrinsic but found {}",other.to_string(false))
                                             }
                                         }
                                         other => {
@@ -1483,7 +1466,7 @@ fn parse_tokens_to_build(lexer: &mut Lexer, program: &mut CmdProgram) -> BuildPr
                     }
                 }
                 if !isvalid {
-                    isvalid = build.functions.contains_key(&word);
+                    isvalid = build.functions.contains_key(word);
                     if isvalid {
                         let func = build.functions.get_mut(currentFunction.as_mut().unwrap()).unwrap();
                         func.body.push((token.location.clone(),Instruction::CALL(word.clone())));
@@ -1491,10 +1474,10 @@ fn parse_tokens_to_build(lexer: &mut Lexer, program: &mut CmdProgram) -> BuildPr
                     }
                 }
                 if !isvalid  {
-                    isvalid = build.constdefs.contains_key(&word);
+                    isvalid = build.constdefs.contains_key(word);
                     if isvalid {
                         let func = build.functions.get_mut(currentFunction.as_mut().unwrap()).unwrap();
-                        let cons = build.constdefs.get(&word).unwrap();
+                        let cons = build.constdefs.get(word).unwrap();
                         match cons {
                             RawConstValue::INT(val) => {
                                 func.body.push((token.location.clone(),Instruction::MOV(OfP::REGISTER(Register::RAX), OfP::RAW(*val as i64))));
@@ -1762,8 +1745,8 @@ fn parse_tokens_to_build(lexer: &mut Lexer, program: &mut CmdProgram) -> BuildPr
                                 //build.stringdefs.extend(build2.stringdefs);
                                 
                             }
-                            Other => {
-                                par_error!(includeName, "Expected token type String but found {}",Other.to_string(false));
+                            _ => {
+                                par_error!(includeName, "Expected token type String but found {}",includeName.typ.to_string(false));
                             }
                         }
                     },
@@ -1781,9 +1764,9 @@ fn parse_tokens_to_build(lexer: &mut Lexer, program: &mut CmdProgram) -> BuildPr
                         let first = lexer.next();
                         let first = par_expect!(lexer.currentLocation,first,"abruptly ran out of tokens in constant name definition");//first.expect("Error: abruptly ran out of tokens in function contract");
                         let name: String = match first.typ {
-                            TokenType::WordType(word) => {
-                                par_assert!(first, !build.constdefs.contains_key(&word) && !build.functions.contains_key(&word), "Error: multiple constant symbol definitions");
-                                word
+                            TokenType::WordType(ref word) => {
+                                par_assert!(first, !build.constdefs.contains_key(word) && !build.functions.contains_key(word), "Error: multiple constant symbol definitions");
+                                word.to_string()
                             }
                             _ => {
                                 par_error!(first, "Unexpected token type! Expected word but found {}",first.typ.to_string(false));
@@ -1831,8 +1814,8 @@ fn parse_tokens_to_build(lexer: &mut Lexer, program: &mut CmdProgram) -> BuildPr
                         let nametok = par_expect!(lexer.currentLocation, lexer.next(), "Error: abruptly ran out of tokens for Let");
 
                         match nametok.typ {
-                            TokenType::WordType(name) => {
-                                par_assert!(nametok, !build.constdefs.contains_key(&name) && !build.functions.contains_key(&name), "Error: multiply defined symbols");
+                            TokenType::WordType(ref name) => {
+                                par_assert!(nametok, !build.constdefs.contains_key(name) && !build.functions.contains_key(name), "Error: multiply defined symbols");
                                 let currentFunc = build.functions.get_mut(&currentFunction.clone().expect("Todo: Global variables are not yet implemented :|")).unwrap();
                                 let typ = par_expect!(lexer.currentLocation, lexer.next(), "Error: abruptly ran out of tokens for let type");                                
                                 par_assert!(typ,typ.typ==TokenType::IntrinsicType(IntrinsicType::DOUBLE_COLIN), "Error: You probably forgot to put a : after the name!");
@@ -1840,7 +1823,7 @@ fn parse_tokens_to_build(lexer: &mut Lexer, program: &mut CmdProgram) -> BuildPr
                                 match typ.typ {
                                     TokenType::Definition(def) => {
                                         currentFunc.locals.insert(name.clone(), LocalVariable { typ: def, operand: 0 });
-                                        currentFunc.body.push((lexer.currentLocation.clone(),Instruction::DEFVAR(name)))
+                                        currentFunc.body.push((lexer.currentLocation.clone(),Instruction::DEFVAR(name.clone())))
                                     }
                                     _ => {
                                         par_error!(typ, "Error: unexpected token type in let definition. Expected VarType but found {}",typ.typ.to_string(false))
@@ -1870,7 +1853,7 @@ fn parse_tokens_to_build(lexer: &mut Lexer, program: &mut CmdProgram) -> BuildPr
                     },
                 }
             }
-            TokenType::StringType(Word) => {
+            TokenType::StringType(ref Word) => {
                 par_assert!(token,currentFunction.is_some(), "Unexpected string definition outside of entry point!");
 
                 //build.stringdefs.push(ProgramString {Word.clone());
@@ -1880,7 +1863,7 @@ fn parse_tokens_to_build(lexer: &mut Lexer, program: &mut CmdProgram) -> BuildPr
                 }
                 build.functions.get_mut(currentFunction.as_mut().unwrap()).unwrap().body.push((token.location,Instruction::PUSH(OfP::STR(UUID,ProgramStringType::STR))));
             }
-            TokenType::CStringType(Word) => {
+            TokenType::CStringType(ref Word) => {
                 par_assert!(token,currentFunction.is_some(), "Unexpected string definition outside of entry point!");
 
                 //build.stringdefs.push(ProgramString {Word.clone());
@@ -1922,10 +1905,11 @@ fn parse_tokens_to_build(lexer: &mut Lexer, program: &mut CmdProgram) -> BuildPr
 struct optim_ops {
     should_use_callstack: bool,
     usedStrings: HashSet<Uuid>,
+    usedExterns: HashSet<String>
 }
 impl optim_ops {
     fn new() -> Self{
-        Self { should_use_callstack: false, usedStrings: HashSet::new() }
+        Self { should_use_callstack: false, usedStrings: HashSet::new(), usedExterns: HashSet::new() }
     }
 }
 fn optimization_ops(build: &mut BuildProgram, program: &CmdProgram) -> optim_ops{
@@ -1953,6 +1937,9 @@ fn optimization_ops(build: &mut BuildProgram, program: &CmdProgram) -> optim_ops
                                 out.should_use_callstack = true;
                                 break
                             }
+                            Instruction::CALLRAW(r) => {
+                                out.usedExterns.insert(r.clone());
+                            }
                             _ => {}
                         }
                     }
@@ -1963,7 +1950,7 @@ fn optimization_ops(build: &mut BuildProgram, program: &CmdProgram) -> optim_ops
             }
             out
         },
-        OptimizationMode::DEBUG => optim_ops { should_use_callstack: true, usedStrings: HashSet::new()},
+        OptimizationMode::DEBUG => optim_ops { should_use_callstack: true, usedStrings: HashSet::new(), usedExterns: HashSet::new()},
     }
 }
 fn to_nasm_x86_64(build: &mut BuildProgram, program: &CmdProgram) -> io::Result<()>{
@@ -1992,7 +1979,7 @@ fn to_nasm_x86_64(build: &mut BuildProgram, program: &CmdProgram) -> io::Result<
                 write!(&mut f, "{}, ",(chr as u8))?;
             }
             if program.in_mode == OptimizationMode::DEBUG {
-                writeln!(&mut f, "0    ; {}",stridef.Data)?;
+                writeln!(&mut f, "0    ; {}",stridef.Data.escape_default())?;
             }
             else {
                 writeln!(&mut f, "0")?;
@@ -2001,6 +1988,20 @@ fn to_nasm_x86_64(build: &mut BuildProgram, program: &CmdProgram) -> io::Result<
                 ProgramStringType::STR  => writeln!(&mut f, "   _LEN_STRING_{}_: dq {}",UUID.to_string().replace("-", ""),stridef.Data.len())?,
                 ProgramStringType::CSTR => {},
             }
+        }
+        else {
+            println!("[NOTE] Unused string:   <{}> \"{}\" - This is probably due to a constant definition that was never used",UUID, stridef.Data.escape_default());
+            for (cd_name, cd) in build.constdefs.iter() {
+                match cd {
+                    RawConstValue::STR(id) => {
+                        if id == UUID {
+                            println!("       ^ Found matching constant definition: \"{}\"",cd_name);
+                        }
+                    }
+                    _ => {}
+                }
+            }
+            
         }
     }
     if optimization.should_use_callstack {
@@ -2020,11 +2021,14 @@ fn to_nasm_x86_64(build: &mut BuildProgram, program: &CmdProgram) -> io::Result<
     //writeln!(&mut f,"global _main")?;
     for exter in build.externals.iter() {
         match exter {
-            External::RawExternal(Word) => {
-                writeln!(&mut f,"  extern {}{}{}",exter.prefix(),Word,exter.suffix())?;
-            }
-            External::CExternal(Word) => {
-                writeln!(&mut f,"  extern {}{}{}",exter.prefix(),Word,exter.suffix())?;
+            
+            External::CExternal(Word) | External::RawExternal(Word) => {
+                if program.in_mode == OptimizationMode::DEBUG || optimization.usedExterns.contains(&format!("{}{}{}",exter.prefix(),Word,exter.suffix())) {
+                    writeln!(&mut f,"  extern {}{}{}",exter.prefix(),Word,exter.suffix())?;
+                }
+                else {
+                    println!("[NOTE] Unused external: \"{}\"",Word)
+                }
             },
         }
     }
@@ -2381,6 +2385,150 @@ fn to_nasm_x86_64(build: &mut BuildProgram, program: &CmdProgram) -> io::Result<
 
 
 
+
+fn type_check_build(build: &mut BuildProgram) {
+    // TODO: implement macros for assert, expect etc. for type checking that also print the type stack trace.
+    let mut typeStack: Vec<VarType> = Vec::new();
+    for (name, func) in build.functions.iter() {
+        typeStack.extend(func.contract.Inputs.clone());
+        for (loc, instruction) in func.body.iter() {
+            match instruction {
+                Instruction::PUSH(ofp) => {
+                    match ofp {
+                        OfP::REGISTER(reg) => {
+                            match reg.size() {
+                                8 => {
+                                    // TODO: Implement checking for if register is rsp or rbp, (push a pointer onto the typeStack)
+                                    typeStack.push(VarType::LONG)
+                                }
+                                4 => {
+                                    typeStack.push(VarType::INT)
+                                }
+                                2 => {
+                                    typeStack.push(VarType::SHORT)
+                                }
+                                1 => {
+                                    typeStack.push(VarType::CHAR)
+                                }
+                                _ => {
+                                    todo!("Unreachable");
+                                }
+                            }
+                        }
+                        OfP::LOCALVAR(_) => todo!("Type checking for local variables on the stack"),
+                        OfP::RAW(_) => {
+                            typeStack.push(VarType::LONG);
+                        },
+                        OfP::STR(_, typ) => {
+                            match typ {
+                                ProgramStringType::STR => {
+                                    typeStack.push(VarType::PTR);
+                                    typeStack.push(VarType::LONG)
+                                },
+                                ProgramStringType::CSTR => {
+                                    typeStack.push(VarType::PTR)
+                                },
+                            }
+                        },
+                    }
+                },
+                Instruction::DEFVAR(_)           => {},
+                Instruction::MOV(_, _)           => {},
+                Instruction::POP(ofp)              => {
+                    match ofp {
+                        OfP::REGISTER(reg) => {
+                            match reg.size() {
+                                8 => {
+                                    // TODO: Implement checking for if register is rsp or rbp, (push a pointer onto the typeStack)
+                                    let v = com_expect!(loc, typeStack.pop(), "Error: Stack underflow occured for types! Make sure everything is ok and you aren't manipulating the stack with anything");
+                                    com_assert!(loc, v.get_size() == 8, "Error: Can not pop type into register as its a different size!");
+                                }
+                                4 => {
+                                    let v = com_expect!(loc, typeStack.pop(), "Error: Stack underflow occured for types! Make sure everything is ok and you aren't manipulating the stack with anything");
+                                    com_assert!(loc, v.get_size() == 4, "Error: Can not pop type into register as its a different size!");
+                                }
+                                2 => {
+                                    let v = com_expect!(loc, typeStack.pop(), "Error: Stack underflow occured for types! Make sure everything is ok and you aren't manipulating the stack with anything");
+                                    com_assert!(loc, v.get_size() == 2, "Error: Can not pop type into register as its a different size!");
+                                }
+                                1 => {
+                                    let v = com_expect!(loc, typeStack.pop(), "Error: Stack underflow occured for types! Make sure everything is ok and you aren't manipulating the stack with anything");
+                                    com_assert!(loc, v.get_size() == 1, "Error: Can not pop type into register as its a different size!");
+                                }
+                                _ => {
+                                    todo!("Unreachable");
+                                }
+                            }
+                        },
+                        _ => {
+                            todo!("Unsupported");
+                        }
+                    }
+                },
+                Instruction::CALLRAW(_)          => {},
+                Instruction::ADD(_, _)           => {},
+                Instruction::SUB(_, _)           => {},
+                Instruction::MUL(_, _)           => {},
+                Instruction::DIV(_, _)           => {},
+                Instruction::EQUALS(_, _)        => {},
+                Instruction::CALL(func)             => {
+                    let function =  com_expect!(loc, build.functions.get(func), "Error: unknown function call to {}, Function may not exist!",func);
+                    com_assert!(loc, function.contract.Inputs.len() <= typeStack.len(), "Error: Not enough arguments for {} in {}",func,name);
+                    com_assert!(loc, typeStack.ends_with(&function.contract.Inputs), "Error: Arguments for function don't match, function expected:\n {}, But found\n: {}",
+                    {
+                        
+                        for typ in function.contract.Inputs.iter() {
+                            eprintln!("   {}",typ.to_string(false).to_uppercase())
+                        }
+                        ""
+                    },
+                    {
+                        for typ in typeStack.iter() {
+                            eprintln!("   {}",typ.to_string(false).to_uppercase())
+                        }
+                        ""
+                    });
+                    typeStack.extend(function.contract.Outputs.clone());
+                },
+                Instruction::FNBEGIN()           => {},
+                Instruction::RET()               => {},
+                Instruction::SCOPEBEGIN          => {
+                    //eprintln!("WARNING: Not implemented yet")
+                    /*
+                    func main(int, ptr : int) {
+                        // str
+                        if pop "Hello World!"c streq RAX {
+                            pop 
+                        }
+                        else {
+                            
+                        }
+                    }
+                    */
+                },
+                Instruction::SCOPEEND            => {},//eprintln!("WARNING: Not implemented yet"),
+                Instruction::CONDITIONAL_JUMP(_) => todo!("Branching"),
+                Instruction::JUMP(_)             => todo!("JUMP to index"),
+                Instruction::INTERRUPT(_)        => {},
+            }
+        }
+        if typeStack != func.contract.Outputs {
+            eprintln!("Error: types left on the stack in function body: {}\n   Type stack trace: ",name);
+            for typ in typeStack.iter() {
+                eprintln!("   {}",typ.to_string(false).to_uppercase());
+            }
+
+            eprintln!("Expected: ");
+            for typ in func.contract.Outputs.iter() {
+                eprintln!("   {}",typ.to_string(false).to_uppercase());
+            }
+            exit(1)
+        }
+    }
+}
+
+
+
 fn usage(program: &String) {
     println!("--------------------------------------------");
     println!("{} (output language) (input path) [flags]",program);
@@ -2391,6 +2539,7 @@ fn usage(program: &String) {
     println!("         -r               -> builds the program for you if the option is available for that language mode (for example in nasm_x86_64 it calls nasm with gcc to link it to an executeable)");
     println!("         -noRaxWarn       -> removes the RAX usage warning for nasm");
     println!("         -release         -> builds the program in release mode");
+    println!("         -ntc             -> (NoTypeChecking) Disable type checking");
     println!("--------------------------------------------");
 }
 fn main() {
@@ -2411,7 +2560,6 @@ fn main() {
             match flag.as_str() {
                 // TODO: introduce a flag for call stack size
                 "-o" => {
-                    
                     program.opath = args.get(i+1).unwrap_or_else(|| {
                         eprintln!("Error: Could not get output path for -o flag!");
                         exit(1);
@@ -2425,8 +2573,10 @@ fn main() {
                     program.in_mode = OptimizationMode::RELEASE
                 }
                 "-noRaxWarn" => {
-
                     program.warn_rax_usage = false
+                }
+                "-ntc" => {
+                    program.use_type_checking = false
                 }
                 flag => {
                     eprintln!("Error: undefined flag: {flag}\nUsage: ");
@@ -2481,6 +2631,9 @@ fn main() {
     let mut lexer = Lexer::new(info, & Intrinsics, &Definitions);
     lexer.currentLocation.file = program.path.clone();
     let mut build = parse_tokens_to_build(&mut lexer, &mut program);
+    if program.use_type_checking {
+        type_check_build(&mut build);
+    }
     match program.typ.as_str() {
         "nasm_x86_64" => {
             to_nasm_x86_64(&mut build, &program).expect("Could not build to nasm_x86_64");
