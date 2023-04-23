@@ -1712,6 +1712,17 @@ fn parse_tokens_to_build(lexer: &mut Lexer, program: &mut CmdProgram) -> BuildPr
                                         //let nid = Uuid::ge
                                     }
                                     if isContaining {
+                                        for (_, cn_cn) in build2.constdefs.iter_mut() {
+                                            match cn_cn {
+                                                _ => {}
+                                                _ => {}
+                                                RawConstValue::STR(val) => {
+                                                    if &orgstrdefId == val {
+                                                        *val = strdefId
+                                                    }
+                                                },
+                                            }
+                                        }
                                         for (_floc, funcDef) in build2.functions.iter_mut() {
                                             for (_iloc,Inst) in funcDef.body.iter_mut() {
                                                 match Inst {
@@ -1737,6 +1748,14 @@ fn parse_tokens_to_build(lexer: &mut Lexer, program: &mut CmdProgram) -> BuildPr
                                     match build.functions.insert(fn_name.clone(), fn_fn) {
                                         Some(_Other) => {
                                             lpar_error!(_loc, "Error: mulitply defined symbols {}",fn_name);
+                                        },
+                                        None => {},
+                                    }
+                                }
+                                for (cn_name,cn_val) in build2.constdefs{
+                                    match build.constdefs.insert(cn_name.clone(),cn_val) {
+                                        Some(_Other) => {
+                                            par_error!(lexer.currentLocation,"Error: mulitply defined symbols {}",cn_name);
                                         },
                                         None => {},
                                     }
