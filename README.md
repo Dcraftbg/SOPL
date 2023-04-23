@@ -7,7 +7,7 @@ Stack-oriented Programming Language
 
 Sopl is a lightweight, easily extendable, stack-oriented language.
 It is currently in it's very early stages and is syntacically bound to change over time. I'll try to not change it semantically too much but be warned if you are using it to build projects yourself as things may break over versions.
-For more info on current versions checkout [versions.txt](version.txt)
+For more info on current versions checkout [version.md](version.md)
 
 **Manual:**
 Made for easy navigation around the README.md
@@ -78,8 +78,8 @@ cargo run (PLATFORM) (File path) -o (Output path)
 ```
 ## Flags and Versions
 
-Whenever something gets added you will see that in 99% of the time [version.txt](version.txt) gets updated. Thats because it contains the necessary information about any new versions that come out.
-Whilst the README is updated oftenly, for the most modern features you might have to check out the [version.txt](version.txt) since it contains any information on the latest patches and updates. 
+Whenever something gets added you will see that in 99% of the time [version.md](version.md) gets updated. Thats because it contains the necessary information about any new versions that come out.
+Whilst the README is updated oftenly, for the most modern features you might have to check out the [version.md](version.md) since it contains any information on the latest patches and updates. 
 It also gives you a timeline of the most recent changes (newest -> oldest).
 
 Flags are really important and if not updated here, you can always check out what flag support there is by just running the compiler without anything (This will display information such as the usage, the currently supported builds and any flags you might want to use).

@@ -1,5 +1,6 @@
 (Latest patch notes in github history)
 V:
+ 0.0.5.2A -> Changed version.txt to version.md for easier reading
  0.0.5.1A -> Fixed including to now include constant definitions. 
  0.0.5A   -> Added basic type checking (without any branching!), The -ntc (No Type Checking) flag, Updated the macros to be more flexible with loc_display(), Changed "".to_string() to String::new() in most places, added Unused externals for release to be folded and for constant strings that were never used (for constants)
  0.0.4A   -> Added interrupts
