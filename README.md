@@ -45,6 +45,8 @@ Made for easy navigation around the README.md
   - [ ] for statements
 - [x] locals
 - [ ] type checking
+  - [x] Function type checking
+  - [ ] Branching
 - [ ] structs
 - [ ] struct methods
 - [ ] interfaces
