@@ -1,13 +1,12 @@
 extern "C" printf
 extern "C" exit
-func main(int, ptr : int) { 
+func main() { 
     RBX = 5
     R8 = 5
     if RBX R8 == {
-        "Hello World!" pop printf pop
+        "Hello World!"c printf pop
     }
     else {
-        "Goodbye World!" pop printf pop
+        "Goodbye World!"c printf pop
     }
-    0l exit
 }

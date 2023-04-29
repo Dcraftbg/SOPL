@@ -1,8 +1,10 @@
 extern "C" fopen
 extern "C" fwrite
 extern "C" exit
-func main(int, ptr : int) {
-    "w" pop "hello.txt" pop fopen
-    RAX push 1l 12l "Hello World!" pop fwrite
-    0 exit
+func main() {
+    "w"c "hello.txt"c fopen 
+    RBX RAX =
+    EAX pop
+    EAX pop
+    RBX push 1l 12l "Hello World!"c fwrite EAX pop pop pop pop
 }

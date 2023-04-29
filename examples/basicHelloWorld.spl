@@ -1,0 +1,8 @@
+extern "C" printf
+func main() {
+    "Hello World!\n"c printf pop
+    "Hello World!\n"c printf pop
+    "Hello World!\n"c printf pop
+    "Hello World!\n"c printf pop
+
+}

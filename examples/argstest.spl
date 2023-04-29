@@ -1,0 +1,5 @@
+extern "C" printf
+func main(argv: ptr, argc: long) {
+    argc push "Amount of arguments: %ld"c printf EAX pop
+    pop
+}

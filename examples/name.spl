@@ -1,9 +1,8 @@
 extern "C" scanf
 extern "C" printf
-func main(int, ptr : int) {
-    "Whats your name? " pop printf
-    "                    " pop "%s" pop scanf
+func main() {
+    "Whats your name? "c printf EAX pop
+    "                    "c "%s"c scanf EAX pop
     printf
-    pop
-
+    EAX pop
 }
