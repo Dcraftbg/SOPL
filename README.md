@@ -105,7 +105,7 @@ As of **0.0.5.3A** flags consist of:
 ```sopl
 extern "C" printf
 
-func main(int, ptr : int) {
+func main() {
   "Hello World!\n"c printf pop
 }
 ```
@@ -122,7 +122,8 @@ might not be available for the current mode you are running in like if you try t
 
 Thats also a reason why externs are generally not recommended for direct use (although depending on your version it might be required to use them raw (currently its required)).
 ### functions
-
+> -> Pre 0.0.1A
+> -> 0.0.6A Changed to now have named parameters
 **Syntax**:
 ```
 func (name) ((contract)) {
@@ -131,7 +132,7 @@ func (name) ((contract)) {
 ```
 Functions, just like in other languages have a name and a body. In sopl however you have to provide a contract:
 
-A contract is a way to tell the type checker what to expect to have when it calls your function and in what state the top of the stack is going to be afterwards.
+A contract is a way to tell the type checker what to expect to have put onto the stack after it calls your function.
 The contract contains:
 (Input parameters separated by , : Output parameters separated by ,)
 
@@ -142,13 +143,19 @@ Inside of functions you can use the "ret" keyword to return although it is autom
 func sayHello() {
    "Hello World!\n"c printf pop
 }
-func counter(long : long) {
-    RBX pop
-    RCX = 1
-    RBX RCX -
-    RBX push
+func counter(long c: long) {
+  RBX pop
+  RCX = 1
+  RBX RCX -
+  RBX push
+  counter
+  RBX pop
+  pop
+  rs RBX push
 }
 ```
+
+As of 0.0.6A, there is a new keyword called 'rs' short for "Return stack"
 
 ### including
 > -> Pre 0.0.1A
@@ -167,7 +174,7 @@ func sayHello() {
 HelloWorld.spl:
 ```spl
 include "./Functions.spl"
-func main(int, ptr : int) {
+func main() {
   sayHello
 }
 ```
@@ -258,8 +265,8 @@ To define a string we use "" (escaping is supported). To define a cstring just a
 **Examples**
 
 ```sopl
-func main(int,ptr: int) {
-  "Hello World!" pop printf pop
+func main() {
+  "Hello World!"c printf pop
   "Foo Bar!"c printf pop
 }
 ```

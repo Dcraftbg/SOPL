@@ -1,9 +1,11 @@
 /target
 /syntax
 /.idea
+/.vscode
 /examples/bin/
 /examples/int/
 /examples/raw/
+/examples/debug/
 names.txt
 ideas.txt
 build.py
