@@ -86,19 +86,19 @@ It also gives you a timeline of the most recent changes (newest -> oldest).
 
 Flags are really important and if not updated here, you can always check out what flag support there is by just running the compiler without anything (This will display information such as the usage, the currently supported builds and any flags you might want to use).
 
-As of **0.0.5.3A** flags consist of:
+As of **0.0.6.2A** flags consist of:
 ```
 --------------------------------------------
 (output language) (input path) [flags]
      Output Language: 
          - nasm_x86_64
      flags: 
-         -o (output path) -> outputs to that file (example: hello.asm in nasm_x86_64 mode). If the output path is not specified it defaults to the modes default (for nasm_x86_64 thats a.asm)
-         -r               -> builds the program for you if the option is available for that language mode (for example in nasm_x86_64 it calls nasm with gcc to link it to an executeable)
-         -noRaxWarn       -> removes the RAX usage warning for nasm
-         -release         -> builds the program in release mode
-         -ntc             -> (NoTypeChecking) Disable type checking
-         -nuw             -> No unused warn. Disable warning abouts unused strings, constants externals etc. when running in release mode
+         -o (output path)                    -> outputs to that file (example: hello.asm in nasm_x86_64 mode). If the output path is not specified it defaults to the modes default (for nasm_x86_64 thats a.asm)
+         -r                                  -> builds the program for you if the option is available for that language mode (for example in nasm_x86_64 it calls nasm with gcc to link it to an executeable)
+         -noRaxWarn                          -> removes the RAX usage warning for nasm
+         -release                            -> builds the program in release mode
+         -ntc                                -> (NoTypeChecking) Disable type checking
+         -nou (all, funcs, externs, strings) -> Disable unused warns for parameter
 --------------------------------------------
 ```
 ## How to use?

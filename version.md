@@ -3,6 +3,7 @@
 Newest Version: [0.0.6.1A](#0061a)
 # Manual:
   - [0.0.6A](#006a)
+    - [0.0.6.2A](#0062a)
     - [0.0.6.1A](#0061a)
   - [0.0.5A](#005a)
     - [0.0.5.3A](#0053a)
@@ -14,6 +15,10 @@ Newest Version: [0.0.6.1A](#0061a)
   - [0.0.2A](#002a)
   - [0.0.1A](#001a)
 # Change Log
+ ## 0.0.6.2A
+   - Added optimization for unused functions
+   - Changed the flag -nuw to now be -nou with parameters for (all, funcs, externs, strings) to disable specific warnings from being shown
+   - Updated [README.md](README.md#flags-and-versions) flags
  ## 0.0.6.1A
    - Changed -r to now run the program as well as build it
  ## 0.0.6A

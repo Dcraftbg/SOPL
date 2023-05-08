@@ -146,14 +146,21 @@ struct CmdProgram {
     should_build: bool,
     warn_rax_usage: bool,
     use_type_checking: bool,
-    print_unused_warns: bool,
+    print_unused_warns  : bool,
+    // Sub sets
+    print_unused_funcs  : bool,
+    print_unused_externs: bool,
+    print_unused_strings: bool,
+    
+
+    remove_unused_functions: bool,
     in_mode: OptimizationMode,
     build_architecture: String,
-    call_stack_size: usize
+    call_stack_size: usize,
 }
 impl CmdProgram {
     fn new() -> Self {
-        Self { path: String::new(), opath: String::new(), should_build: false, typ: String::new(), warn_rax_usage: true, call_stack_size: 64000, in_mode: OptimizationMode::DEBUG, use_type_checking: true, print_unused_warns: true, build_architecture: String::new() }
+        Self { path: String::new(), opath: String::new(), should_build: false, typ: String::new(), warn_rax_usage: true, call_stack_size: 64000, in_mode: OptimizationMode::DEBUG, use_type_checking: true, print_unused_warns: true, build_architecture: String::new(), remove_unused_functions: false, print_unused_funcs: true, print_unused_externs: true, print_unused_strings: true }
     }
 }
 #[repr(u32)]
@@ -1999,12 +2006,13 @@ fn parse_tokens_to_build(lexer: &mut Lexer, program: &mut CmdProgram) -> BuildPr
 
 struct optim_ops {
     should_use_callstack: bool,
-    usedStrings: HashSet<Uuid>,
-    usedExterns: HashSet<String>
+    usedStrings: HashMap<Uuid, String>,
+    usedExterns: HashSet<String>,
+    usedFuncs: HashSet<String>,
 }
 impl optim_ops {
     fn new() -> Self{
-        Self { should_use_callstack: false, usedStrings: HashSet::new(), usedExterns: HashSet::new() }
+        Self { should_use_callstack: false, usedStrings: HashMap::new(), usedExterns: HashSet::new(), usedFuncs: HashSet::new() }
     }
 }
 fn optimization_ops(build: &mut BuildProgram, program: &CmdProgram) -> optim_ops{
@@ -2012,13 +2020,13 @@ fn optimization_ops(build: &mut BuildProgram, program: &CmdProgram) -> optim_ops
         OptimizationMode::RELEASE => {
             let mut out = optim_ops::new();
 
-            for (_, func) in build.functions.iter() {
+            for (fn_name, func) in build.functions.iter() {
                 for (_,op) in func.body.iter() {
                     match op {
                         Instruction::PUSH(d) => {
                             match d {
                                 OfP::STR(UUID,_) => {
-                                    out.usedStrings.insert(UUID.clone());
+                                    out.usedStrings.insert(UUID.clone(), fn_name.clone());
                                 }
                                 _ => {}
                             }
@@ -2029,13 +2037,16 @@ fn optimization_ops(build: &mut BuildProgram, program: &CmdProgram) -> optim_ops
                         Instruction::CALLRAW(r) => {
                             out.usedExterns.insert(r.clone());
                         }
+                        Instruction::CALL(r) => {
+                            out.usedFuncs.insert(r.clone());
+                        }
                         _ => {}
                     }
                 }
             }
             out
         },
-        OptimizationMode::DEBUG => optim_ops { should_use_callstack: true, usedStrings: HashSet::new(), usedExterns: HashSet::new()},
+        OptimizationMode::DEBUG => optim_ops { should_use_callstack: true, usedStrings: HashMap::new(), usedExterns: HashSet::new(), usedFuncs: HashSet::new() },
     }
 }
 
@@ -2048,7 +2059,7 @@ fn to_nasm_x86_64(build: &mut BuildProgram, program: &CmdProgram) -> io::Result<
     
     
     for (UUID,stridef) in build.stringdefs.iter(){                
-        if program.in_mode == OptimizationMode::DEBUG || optimization.usedStrings.contains(UUID) {
+        if program.in_mode == OptimizationMode::DEBUG || (optimization.usedStrings.contains_key(UUID) && optimization.usedFuncs.contains(optimization.usedStrings.get(UUID).unwrap()) || optimization.usedStrings.get(UUID).unwrap() == "main") {
             write!(&mut f, "   _STRING_{}_: db ",UUID.to_string().replace("-", ""))?;
             for chr in stridef.Data.chars() {
                 write!(&mut f, "{}, ",(chr as u8))?;
@@ -2064,9 +2075,8 @@ fn to_nasm_x86_64(build: &mut BuildProgram, program: &CmdProgram) -> io::Result<
                 ProgramStringType::CSTR => {},
             }
         }
-        else {
-            if program.print_unused_warns {
-                println!("[NOTE] Unused string:   <{}> \"{}\" - This is probably due to a constant definition that was never used",UUID, stridef.Data.escape_default());
+        else if program.print_unused_warns && program.print_unused_strings {
+                println!("[NOTE] Unused string:   <{}> \"{}\" - This is probably due to a constant definition that was never used or a function that may have used that strings, that got cut off from the final build",UUID, stridef.Data.escape_default());
                 for (cd_name, cd) in build.constdefs.iter() {
                     match cd.typ {
                         RawConstValueType::STR(ref id) => {
@@ -2077,7 +2087,6 @@ fn to_nasm_x86_64(build: &mut BuildProgram, program: &CmdProgram) -> io::Result<
                         _ => {}
                     }
                 }
-            }
         }
     }
     if optimization.should_use_callstack {
@@ -2091,7 +2100,12 @@ fn to_nasm_x86_64(build: &mut BuildProgram, program: &CmdProgram) -> io::Result<
             writeln!(&mut f,"global _{}",function_name)?;
         }
         else {
-            writeln!(&mut f,"global _F_{}",function_name)?;
+            if program.in_mode == OptimizationMode::DEBUG || !program.remove_unused_functions || optimization.usedFuncs.contains(function_name){
+                writeln!(&mut f,"global _F_{}",function_name)?;
+            }
+            else if program.print_unused_warns && program.print_unused_funcs {
+                println!("[NOTE] {}: Unused function: \"{}\"", build.functions.get(function_name).unwrap().location.loc_display(),function_name);
+            }
         }
     }
     for exter in build.externals.iter() {
@@ -2100,17 +2114,20 @@ fn to_nasm_x86_64(build: &mut BuildProgram, program: &CmdProgram) -> io::Result<
                 if program.in_mode == OptimizationMode::DEBUG || optimization.usedExterns.contains(&format!("{}{}{}",exter.typ.prefix(),Word,exter.typ.suffix())) {
                     writeln!(&mut f,"  extern {}{}{}",exter.typ.prefix(),Word,exter.typ.suffix())?;
                 }
-                else if program.print_unused_warns {
+                else if program.print_unused_warns && program.print_unused_externs {
                     println!("[NOTE] {}: Unused external: \"{}\"",exter.loc.loc_display(),Word);
-                }
+                } 
             },
         }
     }
     writeln!(&mut f, "section .text")?;
     // TODO: introduce something like mainMEM which won't be bound to the 640 000
     let mut callstack_size: i64 = 0;
-    
     for (function_name,function) in build.functions.iter() {
+        // true                                          true                               true                                               true                              
+        if program.in_mode != OptimizationMode::DEBUG && program.remove_unused_functions && !optimization.usedFuncs.contains(function_name) && function_name != "main" {
+            continue;
+        }
         let mut hasFoundRet = false;
         let mut stack_size: i64 = 0;
         
@@ -2688,12 +2705,12 @@ fn usage(program: &String) {
     println!("     Output Language: ");
     println!("         - nasm_x86_64");
     println!("     flags: ");
-    println!("         -o (output path) -> outputs to that file (example: hello.asm in nasm_x86_64 mode). If the output path is not specified it defaults to the modes default (for nasm_x86_64 thats a.asm)");
-    println!("         -r               -> builds the program for you if the option is available for that language mode (for example in nasm_x86_64 it calls nasm with gcc to link it to an executeable)");
-    println!("         -noRaxWarn       -> removes the RAX usage warning for nasm");
-    println!("         -release         -> builds the program in release mode");
-    println!("         -ntc             -> (NoTypeChecking) Disable type checking");
-    println!("         -nuw             -> No unused warn");
+    println!("         -o (output path)                    -> outputs to that file (example: hello.asm in nasm_x86_64 mode). If the output path is not specified it defaults to the modes default (for nasm_x86_64 thats a.asm)");
+    println!("         -r                                  -> builds the program for you if the option is available for that language mode (for example in nasm_x86_64 it calls nasm with gcc to link it to an executeable)");
+    println!("         -noRaxWarn                          -> removes the RAX usage warning for nasm");
+    println!("         -release                            -> builds the program in release mode");
+    println!("         -ntc                                -> (NoTypeChecking) Disable type checking");
+    println!("         -nou (all, funcs, externs, strings) -> Disable unused warns for parameter");
     println!("--------------------------------------------");
 }
 fn main() {
@@ -2732,8 +2749,29 @@ fn main() {
                 "-ntc" => {
                     program.use_type_checking = false
                 }
-                "-nuw" => {
-                    program.print_unused_warns = false
+                "-nou" => {
+                    let typ = args.get(i+1).expect("Error: Expected `all, funcs,externs,strings`");
+                    match typ.as_str() {
+                        "all" => {
+                            program.print_unused_warns = false
+                        }
+                        "funcs" => {
+                            program.print_unused_funcs = false
+                        }
+                        "externs" => {
+                            program.print_unused_externs = false
+                        }
+                        "strings" => {
+                            program.print_unused_strings = false
+                        }
+                        _ => {
+                            eprintln!("Unexpected parameter: {}, Expected: `all,funcs,externs,strings`",typ)
+                        }
+                    }
+                    i += 1;
+                }
+                "-ruf" => {
+                    program.remove_unused_functions = true;
                 }
                 flag => {
                     eprintln!("Error: undefined flag: {flag}\nUsage: ");
