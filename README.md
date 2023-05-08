@@ -86,7 +86,7 @@ It also gives you a timeline of the most recent changes (newest -> oldest).
 
 Flags are really important and if not updated here, you can always check out what flag support there is by just running the compiler without anything (This will display information such as the usage, the currently supported builds and any flags you might want to use).
 
-As of **0.0.6.2A** flags consist of:
+As of [0.8A](version.md#08a) flags consist of:
 ```
 --------------------------------------------
 (output language) (input path) [flags]
@@ -99,6 +99,7 @@ As of **0.0.6.2A** flags consist of:
          -release                            -> builds the program in release mode
          -ntc                                -> (NoTypeChecking) Disable type checking
          -nou (all, funcs, externs, strings) -> Disable unused warns for parameter
+         -callstack (size)                   -> Set callstack size. The name is very deceiving but callstack is now only used for locals as of 0.6A (checkout versions.md)
 --------------------------------------------
 ```
 ## How to use?
@@ -112,8 +113,8 @@ func main() {
 }
 ```
 ### extern
-  * Pre 0.0.1A
-  * Added in [0.0.7A](version.md#007a):
+  * Pre 0.1A
+  * Added in [0.7A](version.md#07a):
     - [stdio.spl](src/C/stdio.spl)
     - [stdlib.spl](src/C/stdlib.spl)
 
@@ -129,8 +130,8 @@ Thats also a reason why externs are generally not recommended for direct use (al
 
 Externs are really powerful if you want to link to libraries that aren't previously implement and are generally really good to use for building things that require platform specific things such as Windows applications etc.
 ### functions
-* Pre 0.0.1A
-* 0.0.6A Changed to now have named parameters
+* Pre 0.1A
+* 0.6A Changed to now have named parameters
 
 **Syntax**:
 ```
@@ -163,10 +164,10 @@ func counter(long c: long) {
 }
 ```
 
-As of 0.0.6A, there is a new keyword called 'rs' short for "Return stack"
+As of 0.6A, there is a new keyword called 'rs' short for "Return stack"
 
 ### including
-* Pre 0.0.1A
+* Pre 0.1A
 
 **Syntax**
 ```spl
@@ -187,7 +188,7 @@ func main() {
 }
 ```
 ### registers
-* Pre 0.0.1A
+* Pre 0.1A
 
 Current register support:
 - [x] RAX
@@ -258,9 +259,9 @@ As for returning values that are higher than 8 bytes, C pushes them on the stack
 
 
 ### strings
-> Strings  -> Pre 0.0.1A 
+> Strings  -> Pre 0.1A 
 
-> CStrings -> 0.0.2A
+> CStrings -> 0.2A
 
 In sopl there are 2 different types of strings. There are:
 ```
@@ -279,14 +280,14 @@ func main() {
 }
 ```
 
-**[NOTE] It is generally recommended to use cstrings whenever possible if the function doesn't use the length as a parameter. In < 0.0.1A strings had to be pushed and then the length of them popped which is no longer sufficient and may cause your code to be inefficient**
+**[NOTE] It is generally recommended to use cstrings whenever possible if the function doesn't use the length as a parameter. In < 0.1A strings had to be pushed and then the length of them popped which is no longer sufficient and may cause your code to be inefficient**
 
 
 ### control flow
 
-> If     -> Pre 0.0.1A
+> If     -> Pre 0.1A
 
-> Else   -> Pre 0.0.1A
+> Else   -> Pre 0.1A
 
 **Syntax:**
 ```sopl
@@ -307,7 +308,7 @@ else {
 
 
 ### constants
-* Pre 0.0.1A
+* Pre 0.1A
 
 **Syntax:**
 ```sopl
@@ -328,11 +329,11 @@ const HelloWorldNine = HelloWorld C + ; // Concatenates the integers and strings
 In a constants expression can only be things that can be evaluated at compile time, such as Strings, Integers, Longs and other constants. If you try to use something like a function it would tell you that it doesn't recognize it as a constant value. 
 
 ### locals
-* Pre 0.0.1A
-  * Add  -> Pre 0.0.1A
-  * Set  -> Pre 0.0.1A
-  * Push -> Pre 0.0.1A
-  * Pop  -> Pre 0.0.1A
+* Pre 0.1A
+  * Add  -> Pre 0.1A
+  * Set  -> Pre 0.1A
+  * Push -> Pre 0.1A
+  * Pop  -> Pre 0.1A
 
 **Syntax:**
 ```sopl
@@ -350,7 +351,7 @@ push
 ```
 
 ### interrupts
-* 0.0.4A
+* 0.4A
   
 Interrupts are essential for anything you build on platforms such as linux if you don't want to use libc. Whilst they aren't useful as much on windows machines WSL could be used to make linux syscalls into something which can run on windows.
 
