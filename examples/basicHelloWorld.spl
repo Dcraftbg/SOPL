@@ -1,8 +1,8 @@
 extern "C" printf
 func main() {
-    "Hello World!\n"c printf pop
-    "Hello World!\n"c printf pop
-    "Hello World!\n"c printf pop
-    "Hello World!\n"c printf pop
+    "Hello World!\n"c printf EAX pop
+    "Hello World!\n"c printf EAX pop
+    "Hello World!\n"c printf EAX pop
+    "Hello World!\n"c printf EAX pop
 
 }

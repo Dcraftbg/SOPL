@@ -5,7 +5,7 @@
 #![allow(unused_imports)]
 #![allow(unreachable_patterns)]
 
-use std::{env, process::{exit, Command}, path::{Path, PathBuf}, ffi::OsStr, str::FromStr, collections::{HashMap, HashSet}, hash::Hash, fs::{File, self}, io::{Read, Write, self}, fmt::format, os::windows::{process::CommandExt, self}, arch::x86_64::_mm_testz_pd, borrow::BorrowMut, clone};
+use std::{env, process::{exit, Command, Stdio}, path::{Path, PathBuf}, ffi::OsStr, str::FromStr, collections::{HashMap, HashSet}, hash::Hash, fs::{File, self}, io::{Read, Write, self}, fmt::format, os::windows::{process::CommandExt, self}, arch::x86_64::_mm_testz_pd, borrow::BorrowMut, clone};
 use uuid::Uuid;
 
 macro_rules! par_error {
@@ -2804,15 +2804,29 @@ fn main() {
                 println!("   * ld {}",Path::new(program.opath.as_str()).with_extension("").to_str().unwrap());
                 let _ld  = Command::new("ld".to_string()).arg(Path::new(program.opath.as_str()).with_extension("").to_str().unwrap()).output().expect("Could not build your program!");
                 if !nasm.status.success() {
+                    println!("--------------");
                     println!("Nasm: \n{:?}\n-----------",nasm);
+                    println!("--------------");
                 }
                 else if !gcc.status.success() {
-                    println!("Gcc:  \n{:?}\n-----------",gcc);
+                    println!("--------------");
+                    println!("Gcc:  \n{:?}",gcc);
+                    println!("--------------");
                 }
                 else {
-                    println!("   - Finished build successfully")
+                    println!("--------------");
+                    println!("   - Finished build successfully");
+                    println!("--------------");
+                    let exe_path = Path::new(program.opath.as_str()).with_extension("");
+                    println!("   * {}", exe_path.to_str().unwrap());
+                    println!("--------------");
+                    let mut prog = Command::new(exe_path.to_str().unwrap()).stdout(Stdio::inherit()).stdin(Stdio::inherit()).stderr(Stdio::inherit()).spawn().unwrap();
+                    let status = prog.wait().unwrap();
+                    println!("--------------");
+                    println!("Program exited with: {}",status.code().unwrap());
+                    println!("--------------");
+                    
                 }
-                println!("--------------");
             }
         }
         _ => {
