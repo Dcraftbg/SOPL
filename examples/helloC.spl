@@ -1,0 +1,4 @@
+include "../src/C/stdio.spl"
+func main() {
+    "Hello World!\n"c printf EAX pop
+}

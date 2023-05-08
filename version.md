@@ -2,6 +2,7 @@
 
 Newest Version: [0.0.6.1A](#0061a)
 # Manual:
+  - [0.0.7A](#007a)
   - [0.0.6A](#006a)
     - [0.0.6.2A](#0062a)
     - [0.0.6.1A](#0061a)
@@ -15,6 +16,14 @@ Newest Version: [0.0.6.1A](#0061a)
   - [0.0.2A](#002a)
   - [0.0.1A](#001a)
 # Change Log
+ ## 0.0.7A 
+   - Added C stdio.spl
+   - Added C stdlib.spl
+   - Added [helloC.spl](examples/helloC.spl) example
+   - Added [comments.spl](examples/comments.spl) example
+   - Fixed Comments
+   - Changed [README.md](README.md) version syntax
+
  ## 0.0.6.2A
    - Added optimization for unused functions
    - Changed the flag -nuw to now be -nou with parameters for (all, funcs, externs, strings) to disable specific warnings from being shown

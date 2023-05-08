@@ -370,6 +370,9 @@ impl<'a> Lexer<'a> {
     fn is_not_empty(&self) -> bool {
         self.cursor < self.source.len()
     }
+    fn is_not_empty_offset(&self, offset: usize) -> bool {
+        self.cursor+offset < self.source.len()
+    }
     fn new(source: String, Intrinsics: &'a HashMap<String, IntrinsicType>, Definitions: &'a HashMap<String,VarType>) -> Self {
         Self { 
             source: source.clone(), 
@@ -378,6 +381,37 @@ impl<'a> Lexer<'a> {
             Intrinsics,
             Definitions,
         }
+    }
+    fn drop_char(&mut self) {
+        if self.is_not_empty() {
+            if self.cchar() == '\n' {
+                self.currentLocation.linenumber += 1;
+                self.currentLocation.character = 0;
+            } else {
+                self.currentLocation.character += 1;
+            }
+            self.cursor += 1;
+        }
+    }
+    fn drop_line(&mut self) {
+        while self.is_not_empty() && self.source.chars().nth(self.cursor).unwrap() != '\n' {
+            self.cursor += 1;
+        }
+        self.cursor += 1;
+        self.currentLocation.character = 0;
+        self.currentLocation.linenumber += 1;
+    }
+    fn cchar(&self) -> char {
+        self.source.chars().nth(self.cursor).unwrap()
+    }
+    fn cchar_s(&self) -> Option<char> {
+        self.source.chars().nth(self.cursor)
+    }
+    fn cchar_offset(&self, offset: usize) -> Option<char> {
+        if self.is_not_empty_offset(offset) {
+            return Some(self.source.chars().nth(self.cursor+offset).unwrap())
+        }
+        None
     }
 }
 impl Iterator for Lexer<'_> {
@@ -444,19 +478,13 @@ impl Iterator for Lexer<'_> {
                     return Some(Token { typ: TokenType::CharType(outstr.clone()), location: self.currentLocation.clone() });
                 }
                 '/' => {
-                    self.cursor += 1;
-                    if let Some(nc) = self.source.chars().nth(self.cursor+1) {
+                    self.drop_char();
+                    if let Some(nc) = self.cchar_s() {
                         if nc == '/' {
-                            self.cursor += 1;
-                            while self.is_not_empty() && self.source.chars().nth(self.cursor).unwrap() != '\n' {
-                                self.currentLocation.character += 1;
-                                self.cursor += 1;
-                            }
-                            self.currentLocation.character = 0;
+                            self.drop_line();
                             return self.next();
                         }
                         else {
-                            self.cursor += 1;
                             return Some(Token { typ: TokenType::IntrinsicType(IntrinsicType::DIV), location: self.currentLocation.clone() });
                         }
                     }
@@ -473,7 +501,7 @@ impl Iterator for Lexer<'_> {
                         outstr.push(c);
                         self.cursor += 1;
                         self.currentLocation.character += 1;
-                        while self.is_not_empty() && (self.source.chars().nth(self.cursor).unwrap() != '(' && self.source.chars().nth(self.cursor).unwrap() != ')' && self.source.chars().nth(self.cursor).unwrap() != '[' && self.source.chars().nth(self.cursor).unwrap() != ']') && !self.source.chars().nth(self.cursor).unwrap().is_alphanumeric() && !self.source.chars().nth(self.cursor).unwrap().is_whitespace() {
+                        while self.is_not_empty() && (self.cchar() != '(' && self.cchar() != ')' && self.cchar() != '[' && self.cchar()  != ']' && self.cchar() != ';') && !self.cchar().is_alphanumeric() && !self.cchar().is_whitespace() {
                             outstr.push(self.source.chars().nth(self.cursor).unwrap());
                             self.cursor+=1;
                             self.currentLocation.character += 1;
@@ -485,13 +513,13 @@ impl Iterator for Lexer<'_> {
                             return Some(Token { typ: TokenType::WordType(outstr.clone()), location: self.currentLocation.clone() });
                         }
                     }
-                    while self.is_not_empty() && self.source.chars().nth(self.cursor).unwrap().is_alphanumeric(){
-                        let _c = self.source.chars().nth(self.cursor).unwrap();
-                        outstr.push(self.source.chars().nth(self.cursor).unwrap());
-                        self.cursor+=1;
-                        self.currentLocation.character += 1;
+                    let org = c;
+                    while self.is_not_empty() && self.cchar().is_alphanumeric() || self.cchar() == '_' || self.cchar() == '-'{
+                        let _c = self.cchar();
+                        outstr.push(self.cchar());
+                        self.drop_char();
                     }       
-                    if c.is_alphabetic(){
+                    if org.is_alphabetic() || org == '_'{
                         if let Some(o) = self.Intrinsics.get(&outstr){                        
                             return Some(Token { typ: TokenType::IntrinsicType((*o).clone()), location: self.currentLocation.clone() });
                         }

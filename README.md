@@ -112,7 +112,10 @@ func main() {
 }
 ```
 ### extern
-> -> Pre 0.0.1A
+  * Pre 0.0.1A
+  * Added in [0.0.7A](version.md#007a):
+    - [stdio.spl](src/C/stdio.spl)
+    - [stdlib.spl](src/C/stdlib.spl)
 
 **Syntax**:
 ```
@@ -122,10 +125,13 @@ Extern is a way to access outside features of the language or link to functions 
 It has to be noted here that using extern on its own can sometimes lead to unexpected behavior or program slowdowns as most externs don't get type checked automatically and
 might not be available for the current mode you are running in like if you try to link to standard C functions when you are in JAVA mode.
 
-Thats also a reason why externs are generally not recommended for direct use (although depending on your version it might be required to use them raw (currently its required)).
+Thats also a reason why externs are generally not recommended for direct use (although depending on your version it might be required to use them raw (currently its not required - use stdio.spl, stdlib.spl directly instead of listing externs every time :D. If you want to implement any C library you can do that and share the information online)).
+
+Externs are really powerful if you want to link to libraries that aren't previously implement and are generally really good to use for building things that require platform specific things such as Windows applications etc.
 ### functions
-> -> Pre 0.0.1A
-> -> 0.0.6A Changed to now have named parameters
+* Pre 0.0.1A
+* 0.0.6A Changed to now have named parameters
+
 **Syntax**:
 ```
 func (name) ((contract)) {
@@ -160,7 +166,7 @@ func counter(long c: long) {
 As of 0.0.6A, there is a new keyword called 'rs' short for "Return stack"
 
 ### including
-> -> Pre 0.0.1A
+* Pre 0.0.1A
 
 **Syntax**
 ```spl
@@ -181,7 +187,7 @@ func main() {
 }
 ```
 ### registers
-> -> Pre 0.0.1A
+* Pre 0.0.1A
 
 Current register support:
 - [x] RAX
@@ -301,7 +307,7 @@ else {
 
 
 ### constants
-> -> Pre 0.0.1A
+* Pre 0.0.1A
 
 **Syntax:**
 ```sopl
@@ -322,11 +328,11 @@ const HelloWorldNine = HelloWorld C + ; // Concatenates the integers and strings
 In a constants expression can only be things that can be evaluated at compile time, such as Strings, Integers, Longs and other constants. If you try to use something like a function it would tell you that it doesn't recognize it as a constant value. 
 
 ### locals
-> -> Pre 0.0.1A
-  Add  -> Pre 0.0.1A
-  Set  -> Pre 0.0.1A
-  Push -> Pre 0.0.1A
-  Pop  -> Pre 0.0.1A
+* Pre 0.0.1A
+  * Add  -> Pre 0.0.1A
+  * Set  -> Pre 0.0.1A
+  * Push -> Pre 0.0.1A
+  * Pop  -> Pre 0.0.1A
 
 **Syntax:**
 ```sopl
@@ -344,7 +350,7 @@ push
 ```
 
 ### interrupts
-> -> 0.0.4A
+* 0.0.4A
   
 Interrupts are essential for anything you build on platforms such as linux if you don't want to use libc. Whilst they aren't useful as much on windows machines WSL could be used to make linux syscalls into something which can run on windows.
 
