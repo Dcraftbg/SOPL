@@ -66,7 +66,7 @@ Ideas that are left for discussion and further expansion:
 - [ ] ARM assembly
 - [ ] C
 
-[NOTE] that whilst registers are really powerful and useful for building with x86 64, they might get 'discontinued' after Java integration. They will have support for nasm but in the future their usage will be warned and their features replaced by more modern ones. Deprecation isn't expected any time soon but when the majority of the boxes under 'plans' are ticked off you probably will expect deprecation of them. 
+[NOTE] that whilst registers are really powerful and useful for building with x86 64, they might get 'discontinued' after Java integration (theoretical Java integration). They will have support for nasm but in the future their usage will be warned and their features replaced by more modern ones. Deprecation isn't expected any time soon but when the majority of the boxes under 'plans' are ticked off you probably will expect deprecation of them. 
 For anyone wandering things like interrupts are probably going to be handled like so:
 ```sopl
 interrupt 128, 1, 1, "Hello World!" // Print Hello World! on linux
