@@ -1,22 +1,35 @@
 **(Latest patch versions in github history)**
 
-Newest Version: [0.8A](#08a)
+Newest Version: [0.9A](#09a)
 # Manual:
+  - [0.9A](#09a)
   - [0.8A](#08a)
   - [0.7A](#07a)
-  - [0.6A](#06a)
-    - [0.6.2A](#062a)
+  - [0.6.2A](#062a)
     - [0.6.1A](#061a)
-  - [0.5A](#05a)
-    - [0.5.3A](#053a)
+    - [0.6A](#06a)
+  - [0.5.3A](#053a)
     - [0.5.2A](#052a)
     - [0.5.1A](#051a)
+    - [0.5A](#05a)
   - [0.4A](#04a)
-  - [0.3A](#03a)
-    - [0.3.1A](#031a)
+  - [0.3.1A](#031a)
+    - [0.3A](#03a)
   - [0.2A](#02a)
   - [0.1A](#01a)
 # Change Log
+ ## 0.9A
+   - Optimized Lexer Word processing and re-wrote basically the entirety of the lexer that isn't about strings and chars (planned for next update)
+   - Huge optimization to Lexer cutting compile time in half as shown in [benchmark](rsc/benchmarks/1-0_9A.log)
+   - Using shared references (Rc's) for locations which makes it so there are a lot less clones for locations
+   - Preparation for optimization of everything in the near future:
+     - strings in Lexer
+     - chars in Lexer
+     - currentFunction
+
+   - Benchmarking is now officially a constant part of this project and information on performance is going to be shown there
+   - Changed versions.md manual to display newest of sub minor versions at the top instead of the old minor version
+   - Pin pointed causes of slow downs :D
  ## 0.8A
    - Changed all versions from sub minor to minor (0.0.1A -> 0.1A).
    - Changed all previous instances of sub-minor versions
@@ -27,7 +40,7 @@ Newest Version: [0.8A](#08a)
    - Started working on deprecating the currentFunction system to improve it and prepare for the near future changes (Inspired by another [project](https://github.com/Dimitar85898/STAP) of mine by the name STAP)
    - Started preparing for optimzation and finishing some TODOs
    - Added -callstack flag for specifying the amount of space needed for localvars.
-   - [Benchmarking](rsc/benchmarks/1-0_8A.log) to find out that defining a lot of constants leads to a lot of time taken for compiling (unresolved yet). 
+   - [Benchmarking](rsc/benchmarks/1-0_8A.log) to find out that defining a lot of constants leads to a lot of time taken for compiling (resolved in [0.9A](#09a), // The issue was actually with the lexer and not with the constants). 
      - At 350+ constants it takes roughly 10-8ms to evaluate which is a long time for such a simple thing.
    - Added project [resources](rsc)
     - Added [benchmarks](rsc/benchmarks)
@@ -39,7 +52,7 @@ Newest Version: [0.8A](#08a)
    - Added [comments.spl](examples/comments.spl) example
    - Fixed Comments
    - Changed [README.md](README.md) version syntax
-
+   - *Added optimization to remove any strings that were declared inside of functions that didn't end up in the final build
  ## 0.6.2A
    - Added optimization for unused functions
    - Changed the flag -nuw to now be -nou with parameters for (all, funcs, externs, strings) to disable specific warnings from being shown

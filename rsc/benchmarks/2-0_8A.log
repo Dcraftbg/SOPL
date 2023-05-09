@@ -1,0 +1,11 @@
+Time to constant definition declaration evaluation in Debug mode before 0.9A:
+0ms -> 0=>32    constants
+1ms -> 33=>68   constants
+2ms -> 69=>99   constants
+3ms -> 100=>128 constants
+4ms -> 129=>166 constants (occasionally spiking to 5 or 6)
+5ms -> 167=>201 constants
+6ms -> 202=>215 constants
+7ms -> 216=>270 constants (occasionally spiking to 8 or even 9)
+8ms -> 271=>288 constants
+8ms/9ms/10ms -> more than 289 constants. 

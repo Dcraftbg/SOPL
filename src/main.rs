@@ -5,7 +5,7 @@
 #![allow(unused_imports)]
 #![allow(unreachable_patterns)]
 
-use std::{env, process::{exit, Command, Stdio}, path::{Path, PathBuf}, ffi::OsStr, str::FromStr, collections::{HashMap, HashSet}, hash::Hash, fs::{File, self}, io::{Read, Write, self}, fmt::format, os::windows::{process::CommandExt, self}, arch::x86_64::_mm_testz_pd, borrow::BorrowMut, clone, time::SystemTime};
+use std::{env, process::{exit, Command, Stdio}, path::{Path, PathBuf}, ffi::OsStr, str::FromStr, collections::{HashMap, HashSet}, hash::Hash, fs::{File, self}, io::{Read, Write, self}, fmt::format, os::windows::{process::CommandExt, self}, arch::x86_64::_mm_testz_pd, borrow::BorrowMut, clone, time::SystemTime, rc::Rc};
 use uuid::Uuid;
 
 macro_rules! par_error {
@@ -101,7 +101,9 @@ macro_rules! com_assert {
 
 
 
-
+fn is_symbolic(c: char) -> bool {
+    c.is_alphabetic() || c.is_alphanumeric() || c == '_' || c=='-'
+}
 fn unescape(stri: &String) -> String {
     let mut out = String::new();
     let mut chars = stri.chars().into_iter();
@@ -322,7 +324,7 @@ impl TokenType {
 }
 #[derive(Clone,Debug)]
 struct ProgramLocation {
-    file: String,
+    file: Rc<String>,
     linenumber: i32,
     character:  i32,
 }
@@ -377,20 +379,23 @@ impl<'a> Lexer<'a> {
         Self { 
             source, 
             cursor: 0, 
-            currentLocation: ProgramLocation { file: String::new(), linenumber: 1, character: 0 },
+            currentLocation: ProgramLocation { file: Rc::new(String::new()), linenumber: 1, character: 0 },
             Intrinsics,
             Definitions,
         }
     }
-    fn drop_char(&mut self) {
+    fn drop_char(&mut self){
         if self.is_not_empty() {
-            if self.cchar() == '\n' {
-                self.currentLocation.linenumber += 1;
-                self.currentLocation.character = 0;
-            } else {
-                self.currentLocation.character += 1;
+            let c = self.cchar_s();
+            if let Some(c) = c {
+                if c == '\n' {
+                    self.currentLocation.linenumber += 1;
+                    self.currentLocation.character = 0;
+                } else {
+                    self.currentLocation.character += 1;
+                }
+                self.cursor += 1;
             }
-            self.cursor += 1;
         }
     }
     fn drop_line(&mut self) {
@@ -400,6 +405,21 @@ impl<'a> Lexer<'a> {
         self.cursor += 1;
         self.currentLocation.character = 0;
         self.currentLocation.linenumber += 1;
+    }
+    fn pop_symbol(&mut self) -> Option<String> {
+        let mut o = String::new();
+        let mut c = self.cchar_s()?;
+        if !c.is_alphabetic() {
+            return None;
+        }
+        while self.is_not_empty() && c.is_alphanumeric() || c=='_' || c=='-' {
+            c = self.cchar_s()?;
+            self.cursor += 1;
+            o.push(c);
+        }
+        o.pop();
+        self.currentLocation.character += o.len() as i32;
+        Some(o)
     }
     fn cchar(&self) -> char {
         self.source.chars().nth(self.cursor).unwrap()
@@ -420,8 +440,7 @@ impl Iterator for Lexer<'_> {
         self.trim_left();
         let mut outstr: String = Default::default();
         if self.is_not_empty() {
-            let c = self.source.chars().nth(self.cursor).unwrap();
-            
+            let mut c = self.cchar();
             match c {
                 '\"' => {
                     let mut shouldIgnoreNext: bool = true;
@@ -495,64 +514,140 @@ impl Iterator for Lexer<'_> {
                 }
                 _    => {
                     let _orgcursor = self.cursor;
-                    if !self.source.chars().nth(self.cursor).unwrap().is_alphanumeric() {
-                        // ->
-                        // ()
-                        outstr.push(c);
-                        self.cursor += 1;
-                        self.currentLocation.character += 1;
-                        while self.is_not_empty() && (self.cchar() != '(' && self.cchar() != ')' && self.cchar() != '[' && self.cchar()  != ']' && self.cchar() != ';') && !self.cchar().is_alphanumeric() && !self.cchar().is_whitespace() {
-                            outstr.push(self.source.chars().nth(self.cursor).unwrap());
-                            self.cursor+=1;
-                            self.currentLocation.character += 1;
-                        }
+                    if !self.is_not_empty() {
+                        return None;
+                    }
+                    if c.is_alphabetic() {
+                        // outstr.push(c);
+                        // self.cursor += 1;
+                        // self.currentLocation.character += 1;
+                        // while self.is_not_empty() && (self.cchar() != '(' && self.cchar() != ')' && self.cchar() != '[' && self.cchar()  != ']' && self.cchar() != ';') && !self.cchar().is_alphanumeric() && !self.cchar().is_whitespace() {
+                        //     outstr.push(self.source.chars().nth(self.cursor).unwrap());
+                        //     self.cursor+=1;
+                        //     self.currentLocation.character += 1;
+                        // }
+
+                        let outstr = self.pop_symbol()?;
                         if let Some(o) = self.Intrinsics.get(&outstr) {
                             return Some(Token { typ: TokenType::IntrinsicType(o.clone()), location: self.currentLocation.clone() });
+                        }
+                        else if let Some(o) = self.Definitions.get(&outstr){                        
+                                return Some(Token { typ: TokenType::Definition(o.clone()), location: self.currentLocation.clone() });
                         }
                         else{
                             return Some(Token { typ: TokenType::WordType(outstr), location: self.currentLocation.clone() });
                         }
                     }
-                    let org = c;
-                    while self.is_not_empty() && self.cchar().is_alphanumeric() || self.cchar() == '_' || self.cchar() == '-'{
-                        let _c = self.cchar();
-                        outstr.push(self.cchar());
-                        self.drop_char();
-                    }       
-                    if org.is_alphabetic() || org == '_'{
-                        if let Some(o) = self.Intrinsics.get(&outstr){                        
-                            return Some(Token { typ: TokenType::IntrinsicType((*o).clone()), location: self.currentLocation.clone() });
+                    else if (c == '-' && self.cchar_offset(1)?.is_alphanumeric()) || c.is_alphanumeric(){
+                        if c=='-' {
+                            outstr.push(c);
+                            self.cursor += 1;
+                            c = self.cchar_s()?;
                         }
-                        else if let Some(o) = self.Definitions.get(&outstr){                        
-                            return Some(Token { typ: TokenType::Definition((*o).clone()), location: self.currentLocation.clone() });
+                        while self.is_not_empty() && c.is_alphanumeric() {
+                            c = self.cchar_s()?;
+                            self.cursor += 1;
+                            outstr.push(c);
                         }
-                        else {
-                            return Some(Token { typ: TokenType::WordType(outstr), location: self.currentLocation.clone() });
-                        }
-                    }
-                    else {
-                        let nc = self.source.chars().nth(self.cursor-1);
-                        if nc.is_some() {
-                            if nc.unwrap() == 'l' {
-                                outstr.pop();
-                                let num = outstr.parse::<i64>();
-                                if num.is_ok(){
-                                    return Some(Token { typ: TokenType::Number64(num.unwrap()), location: self.currentLocation.clone() });
+                        outstr.pop();
+                        self.cursor -= 1;
+                        self.currentLocation.character += outstr.len() as i32;
+                        if let Some(nc) = self.cchar_offset(1) {
+                            if nc == 'l' {
+                                self.cursor += 1;
+                                self.currentLocation.character += 1;
+                                if let Ok(val) = outstr.parse::<i64>() {
+                                    return Some(Token {location: self.currentLocation.clone(), typ: TokenType::Number64(val)});
                                 }
                                 else {
-                                    println!("INVALID Integer for 64 (long) size!");
+                                    todo!("Error message for this")
                                 }
                             }
-                        }
-                        let num = outstr.parse::<i32>();
-
-                        if num.is_ok(){
-                            return Some(Token { typ: TokenType::Number32(num.unwrap()), location: self.currentLocation.clone() });
+                            else {
+                                if let Ok(val) = outstr.parse::<i32>() {
+                                    return Some(Token {location: self.currentLocation.clone(), typ: TokenType::Number32(val)});
+                                }   
+                                else {
+                                    todo!("Error message for this")
+                                } 
+                            }
                         }
                         else {
-                            todo!()
+                            if let Ok(val) = outstr.parse::<i32>() {
+                                return Some(Token {location: self.currentLocation.clone(), typ: TokenType::Number32(val)});
+                            }
+                            else if let Ok(val) = outstr.parse::<i64>() {
+                                return Some(Token {location: self.currentLocation.clone(), typ: TokenType::Number64(val)});
+                            }
+                            else {
+                                panic!("Unknown number combo: {}",outstr);
+                            }
                         }
                     }
+                    else if c == ';' || c==')' || c=='(' || c=='{' || c=='}' || c=='[' || c==']' {
+                        self.cursor += 1;
+                        self.currentLocation.character += 1;
+                        //println!("Got here!");
+                        return Some(Token {typ: TokenType::IntrinsicType(self.Intrinsics.get(&c.to_string()).expect("Unhandled intrinsic :(").clone()), location: self.currentLocation.clone()});
+                    }
+                    else {
+                        
+                        while self.is_not_empty() && !c.is_alphabetic() && !c.is_numeric() && !c.is_whitespace() && c != ';' && c!=')' && c!='(' && c!='{' && c!='}' && c!='[' && c!=']'{
+                            c = self.cchar_s()?;
+                            self.cursor += 1;
+                            outstr.push(c);
+                        }
+                        outstr.pop();
+                        //self.cursor -= 1;
+                        //println!("Debug: {}",self.cchar());
+                        self.currentLocation.character += outstr.len() as i32;
+                        if let Some(intrinsic) = self.Intrinsics.get(&outstr) {
+                            return Some(Token { typ: TokenType::IntrinsicType(intrinsic.clone()), location: self.currentLocation.clone() })
+                        }
+                        else {
+                            return  Some(Token { typ: TokenType::WordType(outstr), location: self.currentLocation.clone() });
+                        }
+                    }
+                    // let org = c;
+                    // while self.is_not_empty() && self.cchar().is_alphanumeric() || self.cchar() == '_' || self.cchar() == '-'{
+                    //     let _c = self.cchar();
+                    //     outstr.push(self.cchar());
+                    //     self.drop_char();
+                    // }       
+                    // if org.is_alphabetic() || org == '_'{
+                    //     if let Some(o) = self.Intrinsics.get(&outstr){                        
+                    //         return Some(Token { typ: TokenType::IntrinsicType((*o).clone()), location: self.currentLocation.clone() });
+                    //     }
+                    //     else if let Some(o) = self.Definitions.get(&outstr){                        
+                    //         return Some(Token { typ: TokenType::Definition((*o).clone()), location: self.currentLocation.clone() });
+                    //     }
+                    //     else {
+                    //         return Some(Token { typ: TokenType::WordType(outstr), location: self.currentLocation.clone() });
+                    //     }
+                    // }
+                    // else {
+                    //     let nc = self.source.chars().nth(self.cursor-1);
+                    //     if nc.is_some() {
+                    //         if nc.unwrap() == 'l' {
+                    //             outstr.pop();
+                    //             let num = outstr.parse::<i64>();
+                    //             if num.is_ok(){
+                    //                 return Some(Token { typ: TokenType::Number64(num.unwrap()), location: self.currentLocation.clone() });
+                    //             }
+                    //             else {
+                    //                 println!("INVALID Integer for 64 (long) size!");
+                    //             }
+                    //         }
+                    //     }
+                    //     let num = outstr.parse::<i32>();
+
+                    //     if num.is_ok(){
+                    //         return Some(Token { typ: TokenType::Number32(num.unwrap()), location: self.currentLocation.clone() });
+                    //     }
+                    //     else {
+                    //         todo!()
+                    //     }
+                    // }
                 }
             }
         }
@@ -1777,7 +1872,7 @@ fn parse_tokens_to_build(lexer: &mut Lexer, program: &mut CmdProgram) -> BuildPr
                                 let p = p.parent().unwrap();
                                 let include_p  = PathBuf::from(path);
                                 let mut lf = Lexer::new(fs::read_to_string(String::from(p.join(&include_p).to_str().unwrap().replace("\\", "/"))).expect(&format!("Error: could not open file: {}",String::from(p.join(&include_p).to_str().unwrap()).replace("\\", "/"))),lexer.Intrinsics,lexer.Definitions);
-                                lf.currentLocation.file = String::from(p.join(&include_p).to_str().unwrap().replace("\\", "/"));
+                                lf.currentLocation.file = Rc::new(String::from(p.join(&include_p).to_str().unwrap().replace("\\", "/")));
                                 let mut nprogram = program.clone();
                                 
                                 nprogram.path = String::from(p.join(&include_p).to_str().unwrap().replace("\\", "/"));
@@ -2865,7 +2960,7 @@ fn main() {
     let info = fs::read_to_string(&program.path).expect("Error: could not open file!");
 
     let mut lexer = Lexer::new(info, & Intrinsics, &Definitions);
-    lexer.currentLocation.file = program.path.clone();
+    lexer.currentLocation.file = Rc::new(program.path.clone());
     let mut build = parse_tokens_to_build(&mut lexer, &mut program);
     if program.use_type_checking {
         type_check_build(&mut build, &program);
