@@ -58,6 +58,7 @@ Made for easy navigation around the README.md
 Because of how the project is structured, it can easily be expanded to not only NASM assembly but to virtually any stack machine out there.
 Current supports include:
 - [x] NASM x86 64
+- [ ] FASM x86 64
 - [ ] Java bytecode
 - [ ] Native simulation
 
