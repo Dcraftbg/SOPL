@@ -1,8 +1,9 @@
 **(Latest patch versions in github history)**
 
-Newest Version: [0.9A](#09a)
+Newest Version: [0.9.1A](#091a)
 # Manual:
-  - [0.9A](#09a)
+  - [0.9.1A](#091a)
+    - [0.9A](#09a)
   - [0.8A](#08a)
   - [0.7A](#07a)
   - [0.6.2A](#062a)
@@ -18,6 +19,9 @@ Newest Version: [0.9A](#09a)
   - [0.2A](#02a)
   - [0.1A](#01a)
 # Change Log
+ ## 0.9.1A
+   - Optimized Strings (No benchmarks cuz I forgot :<)
+   - Temprarily disabled chars
  ## 0.9A
    - Optimized Lexer Word processing and re-wrote basically the entirety of the lexer that isn't about strings and chars (planned for next update)
    - Huge optimization to Lexer cutting compile time in half as shown in [benchmark](rsc/benchmarks/1-0_9A.log)

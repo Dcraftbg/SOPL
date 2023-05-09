@@ -418,6 +418,7 @@ impl<'a> Lexer<'a> {
             o.push(c);
         }
         o.pop();
+        self.cursor -= 1;
         self.currentLocation.character += o.len() as i32;
         Some(o)
     }
@@ -442,37 +443,50 @@ impl Iterator for Lexer<'_> {
         if self.is_not_empty() {
             let mut c = self.cchar();
             match c {
-                '\"' => {
-                    let mut shouldIgnoreNext: bool = true;
+                '"' => {
+                    let mut shouldIgnoreNext: bool = false;
                     self.cursor += 1;
-                    self.currentLocation.character += 1;
-                    while self.is_not_empty() && if !shouldIgnoreNext {self.source.chars().nth(self.cursor).unwrap() != '\"'} else {true} {
-                        let c = self.source.chars().nth(self.cursor).unwrap();
+                    c = self.cchar();
+                    // REMEMBER TO UPDATE LOCATION CHAR AFTER
+                    /*
+                    shouldIgnoreNext:     c != '\"'
+                    1                  0              1
+                    1                  1              1
+                    0                  1              1
+                    0                  0              0
+                    */
+                    while self.is_not_empty() && (shouldIgnoreNext || c != '\"'){
+                        c = self.cchar_s()?;
+                        //println!("Adding: {}, shouldIgnoreNext: {}",c.escape_default(),shouldIgnoreNext);
                         if shouldIgnoreNext {
                             shouldIgnoreNext = false
                         }
                         if c == '\\' {
                             shouldIgnoreNext = true
                         }
-                        outstr.push(self.source.chars().nth(self.cursor).unwrap());
+                        outstr.push(c);
                         self.cursor+=1;
-                        self.currentLocation.character += 1;
                     }
+                    outstr.pop();
+                    self.currentLocation.character += 2+outstr.len() as i32;
+                    //println!("Output string: \"{}\"",outstr);
+                    //println!("Cchar: {}",self.cchar());
                     if self.is_not_empty() {
-                        let u_outstr = unescape(&outstr);
-                        self.cursor += 1;
-                        self.currentLocation.character += 1;
-                        if self.source.chars().nth(self.cursor).unwrap() == 'c' {
+                        let outstr = unescape(&outstr);
+                        //self.cursor += 1;
+                        println!("C: {}",self.cchar());
+                        if self.cchar() == 'c' {
                             self.cursor += 1;
                             self.currentLocation.character += 1;
-                            return Some(Token { typ: TokenType::CStringType(u_outstr), location: self.currentLocation.clone() });
+                            return Some(Token { typ: TokenType::CStringType(outstr), location: self.currentLocation.clone() });
                         }
                         else {
-                            return Some(Token { typ: TokenType::StringType(u_outstr), location: self.currentLocation.clone() });
+                            return Some(Token { typ: TokenType::StringType(outstr), location: self.currentLocation.clone() });
                         }
                     }
                 }
                 '\'' => {
+                    todo!("CHARS ARE NOT YET IMPLEMENTED AND SHOULDN'T BE USED!");
                     let mut shouldIgnoreNext: bool = true;
                     self.cursor += 1;
                     self.currentLocation.character += 1;
@@ -1682,7 +1696,7 @@ fn parse_tokens_to_build(lexer: &mut Lexer, program: &mut CmdProgram) -> BuildPr
                 match Type {
                     IntrinsicType::Extern => {
                         let externType = lexer.next();
-                        let externType = externType.expect("Error: Unexpected abtrupt end of tokens in extern");
+                        let externType = par_expect!(lexer.currentLocation,externType,"Error: Unexpected abtrupt end of tokens in extern");
                         match externType.typ {
                             TokenType::WordType(Word) => {
                                 build.externals.push(External { typ: ExternalType::RawExternal(Word), loc: externType.location.clone()});
@@ -2725,7 +2739,7 @@ fn type_check_build(build: &mut BuildProgram, program: &CmdProgram) {
                     match ofp {
                         OfP::REGISTER(reg) => {
                             let v = com_expect!(loc, typeStack.pop(), "Error: Stack underflow occured for types! Make sure everything is ok and you aren't manipulating the stack with anything");
-                            com_assert!(loc, v.get_size(program) == reg.size(), "Error: Can not pop type into register as its a different size! Top is: {} bytes Register: {} is {} bytes",v.get_size(program),reg.to_string(),reg.size());
+                            com_assert!(loc, v.get_size(program) == reg.size(), "Error: Can not pop type into register as its a different size! Top is: {} bytes Register: {} is {} bytes, Typ: {:?}",v.get_size(program),reg.to_string(),reg.size(),v);
                             match reg.size() {
                                 8 | 4 | 2 | 1 => {}
                                 _ => {
@@ -2844,6 +2858,11 @@ fn usage(program: &String) {
     println!("         -callstack (size)                   -> Set callstack size. The name is very deceiving but callstack is now only used for locals as of 0.0.6A (checkout versions.md)");
     println!("--------------------------------------------");
 }
+fn dump_tokens(lexer: &mut Lexer) {
+    while let Some(token) = lexer.next() {
+        println!("Token: {:?}",token);
+    }
+}
 fn main() {
     let mut args: Vec<_> = env::args().collect();
     let program_n = args.remove(0);
@@ -2960,8 +2979,11 @@ fn main() {
     let info = fs::read_to_string(&program.path).expect("Error: could not open file!");
 
     let mut lexer = Lexer::new(info, & Intrinsics, &Definitions);
+    // dump_tokens(&mut lexer);
+    // exit(1);
     lexer.currentLocation.file = Rc::new(program.path.clone());
     let mut build = parse_tokens_to_build(&mut lexer, &mut program);
+    //panic!("Build: {:#?}",build);
     if program.use_type_checking {
         type_check_build(&mut build, &program);
     }

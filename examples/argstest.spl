@@ -1,5 +1,5 @@
 extern "C" printf
 func main(argv: ptr, argc: long) {
-    argc push "Amount of arguments: %ld"c printf EAX pop
+    argc push "Amount of arguments: %ld\n"c printf EAX pop
     pop
 }
