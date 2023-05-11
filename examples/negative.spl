@@ -1,0 +1,5 @@
+const a = -1;
+extern "C" printf
+func main() {
+    a "A: %d\n"c printf EAX pop pop
+}

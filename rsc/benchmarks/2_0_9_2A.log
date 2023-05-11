@@ -1,0 +1,15 @@
+Build:
+(RELEASE)  (before)                             Milliseconds: 176-181                                   : 0.7A 
+(DEBUG)    (before)                             Milliseconds: 476  Seconds: 9                           : 0.7A 
+
+(RELEASE)  (after)                              Milliseconds: 175-181                                   : 0.8A // Just a small upgrade to the system
+(DEBUG)    (after)                              Milliseconds: 342  Seconds: 9                           : 0.8A // Just a small upgrade to the system
+
+(RELEASE)  (after RC)                           Milliseconds: 174-179                                   : 0.9A // Basically just changed location to now use shared pointer
+(DEBUG)    (after RC)                           Milliseconds: 474  Seconds: 9                           : 0.9A // Basically just changed location to now use shared pointer
+
+(RELEASE)  (after Lexer optimization for Words) Milliseconds:  91                                       : 0.9A // Basically cutting compile time in half
+(DEBUG)    (after Lexer optimization for Words) Milliseconds:  461 Seconds: 4                           : 0.9A // Basically cutting compile time in half
+
+(RELEASE)  (after Lexer optimization for chars) Milliseconds:  10                                       : 0.9.1A // I hate the string system in rust and chars copying everything
+(DEBUG)    (after Lexer optimization for chars) Milliseconds:  37                                       : 0.9.1A // I hate the string system in rust and chars copying everything

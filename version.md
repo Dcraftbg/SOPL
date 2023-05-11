@@ -1,8 +1,9 @@
 **(Latest patch versions in github history)**
 
-Newest Version: [0.9.1A](#091a)
+Newest Version: [0.9.2A](#092a)
 # Manual:
-  - [0.9.1A](#091a)
+  - [0.9.2A](#092a)
+    - [0.9.1A](#091a)
     - [0.9A](#09a)
   - [0.8A](#08a)
   - [0.7A](#07a)
@@ -19,6 +20,11 @@ Newest Version: [0.9.1A](#091a)
   - [0.2A](#02a)
   - [0.1A](#01a)
 # Change Log
+ ## 0.9.2A
+   - HUGE OPTIMIZATION because string system in rust is bad
+   - fixed copying the entire string every time you get a single char
+   - cut compile time by 18 TIMES
+   - Added benchmarks for everything
  ## 0.9.1A
    - Optimized Strings (No benchmarks cuz I forgot :<)
    - Temprarily disabled chars

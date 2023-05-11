@@ -1,3 +1,5 @@
+[profile.release]
+debug=true
 [package]
 name = "sopl"
 version = "0.1.0"

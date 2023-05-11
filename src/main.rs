@@ -5,8 +5,64 @@
 #![allow(unused_imports)]
 #![allow(unreachable_patterns)]
 
-use std::{env, process::{exit, Command, Stdio}, path::{Path, PathBuf}, ffi::OsStr, str::FromStr, collections::{HashMap, HashSet}, hash::Hash, fs::{File, self}, io::{Read, Write, self}, fmt::format, os::windows::{process::CommandExt, self}, arch::x86_64::_mm_testz_pd, borrow::BorrowMut, clone, time::SystemTime, rc::Rc};
+use std::{env, process::{exit, Command, Stdio}, path::{Path, PathBuf}, ffi::OsStr, str::{FromStr, Chars}, collections::{HashMap, HashSet}, hash::Hash, fs::{File, self}, io::{Read, Write, self}, fmt::format, os::windows::{process::CommandExt, self}, arch::x86_64::_mm_testz_pd, borrow::{BorrowMut, Borrow}, clone, time::{SystemTime, Instant}, rc::Rc, iter::Peekable};
 use uuid::Uuid;
+macro_rules! time_func {
+    ($func:expr $(, $arg:expr)*) => {{
+        let start = Instant::now();
+        let result = $func($($arg),*);
+        let elapsed = start.elapsed();
+        println!("Elapsed time for {}: {:?}", stringify!($func),elapsed);
+        result
+    }};
+    ($func:expr) => {{
+        let start = Instant::now();
+        let result = $func();
+        let elapsed = start.elapsed();
+        println!("Elapsed time for {}: {:?}", stringify!($func),elapsed);
+        result
+    }};
+    ($name:expr, $obj:expr, $($args:expr),*) => {{
+        let start = std::time::Instant::now();
+        let result = $obj.$name($($args),*);
+        let elapsed = start.elapsed();
+        println!("Elapsed time for {}.{}: {:?}", stringify!($obj), stringify!($name), elapsed);
+        result
+    }};
+    ($name:expr, $obj:expr) => {{
+        let start = std::time::Instant::now();
+        let result = $obj.$name();
+        let elapsed = start.elapsed();
+        println!("Elapsed time for {}.{}: {:?}", stringify!($obj), stringify!($name), elapsed);
+        result
+    }};
+}
+macro_rules! run_func {
+    ($func:expr $(, $arg:expr)*) => {{
+        let result = $func($($arg),*);
+        result
+    }};
+    ($func:expr) => {{
+        let result = $func();
+        result
+    }};
+}
+macro_rules! time_method {
+    ($name:expr, $obj:ident, $($args:expr),*) => {{
+        let start = std::time::Instant::now();
+        let result = $name.$obj($($args),*);
+        let elapsed = start.elapsed();
+        println!("Elapsed time for {}.{}: {:?}", stringify!($name), stringify!($obj), elapsed);
+        result
+    }};
+    ($name:expr, $obj:ident) => {{
+        let start = std::time::Instant::now();
+        let result = $name.$obj();
+        let elapsed = start.elapsed();
+        println!("Elapsed time for {}.{}: {:?}", stringify!($name), stringify!($obj), elapsed);
+        result
+    }};
+}
 
 macro_rules! par_error {
     ($token:expr, $($arg:tt)*) => ({
@@ -344,7 +400,7 @@ impl Token {
     }
 }
 struct Lexer<'a> {
-    source: String,
+    source: Vec<char>,
     cursor: usize,
     currentLocation: ProgramLocation,
     Intrinsics: &'a HashMap<String,IntrinsicType>,
@@ -356,8 +412,8 @@ impl<'a> Lexer<'a> {
         if !self.is_not_empty(){
             return false;
         }
-        while self.is_not_empty() && self.source.chars().nth(self.cursor).unwrap().is_whitespace() {
-            if self.source.chars().nth(self.cursor).unwrap() == '\n' {
+        while self.is_not_empty() && self.source.get(self.cursor).unwrap().is_whitespace() {
+            if self.source.get(self.cursor).unwrap() == &'\n' {
                 self.currentLocation.linenumber += 1;
                 self.currentLocation.character = 0;
             }
@@ -375,9 +431,9 @@ impl<'a> Lexer<'a> {
     fn is_not_empty_offset(&self, offset: usize) -> bool {
         self.cursor+offset < self.source.len()
     }
-    fn new(source: String, Intrinsics: &'a HashMap<String, IntrinsicType>, Definitions: &'a HashMap<String,VarType>) -> Self {
+    fn new(source: &'a String, Intrinsics: &'a HashMap<String, IntrinsicType>, Definitions: &'a HashMap<String,VarType>) -> Self {
         Self { 
-            source, 
+            source: source.chars().collect(), 
             cursor: 0, 
             currentLocation: ProgramLocation { file: Rc::new(String::new()), linenumber: 1, character: 0 },
             Intrinsics,
@@ -399,7 +455,7 @@ impl<'a> Lexer<'a> {
         }
     }
     fn drop_line(&mut self) {
-        while self.is_not_empty() && self.source.chars().nth(self.cursor).unwrap() != '\n' {
+        while self.is_not_empty() && self.source.get(self.cursor).unwrap() != &'\n' {
             self.cursor += 1;
         }
         self.cursor += 1;
@@ -422,15 +478,15 @@ impl<'a> Lexer<'a> {
         self.currentLocation.character += o.len() as i32;
         Some(o)
     }
-    fn cchar(&self) -> char {
-        self.source.chars().nth(self.cursor).unwrap()
+    fn cchar(&mut self) -> char {
+        self.source.get(self.cursor).unwrap().clone()
     }
-    fn cchar_s(&self) -> Option<char> {
-        self.source.chars().nth(self.cursor)
+    fn cchar_s(&mut self) -> Option<char> {
+        self.source.get(self.cursor).clone().copied()
     }
-    fn cchar_offset(&self, offset: usize) -> Option<char> {
+    fn cchar_offset(&mut self, offset: usize) -> Option<char> {
         if self.is_not_empty_offset(offset) {
-            return Some(self.source.chars().nth(self.cursor+offset).unwrap())
+            return Some(self.source.get(self.cursor+offset).unwrap().clone())
         }
         None
     }
@@ -438,10 +494,12 @@ impl<'a> Lexer<'a> {
 impl Iterator for Lexer<'_> {
     type Item = Token;
     fn next(&mut self) -> Option<Self::Item> {
+        //println!("Source: {:?}",self.source.as_str());
         self.trim_left();
         let mut outstr: String = Default::default();
         if self.is_not_empty() {
             let mut c = self.cchar();
+            //println!("Source after: {:?}",self.source.as_str());
             match c {
                 '"' => {
                     let mut shouldIgnoreNext: bool = false;
@@ -474,7 +532,7 @@ impl Iterator for Lexer<'_> {
                     if self.is_not_empty() {
                         let outstr = unescape(&outstr);
                         //self.cursor += 1;
-                        println!("C: {}",self.cchar());
+                        //println!("C: {}",self.cchar());
                         if self.cchar() == 'c' {
                             self.cursor += 1;
                             self.currentLocation.character += 1;
@@ -490,16 +548,16 @@ impl Iterator for Lexer<'_> {
                     let mut shouldIgnoreNext: bool = true;
                     self.cursor += 1;
                     self.currentLocation.character += 1;
-                    while self.is_not_empty() && (self.source.chars().nth(self.cursor).unwrap() != '\'' && shouldIgnoreNext){
-                        let c = self.source.chars().nth(self.cursor).unwrap();
+                    while self.is_not_empty() && (self.source.get(self.cursor).unwrap() != &'\'' && shouldIgnoreNext){
+                        let c = self.source.get(self.cursor).unwrap();
                         if shouldIgnoreNext {
                             shouldIgnoreNext = false
                         }
-                        if c == '\\' {
+                        if c == &'\\' {
                             shouldIgnoreNext = true
                         }
                         else {
-                            outstr.push(self.source.chars().nth(self.cursor).unwrap());
+                            outstr.push(self.source.get(self.cursor).unwrap().clone());
                         }
                         self.cursor+=1;
                         self.currentLocation.character += 1;
@@ -511,8 +569,11 @@ impl Iterator for Lexer<'_> {
                     return Some(Token { typ: TokenType::CharType(outstr), location: self.currentLocation.clone() });
                 }
                 '/' => {
-                    self.drop_char();
+                    //println!("Source: {:?}",self.source);
+                    //println!("Cursor: {}",self.cursor);
+                    self.cursor += 1;
                     if let Some(nc) = self.cchar_s() {
+                        //println!("Nc: \'{}\'",nc);
                         if nc == '/' {
                             self.drop_line();
                             return self.next();
@@ -1426,7 +1487,13 @@ fn parse_tokens_to_build(lexer: &mut Lexer, program: &mut CmdProgram) -> BuildPr
     let mut build: BuildProgram = BuildProgram { externals: vec![], functions: HashMap::new(),stringdefs: HashMap::new(), constdefs: HashMap::new()};
     let mut scopeStack: Vec<ScopeOpener> = vec![];
     let mut currentFunction: Option<String> = None;
-    while let Some(token) = lexer.next(){
+    //let mut ctime: Instant= Instant::now();
+    //let tokens: Vec<Token> = lexer.collect();
+    while let Some(token) = lexer.next() {
+        //time_func!()
+        // let t = Instant::now();
+        // println!("From last next: {:?}",t-ctime);
+        // ctime = t;
         match token.typ {
             TokenType::WordType(ref word) => {
                 par_assert!(token,currentFunction.is_some(), "Undefined Word Call outside of entry point! '{}'",word);
@@ -1885,7 +1952,8 @@ fn parse_tokens_to_build(lexer: &mut Lexer, program: &mut CmdProgram) -> BuildPr
                                 let p = PathBuf::from(&program.path);
                                 let p = p.parent().unwrap();
                                 let include_p  = PathBuf::from(path);
-                                let mut lf = Lexer::new(fs::read_to_string(String::from(p.join(&include_p).to_str().unwrap().replace("\\", "/"))).expect(&format!("Error: could not open file: {}",String::from(p.join(&include_p).to_str().unwrap()).replace("\\", "/"))),lexer.Intrinsics,lexer.Definitions);
+                                let info = fs::read_to_string(String::from(p.join(&include_p).to_str().unwrap().replace("\\", "/"))).expect(&format!("Error: could not open file: {}",String::from(p.join(&include_p).to_str().unwrap()).replace("\\", "/")));
+                                let mut lf = Lexer::new(&info,lexer.Intrinsics,lexer.Definitions);
                                 lf.currentLocation.file = Rc::new(String::from(p.join(&include_p).to_str().unwrap().replace("\\", "/")));
                                 let mut nprogram = program.clone();
                                 
@@ -2016,7 +2084,7 @@ fn parse_tokens_to_build(lexer: &mut Lexer, program: &mut CmdProgram) -> BuildPr
                     },
                     IntrinsicType::DOTCOMA => {},
                     IntrinsicType::ELSE => todo!(),
-                    IntrinsicType::DIV => todo!("{:#?}",build),
+                    IntrinsicType::DIV => todo!("{:#?} at {}",build,lexer.currentLocation.loc_display()),
                     IntrinsicType::Let => {
                         
                         let nametok = par_expect!(lexer.currentLocation, lexer.next(), "Error: abruptly ran out of tokens for Let");
@@ -2978,7 +3046,7 @@ fn main() {
     Definitions.insert("str".to_string(), VarType::STR);
     let info = fs::read_to_string(&program.path).expect("Error: could not open file!");
 
-    let mut lexer = Lexer::new(info, & Intrinsics, &Definitions);
+    let mut lexer = Lexer::new(&info, & Intrinsics, &Definitions);
     // dump_tokens(&mut lexer);
     // exit(1);
     lexer.currentLocation.file = Rc::new(program.path.clone());
