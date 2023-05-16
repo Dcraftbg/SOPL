@@ -733,8 +733,8 @@ impl Iterator for Lexer<'_> {
 }
 #[derive(Debug)]
 enum ExternalType {
-    RawExternal(String),
-    CExternal(String)
+    RawExternal,
+    CExternal
 }
 #[derive(Debug)]
 struct External {
@@ -744,22 +744,22 @@ struct External {
 impl ExternalType {
     fn prefix(&self) -> String {
         match self {
-            ExternalType::RawExternal(_) => String::new(),
-            ExternalType::CExternal(_) => "_".to_string(),
+            ExternalType::RawExternal => String::new(),
+            ExternalType::CExternal => "_".to_string(),
             _ => String::new()
         }
     }
     fn suffix(&self) -> String {
         match self {
-            ExternalType::RawExternal(_) => String::new(),
-            ExternalType::CExternal(_)   => String::new(),
+            ExternalType::RawExternal => String::new(),
+            ExternalType::CExternal   => String::new(),
             _ => String::new()
         }
     }
     fn to_string(&self) -> String{
         match self {
-            ExternalType::RawExternal(_) => "RawExternal".to_string(),
-            ExternalType::CExternal(_) => "CExternal".to_string()
+            ExternalType::RawExternal => "RawExternal".to_string(),
+            ExternalType::CExternal => "CExternal".to_string()
         }
     }
 }
@@ -1282,7 +1282,7 @@ struct RawConstValue {
 }
 #[derive(Debug)]
 struct BuildProgram {
-    externals:    Vec<External>,
+    externals:    HashMap<String,External>,
     functions:    HashMap<String, Function>,
     stringdefs:   HashMap<Uuid,ProgramString>,
     constdefs:    HashMap<String, RawConstValue>
@@ -1673,7 +1673,7 @@ fn getTopMut(scopeStack: &mut ScopeStack) -> Option<&mut Scope> {
     scopeStack.get_mut(len-1)
 }
 fn parse_tokens_to_build(lexer: &mut Lexer, program: &mut CmdProgram) -> BuildProgram {
-    let mut build: BuildProgram = BuildProgram { externals: vec![], functions: HashMap::new(),stringdefs: HashMap::new(), constdefs: HashMap::new()};
+    let mut build: BuildProgram = BuildProgram { externals: HashMap::new(), functions: HashMap::new(),stringdefs: HashMap::new(), constdefs: HashMap::new()};
     let mut scopeStack: ScopeStack = vec![];
     let mut foundFuncs: HashSet<String> = HashSet::new();
     //let mut currentFunction: Option<String> = None;
@@ -1691,27 +1691,32 @@ fn parse_tokens_to_build(lexer: &mut Lexer, program: &mut CmdProgram) -> BuildPr
                 par_assert!(token,currentScope.body_is_some(), "Error: can not insert word operation at the top level of a {} as it does not support instructions",currentScope.typ.to_string(false));
                 
                 let mut isvalid = false;
-                for external in build.externals.iter() {
-                    match external.typ {
-                        ExternalType::RawExternal(ref ext) => {
-                            if word == ext {
-                                let body = currentScope.body_unwrap_mut().unwrap();
-                                isvalid = true;
-                                // TODO: There might be some optimization here to do with Strings, and instead making them references
-                                body.push((token.location.clone(),Instruction::CALLRAW(ext.clone())));
-                                break;
-                            }
-                        }
-                        ExternalType::CExternal(ref ext) => {
-                            if word == ext {
-                                let body = currentScope.body_unwrap_mut().unwrap();
-                                isvalid = true;
-                                // TODO: There might be some optimization here to do with Strings, and instead making them references
-                                body.push((token.location.clone(),Instruction::CALLRAW(external.typ.prefix().clone()+&ext+&external.typ.suffix())));
-                                break;
-                            }
-                        }
-                    }
+                // for (name,external) in build.externals.iter() {
+                //     match external.typ {
+                //         ExternalType::RawExternal => {
+                //             if word == name {
+                //                 let body = currentScope.body_unwrap_mut().unwrap();
+                //                 isvalid = true;
+                //                 // TODO: There might be some optimization here to do with Strings, and instead making them references
+                //                 body.push((token.location.clone(),Instruction::CALLRAW(ext.clone())));
+                //                 break;
+                //             }
+                //         }
+                //         ExternalType::CExternal => {
+                //             if word == ext {
+                //                 let body = currentScope.body_unwrap_mut().unwrap();
+                //                 isvalid = true;
+                //                 // TODO: There might be some optimization here to do with Strings, and instead making them references
+                //                 body.push((token.location.clone(),Instruction::CALLRAW(external.typ.prefix().clone()+&ext+&external.typ.suffix())));
+                //                 break;
+                //             }
+                //         }
+                //     }
+                // }
+                if let Some(external) = build.externals.get(word) {
+                    isvalid = true;
+                    let body = currentScope.body_unwrap_mut().unwrap();
+                    body.push((token.location.clone(),Instruction::CALLRAW(external.typ.prefix().clone()+word+&external.typ.suffix())));
                 }
                 if let Some(reg) = Register::from_string(&word) {
                     if !isvalid {
@@ -1980,7 +1985,7 @@ fn parse_tokens_to_build(lexer: &mut Lexer, program: &mut CmdProgram) -> BuildPr
                         let externType = par_expect!(lexer.currentLocation,externType,"Error: Unexpected abtrupt end of tokens in extern");
                         match externType.typ {
                             TokenType::WordType(Word) => {
-                                build.externals.push(External { typ: ExternalType::RawExternal(Word), loc: externType.location.clone()});
+                                build.externals.insert(Word,External { typ: ExternalType::RawExternal, loc: externType.location.clone()});
                             }
                             TokenType::IntrinsicType(_) => assert!(false,"Unexpected behaviour! expected type Word or String but found Intrinsic"),
                             TokenType::StringType(Type) => {
@@ -1990,7 +1995,7 @@ fn parse_tokens_to_build(lexer: &mut Lexer, program: &mut CmdProgram) -> BuildPr
                                         let externWord = externWord.expect("Error: C type extern defined but stream of tokens abruptly ended!");
                                         match externWord.typ {
                                             TokenType::WordType(Word) => {
-                                                build.externals.push(External { typ: ExternalType::CExternal(Word), loc: externWord.location.clone()})
+                                                build.externals.insert(Word,External { typ: ExternalType::CExternal, loc: externWord.location.clone()});
                                             }
                                             TokenType::StringType(Word) => {
                                                 par_error!(token, "Error: Expected type Word but found String \"{}\"",Word)
@@ -2533,9 +2538,9 @@ fn to_nasm_x86_64(build: &mut BuildProgram, program: &CmdProgram) -> io::Result<
             }
         }
     }
-    for exter in build.externals.iter() {
+    for (Word,exter) in build.externals.iter() {
         match exter.typ {            
-            ExternalType::CExternal(ref Word) | ExternalType::RawExternal(ref Word) => {
+            ExternalType::CExternal| ExternalType::RawExternal => {
                 if program.in_mode == OptimizationMode::DEBUG || optimization.usedExterns.contains(&format!("{}{}{}",exter.typ.prefix(),Word,exter.typ.suffix())) {
                     writeln!(&mut f,"  extern {}{}{}",exter.typ.prefix(),Word,exter.typ.suffix())?;
                 }
