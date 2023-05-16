@@ -1,6 +1,6 @@
 **(Latest patch versions in github history)**
 
-Newest Version: [0.9.2A](#092a)
+Newest Version: [0.10A](#010a)
 # Manual:
   - [0.9.2A](#092a)
     - [0.9.1A](#091a)
@@ -20,6 +20,9 @@ Newest Version: [0.9.2A](#092a)
   - [0.2A](#02a)
   - [0.1A](#01a)
 # Change Log
+ ## 0.10A
+   - Entirely changed the way scopes are handled! Broke a lot of examples with IF statements which are expected to be fixed in the next patch
+   - Prepared to add local variables, constants and more to scopes
  ## 0.9.2A
    - HUGE OPTIMIZATION because string system in rust is bad
    - fixed copying the entire string every time you get a single char

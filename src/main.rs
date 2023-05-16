@@ -5,7 +5,7 @@
 #![allow(unused_imports)]
 #![allow(unreachable_patterns)]
 
-use std::{env, process::{exit, Command, Stdio}, path::{Path, PathBuf}, ffi::OsStr, str::{FromStr, Chars}, collections::{HashMap, HashSet}, hash::Hash, fs::{File, self}, io::{Read, Write, self}, fmt::format, os::windows::{process::CommandExt, self}, arch::x86_64::_mm_testz_pd, borrow::{BorrowMut, Borrow}, clone, time::{SystemTime, Instant}, rc::Rc, iter::Peekable};
+use std::{env, process::{exit, Command, Stdio}, path::{Path, PathBuf}, ffi::OsStr, str::{FromStr, Chars}, collections::{HashMap, HashSet}, hash::Hash, fs::{File, self}, io::{Read, Write, self}, fmt::format, borrow::{BorrowMut, Borrow}, clone, time::{SystemTime, Instant}, rc::Rc, iter::Peekable, cell::{RefCell, Ref, RefMut}, ops::{Deref, DerefMut}, vec};
 use uuid::Uuid;
 macro_rules! time_func {
     ($func:expr $(, $arg:expr)*) => {{
@@ -1103,9 +1103,14 @@ enum Instruction {
     RET     (),
     SCOPEBEGIN,
     SCOPEEND,
-    CONDITIONAL_JUMP(usize),
-    JUMP(usize),
+
+    // CONDITIONAL_JUMP(usize),
+    // JUMP(usize),
     INTERRUPT(i64),
+
+    EXPAND_SCOPE(NormalScope),
+    EXPAND_IF_SCOPE(NormalScope),
+    EXPAND_ELSE_SCOPE(NormalScope),
 }
 
 #[derive(Debug,Clone)]
@@ -1123,10 +1128,11 @@ struct LocalVariable {
     typ: VarType,
     operand: usize
 }
+type Locals = HashMap<String, LocalVariable>;
 #[derive(Debug)]
 struct Function {
     contract: FunctionContract,
-    locals: HashMap<String,LocalVariable>,
+    locals: Locals,
     location: ProgramLocation,
     body: Vec<(ProgramLocation,Instruction)>,
 }
@@ -1341,26 +1347,200 @@ impl VarType {
         }
     }
 }
+// #[derive(Debug)]
+// enum ScopeType {
+//     FUNC,
+//     IF,
+//     EMPTY,
+//     ELSE,
+// }
+// impl ScopeType {
+//     fn to_string(&self, isplural: bool) -> &str {
+//         if isplural {
+//             match self {
+//                 ScopeType::FUNC  => "functions",
+//                 ScopeType::IF    => "ifs",
+//                 ScopeType::EMPTY => "empties",
+//                 ScopeType::ELSE  => "elses",
+//             }
+//         }
+//         else {
+//             match self {
+//                 ScopeType::FUNC  => "function",
+//                 ScopeType::IF    => "if",
+//                 ScopeType::EMPTY => "empty",
+//                 ScopeType::ELSE  => "else",
+//             }
+//         }
+//     }
+// }
+// #[derive(Debug)]
+// struct ScopeOpener {
+//     cinstruct_size: usize,
+//     hasBeenOpened: bool,
+//     typ:   ScopeType
+// }
+/*
 #[derive(Debug)]
-enum ScopeOpenerType {
-    FUNC,
-    IF,
-    EMPTY,
-    ELSE,
+struct Function {
+    contract: FunctionContract,
+    locals: HashMap<String,LocalVariable>,
+    location: ProgramLocation,
+    body: Vec<(ProgramLocation,Instruction)>,
 }
-#[derive(Debug)]
-struct ScopeOpener {
-    cinstruct_size: usize,
-    hasBeenOpened: bool,
-    typ:   ScopeOpenerType
-}
-
-
-#[derive(Debug)]
+*/
+// #[derive(Debug)]
+// struct Scope {
+//     typ:  ScopeType,
+//     inst: InstBodyType,
+//     locals: LocalBodyType,
+//     contract: Option<FunctionContract>,
+//     hasBeenOpened: bool,
+//     //funcs: Option<Vec<Function>>,  
+// }
+type ScopeBody = Vec<(ProgramLocation,Instruction)>;
+#[derive(Debug, Clone)]
 struct FunctionContract {
     Inputs: Vec<(String, VarType)>,
     Outputs: Vec<VarType>
 }
+#[derive(Debug)]
+enum NormalScopeType {
+    IF,
+    ELSE,
+    EMPTY
+}
+// impl NormalScopeType {
+//     //TODO: Get rid of ScopeType as a whole
+//     fn to_scope_type(&self) -> ScopeType {
+//         match self {
+//             NormalScopeType::IF => ScopeType::IF,
+//             NormalScopeType::ELSE => ScopeType::ELSE,
+//             NormalScopeType::EMPTY => ScopeType::EMPTY,
+//         }
+//     }
+// }
+#[derive(Debug)]
+struct NormalScope {
+    typ: NormalScopeType,
+    body: ScopeBody,
+}
+
+#[derive(Debug)]
+struct FunctionScope<'a> {
+    func: &'a mut Function
+    // body: &'a mut ScopeBody,
+    // locals: &'a mut Locals,
+    // contract: &'a mut FunctionContract
+}
+#[derive(Debug)]
+enum ScopeType {
+    FUNCTION(Function, String),
+    NORMAL(NormalScope),
+}
+#[derive(Debug)]
+struct Scope {
+    typ: ScopeType,
+    hasBeenOpened: bool,
+}
+
+impl ScopeType {
+    fn body_unwrap(&self) -> Option<&ScopeBody> {
+        match self {
+            Self::FUNCTION(func,_) => {
+                Some(&func.body)
+            },
+            Self::NORMAL(scope) => {
+                Some(&scope.body)
+            },
+        }
+    }
+    fn body_unwrap_mut(&mut self) -> Option<&mut ScopeBody> {
+        match self {
+            Self::FUNCTION(func,_) => {
+                Some(&mut func.body)
+            },
+            Self::NORMAL(scope) => {
+                Some(&mut scope.body)
+            },
+        }
+    }
+    fn locals_unwrap(&self) -> Option<&Locals> {
+        match self {
+            Self::FUNCTION(func,_) => {
+                Some(&func.locals)
+            },
+            Self::NORMAL(_) => {
+                None
+            },
+        }
+    }
+    fn locals_unwrap_mut(&mut self) -> Option<&mut Locals> {
+        match self {
+            Self::FUNCTION(func,_) => {
+                Some(&mut func.locals)
+            },
+            Self::NORMAL(_) => {
+                None
+            },
+        }
+    }
+    fn contract_unwrap(&self) -> Option<&FunctionContract> {
+        match self {
+            Self::FUNCTION(func,_) => {
+                Some(&func.contract)
+            },
+            Self::NORMAL(_) => {
+                None
+            },
+        }
+    }
+   
+    fn body_is_some(&self) -> bool {
+        match self {
+            Self::FUNCTION(_,_) => true,
+            Self::NORMAL(_) => true,
+        }
+    }
+    fn locals_is_some(&self) -> bool {
+        match self {
+            Self::FUNCTION(_,_) => true,
+            //TODO: Implement local variables for normal scopes
+            Self::NORMAL(_) => false,
+        }
+    }
+    fn contract_is_some(&self) -> bool {
+        match self {
+            Self::FUNCTION(_,_) => true,
+            Self::NORMAL(_) => false,
+        }
+    }
+    fn to_string(&self, isplural: bool) -> &str { 
+        match self {
+            ScopeType::FUNCTION(_,_)                 => {
+                if isplural {"functions"} else {"function"}
+            }
+            ScopeType::NORMAL(normal)=> {
+                match normal.typ {
+                    NormalScopeType::IF =>    if isplural {"ifs"}     else {"if"},
+                    NormalScopeType::ELSE =>  if isplural {"elses"}   else {"else"},
+                    NormalScopeType::EMPTY => if isplural {"empties"} else {"empty"},
+                }
+            },
+        }
+    }
+}
+impl Scope {
+    fn body_unwrap(&self)         -> Option<&ScopeBody>                    {self.typ.body_unwrap()}
+    fn body_unwrap_mut(&mut self) -> Option<&mut ScopeBody>                {self.typ.body_unwrap_mut()}
+    fn locals_unwrap(&self)          -> Option<& Locals>                   {self.typ.locals_unwrap()}
+    fn locals_unwrap_mut(&mut self)  -> Option<&mut Locals>                {self.typ.locals_unwrap_mut()}
+    fn contract_unwrap(&self)        -> Option<&FunctionContract>          {self.typ.contract_unwrap()}
+    fn body_is_some(&self)           -> bool                               {self.typ.body_is_some()}
+    fn locals_is_some(&self)         -> bool                               {self.typ.locals_is_some()}
+    fn contract_is_some(&self)       -> bool                               {self.typ.contract_is_some()}
+}
+
 fn eval_const_def(lexer: &mut Lexer, build: &mut BuildProgram) -> ConstValue {
     let mut varStack: Vec<ConstValueType> = vec![];
     let orgLoc = lexer.currentLocation.clone();
@@ -1423,6 +1603,7 @@ fn eval_const_def(lexer: &mut Lexer, build: &mut BuildProgram) -> ConstValue {
     lpar_assert!(lexer.currentLocation,varStack.len() == 1,"Error: Lazy constant stack handling! You need to correctly handle your constants");
     ConstValue {typ: varStack.pop().unwrap(), loc: orgLoc}
 }
+
 fn parse_function_contract(lexer: &mut Lexer) -> FunctionContract {
     let mut out = FunctionContract {Inputs: vec![], Outputs: vec![]};
     let mut is_input = true;
@@ -1483,10 +1664,19 @@ fn parse_function_contract(lexer: &mut Lexer) -> FunctionContract {
     }
     out
 }
+type ScopeStack = Vec<Scope>;
+fn getTop(scopeStack: &ScopeStack) -> Option<&Scope> {
+    scopeStack.get(scopeStack.len()-1)
+}
+fn getTopMut(scopeStack: &mut ScopeStack) -> Option<&mut Scope> {
+    let len = scopeStack.len();
+    scopeStack.get_mut(len-1)
+}
 fn parse_tokens_to_build(lexer: &mut Lexer, program: &mut CmdProgram) -> BuildProgram {
     let mut build: BuildProgram = BuildProgram { externals: vec![], functions: HashMap::new(),stringdefs: HashMap::new(), constdefs: HashMap::new()};
-    let mut scopeStack: Vec<ScopeOpener> = vec![];
-    let mut currentFunction: Option<String> = None;
+    let mut scopeStack: ScopeStack = vec![];
+    let mut foundFuncs: HashSet<String> = HashSet::new();
+    //let mut currentFunction: Option<String> = None;
     //let mut ctime: Instant= Instant::now();
     //let tokens: Vec<Token> = lexer.collect();
     while let Some(token) = lexer.next() {
@@ -1496,23 +1686,28 @@ fn parse_tokens_to_build(lexer: &mut Lexer, program: &mut CmdProgram) -> BuildPr
         // ctime = t;
         match token.typ {
             TokenType::WordType(ref word) => {
-                par_assert!(token,currentFunction.is_some(), "Undefined Word Call outside of entry point! '{}'",word);
+                par_assert!(token,scopeStack.len() > 0, "Undefined Word Call outside of entry point! '{}'",word);
+                let currentScope = getTopMut(&mut scopeStack).unwrap();
+                par_assert!(token,currentScope.body_is_some(), "Error: can not insert word operation at the top level of a {} as it does not support instructions",currentScope.typ.to_string(false));
+                
                 let mut isvalid = false;
                 for external in build.externals.iter() {
                     match external.typ {
                         ExternalType::RawExternal(ref ext) => {
                             if word == ext {
+                                let body = currentScope.body_unwrap_mut().unwrap();
                                 isvalid = true;
                                 // TODO: There might be some optimization here to do with Strings, and instead making them references
-                                build.functions.get_mut(currentFunction.as_mut().unwrap()).unwrap().body.push((token.location.clone(),Instruction::CALLRAW(ext.clone())));
+                                body.push((token.location.clone(),Instruction::CALLRAW(ext.clone())));
                                 break;
                             }
                         }
                         ExternalType::CExternal(ref ext) => {
                             if word == ext {
+                                let body = currentScope.body_unwrap_mut().unwrap();
                                 isvalid = true;
                                 // TODO: There might be some optimization here to do with Strings, and instead making them references
-                                build.functions.get_mut(currentFunction.as_mut().unwrap()).unwrap().body.push((token.location.clone(),Instruction::CALLRAW(external.typ.prefix().clone()+&ext+&external.typ.suffix())));
+                                body.push((token.location.clone(),Instruction::CALLRAW(external.typ.prefix().clone()+&ext+&external.typ.suffix())));
                                 break;
                             }
                         }
@@ -1531,22 +1726,26 @@ fn parse_tokens_to_build(lexer: &mut Lexer, program: &mut CmdProgram) -> BuildPr
                             match typ {
                                 
                                 IntrinsicType::POP => {
-                                    build.functions.get_mut(currentFunction.as_mut().unwrap()).unwrap().body.push((token.location.clone(),Instruction::POP(OfP::REGISTER(reg))));
+                                    let body = currentScope.body_unwrap_mut().unwrap();
+                                    body.push((token.location.clone(),Instruction::POP(OfP::REGISTER(reg))));
                                 }
                                 IntrinsicType::PUSH => {
-                                    build.functions.get_mut(currentFunction.as_mut().unwrap()).unwrap().body.push((token.location.clone(),Instruction::PUSH(OfP::REGISTER(reg))));
+                                    let body = currentScope.body_unwrap_mut().unwrap();
+                                    body.push((token.location.clone(),Instruction::PUSH(OfP::REGISTER(reg))));
                                 }
                                 IntrinsicType::SET => {
                                     let token = par_expect!(lexer.currentLocation,lexer.next(),"abruptly ran out of tokens");
                                     match token.typ {
                                         TokenType::Number32(data) => {
                                             if reg.size() >= 4 {
-                                                build.functions.get_mut(currentFunction.as_mut().unwrap()).unwrap().body.push((token.location,Instruction::MOV(OfP::REGISTER(reg), OfP::RAW(data as i64))))
+                                                let body = currentScope.body_unwrap_mut().unwrap();
+                                                body.push((token.location,Instruction::MOV(OfP::REGISTER(reg), OfP::RAW(data as i64))))
                                             }
                                         }
                                         TokenType::Number64(data) => {
                                             if reg.size() >= 8 {
-                                                build.functions.get_mut(currentFunction.as_mut().unwrap()).unwrap().body.push((token.location,Instruction::MOV(OfP::REGISTER(reg), OfP::RAW(data))))
+                                                let body = currentScope.body_unwrap_mut().unwrap();
+                                                body.push((token.location,Instruction::MOV(OfP::REGISTER(reg), OfP::RAW(data))))
                                             }
                                         }
                                         _ => par_error!(token,"Unexpected Type for Mov Intrinsic. Expected Number32/Number64 but found {}",token.typ.to_string(false))
@@ -1562,27 +1761,28 @@ fn parse_tokens_to_build(lexer: &mut Lexer, program: &mut CmdProgram) -> BuildPr
                             if let Some(reg2) = Register::from_string(&Word) {
                                 par_assert!(token,reg.size()==reg2.size(),"Gotten two differently sized registers to one op!");
                                 let regOp = lexer.next().expect(&format!("(P) [ERROR] {}:{}:{}: Unexpected register operation!",token.location.clone().file,&token.location.clone().linenumber,&token.location.clone().character));
+                                let body = currentScope.body_unwrap_mut().unwrap();
                                 match regOp.typ {
                                     TokenType::IntrinsicType(typ) => {
                                         
                                         match typ {
                                             IntrinsicType::ADD => {
-                                                build.functions.get_mut(currentFunction.as_mut().unwrap()).unwrap().body.push((token.location.clone(),Instruction::ADD(OfP::REGISTER(reg), OfP::REGISTER(reg2))))
+                                                body.push((token.location.clone(),Instruction::ADD(OfP::REGISTER(reg), OfP::REGISTER(reg2))))
                                             }
                                             IntrinsicType::SUB => {
-                                                build.functions.get_mut(currentFunction.as_mut().unwrap()).unwrap().body.push((token.location.clone(),Instruction::SUB(OfP::REGISTER(reg), OfP::REGISTER(reg2))))
+                                                body.push((token.location.clone(),Instruction::SUB(OfP::REGISTER(reg), OfP::REGISTER(reg2))))
                                             }
                                             IntrinsicType::MUL => {
-                                                build.functions.get_mut(currentFunction.as_mut().unwrap()).unwrap().body.push((token.location.clone(),Instruction::MUL(OfP::REGISTER(reg), OfP::REGISTER(reg2))))
+                                                body.push((token.location.clone(),Instruction::MUL(OfP::REGISTER(reg), OfP::REGISTER(reg2))))
                                             }
                                             IntrinsicType::EQ => {
-                                                build.functions.get_mut(currentFunction.as_mut().unwrap()).unwrap().body.push((token.location.clone(),Instruction::EQUALS(OfP::REGISTER(reg), OfP::REGISTER(reg2))))
+                                                body.push((token.location.clone(),Instruction::EQUALS(OfP::REGISTER(reg), OfP::REGISTER(reg2))))
                                             }
                                             IntrinsicType::DIV => {
-                                                build.functions.get_mut(currentFunction.as_mut().unwrap()).unwrap().body.push((token.location.clone(),Instruction::DIV(OfP::REGISTER(reg), OfP::REGISTER(reg2))))
+                                                body.push((token.location.clone(),Instruction::DIV(OfP::REGISTER(reg), OfP::REGISTER(reg2))))
                                             }
                                             IntrinsicType::SET => {
-                                                build.functions.get_mut(currentFunction.as_mut().unwrap()).unwrap().body.push((token.location.clone(),Instruction::MOV(OfP::REGISTER(reg), OfP::REGISTER(reg2))))
+                                                body.push((token.location.clone(),Instruction::MOV(OfP::REGISTER(reg), OfP::REGISTER(reg2))))
                                             }
                                             other => par_error!(token,"Unexpected Intrinsic! Expected Register Intrinsic but found {}",other.to_string(false))
                                         }
@@ -1602,35 +1802,41 @@ fn parse_tokens_to_build(lexer: &mut Lexer, program: &mut CmdProgram) -> BuildPr
                     }
                     }
                 }
-                if !isvalid {
-                    let func = build.functions.get_mut(currentFunction.as_mut().unwrap()).unwrap();
-                    isvalid = func.locals.contains_key(word);
+                if !isvalid && currentScope.locals_is_some() {
+                    
+                    isvalid = currentScope.locals_unwrap_mut().unwrap().contains_key(word);
+                    
                     if isvalid {
                         let regOp = par_expect!(lexer.currentLocation,lexer.next(),"Unexpected variable operation or another variable!");
+                        
                         match regOp.typ {
                             TokenType::IntrinsicType(Typ) => {
                                 match Typ {
                                     IntrinsicType::POP => {
+                                        let body = currentScope.body_unwrap_mut().unwrap();
                                         // TODO: There might be some optimzation to do with references of strings instead of actual strings
-                                        func.body.push((regOp.location,Instruction::POP(OfP::LOCALVAR(word.clone()))));
+                                        body.push((regOp.location,Instruction::POP(OfP::LOCALVAR(word.clone()))));
                                     },
                                     IntrinsicType::PUSH => {
+                                        let body = currentScope.body_unwrap_mut().unwrap();
                                         // TODO: There might be some optimzation to do with references of strings instead of actual strings
-                                        func.body.push((regOp.location,Instruction::PUSH(OfP::LOCALVAR(word.clone()))));
+                                        body.push((regOp.location,Instruction::PUSH(OfP::LOCALVAR(word.clone()))));
                                     },
                                     IntrinsicType::SET => {
                                         let operand = par_expect!(lexer.currentLocation,lexer.next(),"Expected another variable, a constant integer or a (string: not yet implemented)!");
                                         match operand.typ {
                                             TokenType::WordType(ref other) => {
                                                 
-                                                if func.locals.contains_key(other) {
+                                                if currentScope.locals_unwrap().unwrap().contains_key(other) {
                                                     // TODO: There might be some optimzation to do with references of strings instead of actual strings
-                                                    func.body.push((operand.location,Instruction::MOV(OfP::LOCALVAR(word.clone()), OfP::LOCALVAR(other.clone()))))
+                                                    let body = currentScope.body_unwrap_mut().unwrap();
+                                                    body.push((operand.location,Instruction::MOV(OfP::LOCALVAR(word.clone()), OfP::LOCALVAR(other.clone()))))
                                                 }
                                                 else if let Some(reg) = Register::from_string(&other) {
-                                                    par_assert!(operand,reg.size() == func.locals.get(word).unwrap().typ.get_size(program), "Register assigned to differently sized variable, Variable size: {}, Register size: {}",reg.size(),func.locals.get(word).unwrap().typ.get_size(program));
+                                                    par_assert!(operand,reg.size() == currentScope.locals_unwrap().unwrap().get(word).unwrap().typ.get_size(program), "Register assigned to differently sized variable, Variable size: {}, Register size: {}",reg.size(),currentScope.locals_unwrap_mut().unwrap().get(word).unwrap().typ.get_size(program));
                                                     // TODO: There might be some optimzation to do with references of strings instead of actual strings
-                                                    func.body.push((operand.location,Instruction::MOV(OfP::LOCALVAR(word.clone()), OfP::REGISTER(reg))))
+                                                    let body = currentScope.body_unwrap_mut().unwrap();
+                                                    body.push((operand.location,Instruction::MOV(OfP::LOCALVAR(word.clone()), OfP::REGISTER(reg))))
                                                 }
                                                 else {
                                                     par_error!(operand,"Could not find variable or register {}",other);
@@ -1638,12 +1844,14 @@ fn parse_tokens_to_build(lexer: &mut Lexer, program: &mut CmdProgram) -> BuildPr
                                             },
                                             TokenType::StringType(_) => todo!("Implement strings with local variables"),
                                             TokenType::Number32(val) => {
+                                                let body = currentScope.body_unwrap_mut().unwrap();
                                                 // TODO: There might be some optimzation to do with references of strings instead of actual strings
-                                                func.body.push((operand.location,Instruction::MOV(OfP::LOCALVAR(word.clone()), OfP::RAW(val as i64))))
+                                                body.push((operand.location,Instruction::MOV(OfP::LOCALVAR(word.clone()), OfP::RAW(val as i64))))
                                             },
                                             TokenType::Number64(val) => {
+                                                let body = currentScope.body_unwrap_mut().unwrap();
                                                 // TODO: There might be some optimzation to do with references of strings instead of actual strings
-                                                func.body.push((operand.location,Instruction::MOV(OfP::LOCALVAR(word.clone()), OfP::RAW(val))))
+                                                body.push((operand.location,Instruction::MOV(OfP::LOCALVAR(word.clone()), OfP::RAW(val))))
                                             },
                                             _ => {
                                                 par_error!(operand,"Unexpected operand for = intrinsic! Expected either a constant integer, another variable or a (string: not yet implemented) but found {}",operand.typ.to_string(false))
@@ -1656,7 +1864,7 @@ fn parse_tokens_to_build(lexer: &mut Lexer, program: &mut CmdProgram) -> BuildPr
                                 }
                             },
                             TokenType::WordType(Word) => {
-                                if func.locals.contains_key(&Word) {
+                                if currentScope.locals_unwrap_mut().unwrap().contains_key(&Word) {
                                     
                                     let regOp = lexer.next().expect(&format!("(P) [ERROR] {}:{}:{}: Unexpected register operation!",token.location.clone().file,&token.location.clone().linenumber,&token.location.clone().character));
                                     match regOp.typ {
@@ -1664,19 +1872,24 @@ fn parse_tokens_to_build(lexer: &mut Lexer, program: &mut CmdProgram) -> BuildPr
                                             
                                             match typ {
                                                 IntrinsicType::ADD => {
-                                                    build.functions.get_mut(currentFunction.as_mut().unwrap()).unwrap().body.push((token.location.clone(),Instruction::ADD(OfP::LOCALVAR(word.clone()), OfP::LOCALVAR(Word.clone()))))
+                                                    let body = currentScope.body_unwrap_mut().unwrap();
+                                                    body.push((token.location.clone(),Instruction::ADD(OfP::LOCALVAR(word.clone()), OfP::LOCALVAR(Word.clone()))))
                                                 }
                                                 IntrinsicType::SUB => {
-                                                    build.functions.get_mut(currentFunction.as_mut().unwrap()).unwrap().body.push((token.location.clone(),Instruction::SUB(OfP::LOCALVAR(word.clone()), OfP::LOCALVAR(Word.clone()))))
+                                                    let body = currentScope.body_unwrap_mut().unwrap();
+                                                    body.push((token.location.clone(),Instruction::SUB(OfP::LOCALVAR(word.clone()), OfP::LOCALVAR(Word.clone()))))
                                                 }
                                                 IntrinsicType::MUL => {
-                                                    build.functions.get_mut(currentFunction.as_mut().unwrap()).unwrap().body.push((token.location.clone(),Instruction::MUL(OfP::LOCALVAR(word.clone()), OfP::LOCALVAR(Word.clone()))))
+                                                    let body = currentScope.body_unwrap_mut().unwrap();
+                                                    body.push((token.location.clone(),Instruction::MUL(OfP::LOCALVAR(word.clone()), OfP::LOCALVAR(Word.clone()))))
                                                 }
                                                 IntrinsicType::EQ => {
-                                                    build.functions.get_mut(currentFunction.as_mut().unwrap()).unwrap().body.push((token.location.clone(),Instruction::EQUALS(OfP::LOCALVAR(word.clone()), OfP::LOCALVAR(Word.clone()))))
+                                                    let body = currentScope.body_unwrap_mut().unwrap();
+                                                    body.push((token.location.clone(),Instruction::EQUALS(OfP::LOCALVAR(word.clone()), OfP::LOCALVAR(Word.clone()))))
                                                 }
                                                 IntrinsicType::DIV => {
-                                                    build.functions.get_mut(currentFunction.as_mut().unwrap()).unwrap().body.push((token.location.clone(),Instruction::DIV(OfP::LOCALVAR(word.clone()), OfP::LOCALVAR(Word.clone()))))
+                                                    let body = currentScope.body_unwrap_mut().unwrap();
+                                                    body.push((token.location.clone(),Instruction::DIV(OfP::LOCALVAR(word.clone()), OfP::LOCALVAR(Word.clone()))))
                                                 }
                                                 other => par_error!(token, "Unexpected Intrinsic! Expected Register Intrinsic but found {}",other.to_string(false))
                                             }
@@ -1697,39 +1910,39 @@ fn parse_tokens_to_build(lexer: &mut Lexer, program: &mut CmdProgram) -> BuildPr
                     }
                 }
                 if !isvalid {
-                    isvalid = build.functions.contains_key(word);
+                    isvalid = foundFuncs.contains(word);
+                    let body = currentScope.body_unwrap_mut().unwrap();
                     if isvalid {
-                        let func = build.functions.get_mut(currentFunction.as_mut().unwrap()).unwrap();
                         // TODO: There might be some optimzation to do with references of strings instead of actual strings
-                        func.body.push((token.location.clone(),Instruction::CALL(word.clone())));
-                        
+                        body.push((token.location.clone(),Instruction::CALL(word.clone())));
                     }
                 }
                 if !isvalid  {
                     isvalid = build.constdefs.contains_key(word);
                     if isvalid {
-                        let func = build.functions.get_mut(currentFunction.as_mut().unwrap()).unwrap();
                         let cons = build.constdefs.get(word).unwrap();
                         match cons.typ {
                             RawConstValueType::INT(ref val) => {
-                                
-                                func.body.push((token.location.clone(),Instruction::MOV(OfP::REGISTER(Register::RAX), OfP::RAW(*val as i64))));
-                                
-                                func.body.push((token.location.clone(),Instruction::PUSH(OfP::REGISTER(Register::RAX))));
+                                let body = currentScope.body_unwrap_mut().unwrap();
+                                body.push((token.location.clone(),Instruction::MOV(OfP::REGISTER(Register::RAX), OfP::RAW(*val as i64))));
+                                body.push((token.location.clone(),Instruction::PUSH(OfP::REGISTER(Register::RAX))));
                             }
                             RawConstValueType::LONG(ref val) => {
-                                func.body.push((token.location.clone(),Instruction::MOV(OfP::REGISTER(Register::RAX), OfP::RAW(*val as i64))));
-                                func.body.push((token.location.clone(),Instruction::PUSH(OfP::REGISTER(Register::RAX))));
+                                let body = currentScope.body_unwrap_mut().unwrap();
+                                body.push((token.location.clone(),Instruction::MOV(OfP::REGISTER(Register::RAX), OfP::RAW(*val as i64))));
+                                body.push((token.location.clone(),Instruction::PUSH(OfP::REGISTER(Register::RAX))));
                             }
                             RawConstValueType::STR(val) => {
-                                func.body.push((token.location.clone(),Instruction::PUSH(OfP::STR(val, ProgramStringType::STR))));
+                                let body = currentScope.body_unwrap_mut().unwrap();
+                                body.push((token.location.clone(),Instruction::PUSH(OfP::STR(val, ProgramStringType::STR))));
                             }
                         }
                     }
                 }
-                if !isvalid {
-                    let func = build.functions.get_mut(currentFunction.as_mut().unwrap()).unwrap();
-                    for (p_name,_) in func.contract.Inputs.iter() {
+                if !isvalid && currentScope.contract_is_some(){
+                    //let func = build.functions.get_mut(currentFunction.as_mut().unwrap()).unwrap();
+                    let contract = currentScope.contract_unwrap().unwrap();
+                    for (p_name,_) in contract.Inputs.iter() {
                         if p_name == word {
                             isvalid = true;
                             let f = par_expect!(lexer.currentLocation, lexer.next(), "Error: Abruptly ran out of tokens for parameter operation");
@@ -1738,7 +1951,8 @@ fn parse_tokens_to_build(lexer: &mut Lexer, program: &mut CmdProgram) -> BuildPr
                                 TokenType::IntrinsicType(typ) => {
                                     match typ {
                                         IntrinsicType::PUSH => {
-                                            func.body.push((lexer.currentLocation.clone(), Instruction::PUSH(OfP::PARAM(word.clone()))))
+                                            let body = currentScope.body_unwrap_mut().unwrap();
+                                            body.push((lexer.currentLocation.clone(), Instruction::PUSH(OfP::PARAM(word.clone()))))
                                         },
                                         _ => {
                                             par_error!(lexer.currentLocation, "Unknown operation for parameter {}",typ.to_string(false))
@@ -1799,21 +2013,28 @@ fn parse_tokens_to_build(lexer: &mut Lexer, program: &mut CmdProgram) -> BuildPr
                     }
                     IntrinsicType::Func => {
                         
-                        let funcName = lexer.next();
-                        let funcName = par_expect!(lexer.currentLocation,funcName,"Unexpected abtrupt end of tokens in func");
+                        let funcName: Option<Token> = lexer.next();
+                        let funcName: Token = par_expect!(lexer.currentLocation,funcName,"Unexpected abtrupt end of tokens in func");
                         match funcName.typ {
                             TokenType::WordType(Word) => {
-                        
                                 par_assert!(token,build.functions.get(&Word).is_none(),"Multiply defined symbols {}!",Word);
                                 let contract = parse_function_contract(lexer);
-                                currentFunction = Some(Word.clone()); // Make currentFunction a shared reference with Rc<RefCell<>>
-                                if Word != "main" {
-                                    build.functions.insert(Word, Function { contract, body: vec![(token.location.clone(),Instruction::FNBEGIN())], location: token.location.clone(), locals: HashMap::new() });
+                                //currentFunction = Some(Word.clone()); // Make currentFunction a shared reference with Rc<RefCell<>>
+                                if Word == "main" {
+                                    //build.functions.insert(Word.clone(), None); //Function { contract: contract.clone(), body:  vec![], location: token.location.clone(), locals: HashMap::new() }
+                                    foundFuncs.insert(Word.clone());
+                                    scopeStack.push(Scope { typ: ScopeType::FUNCTION(Function { contract: contract.clone(), body:  vec![], location: token.location.clone(), locals: HashMap::new() }, Word), hasBeenOpened: false });
+                                    build.functions.reserve(1);
                                 }
                                 else {
-                                    build.functions.insert(Word, Function { contract, body: vec![], location: token.location.clone(), locals: HashMap::new() });
+                                    //build.functions.insert(Word.clone(), None);//Function { contract: contract.clone(), body:  vec![(token.location.clone(),Instruction::FNBEGIN())], location: token.location.clone(), locals:  HashMap::new() }
+                                    foundFuncs.insert(Word.clone());
+                                    scopeStack.push(Scope { typ: ScopeType::FUNCTION(Function { contract: contract.clone(), body:  vec![(token.location.clone(),Instruction::FNBEGIN())], location: token.location.clone(), locals: HashMap::new() }, Word), hasBeenOpened: false });
+                                    build.functions.reserve(1);
                                 }
-                                scopeStack.push(ScopeOpener{typ: ScopeOpenerType::FUNC, hasBeenOpened: false, cinstruct_size: 0});
+                                //let v = build.functions.get_mut(&Word).unwrap();
+                                //Scope {typ: ScopeType::FUNC, hasBeenOpened: false,inst: InstBodyType::Func(v.body.clone()), locals: LocalBodyType::Func(v.locals.clone()), contract: Some(contract)}
+                                //scopeStack.push(Scope { typ: ScopeType::FUNCTION(FunctionScope { func: v }), hasBeenOpened: false});
                             }
                             Other => par_error!(token,"Unexpected behaviour! Expected type Word but found {}",Other.to_string(false))
                         }
@@ -1830,88 +2051,60 @@ fn parse_tokens_to_build(lexer: &mut Lexer, program: &mut CmdProgram) -> BuildPr
                             
                             par_assert!(token,!s.hasBeenOpened, "Scope already opened! {:?}",scopeStack);
                             s.hasBeenOpened = true;
-                            let currentFunc = build.functions.get_mut(currentFunction.as_mut().unwrap()).unwrap();
+                            //let currentFunc = build.functions.get_mut(currentFunction.as_mut().unwrap()).unwrap();
                             
-                            match s.typ {
-                                ScopeOpenerType::FUNC => {}
-                                ScopeOpenerType::IF => {
-                                    s.cinstruct_size = currentFunc.body.len();
-                                    currentFunc.body.push(( token.location.clone(),Instruction::CONDITIONAL_JUMP(currentFunc.body.len()+2) ));
-                                    currentFunc.body.push(( token.location.clone(),Instruction::JUMP(0) ));
+                            match &s.typ {
+                                ScopeType::FUNCTION(_, _) => {}
+                                ScopeType::NORMAL(normal) => {
+                                    match normal.typ {
+                                        NormalScopeType::IF => {
+                                           par_assert!(token, ln > 1, "Error: Alone if outside of any scope is not allowed!");
+                                           let prev = scopeStack.get_mut(ln-2).unwrap();
+                                           // TODO: implement expect_mut()
+                                           par_assert!(token, prev.body_is_some(), "Error: if can not be declared inside of scope of {} as they do not allow instructions!",prev.typ.to_string(true));
+                                        }
+                                        NormalScopeType::ELSE | NormalScopeType::EMPTY => {}
+                                    }
                                 }
-                                ScopeOpenerType::EMPTY => {}
-                                ScopeOpenerType::ELSE => {},
                             }
-                            currentFunc.body.push(( token.location.clone(),Instruction::SCOPEBEGIN));
                         }
                         else {
-                            let currentFunc = build.functions.get_mut(currentFunction.as_mut().unwrap()).unwrap();
-                            currentFunc.body.push(( token.location.clone(), Instruction::SCOPEBEGIN));
-                            scopeStack.push( ScopeOpener { hasBeenOpened: true, typ: ScopeOpenerType::EMPTY, cinstruct_size: build.functions.get_mut(currentFunction.as_mut().unwrap()).unwrap().body.len() });
+                            //inst: InstBodyType::Normal(vec![]), locals: LocalBodyType::None, contract: None, hasBeenOpened: true }
+                            scopeStack.push(Scope { typ: ScopeType::NORMAL(NormalScope { typ: NormalScopeType::EMPTY, body: vec![] }), hasBeenOpened: true});
                         }
                     }
                     IntrinsicType::CLOSECURLY => {
-                        if let Some(sc) = scopeStack.pop(){
+                        if let Some(sc) = scopeStack.pop() {
                             par_assert!(token,sc.hasBeenOpened, "Error: scope closed but never opened!");
-                            
-                            let currentFunc = build.functions.get_mut(currentFunction.as_mut().unwrap()).unwrap();
                             match sc.typ {
-                                ScopeOpenerType::FUNC => {
-                                    build.functions.get_mut(currentFunction.as_mut().unwrap()).unwrap().body.push((token.location.clone(),Instruction::SCOPEEND));
-                                    currentFunction = None;
+                                ScopeType::FUNCTION(mut func, name) => {
+                                    // TODO: Redo system, since we know that if the scope is Function it is always going to have a body
+                                    // Meaning we basically need to redo this
+                                    //let body = sc.body_unwrap_mut().unwrap();
+                                    func.body.push((token.location.clone(),Instruction::SCOPEEND));
+                                    build.functions.insert(name, func);
                                 },
-                                ScopeOpenerType::IF => {
-                                    #[allow(unused_assignments)]
-                                    let mut len: usize = 0;
-                                    {
-                                        let body = &mut currentFunc.body;
-                                        
-                                        
-                                        if let Some(ntok) = lexer.peekable().peek() {
-                                            match ntok.typ {
-                                                TokenType::IntrinsicType(typ) => {
-                                                    match typ {
-                                                        IntrinsicType::ELSE => {
-                                                            body.push((token.location.clone(),Instruction::JUMP(0)));
-                                                            scopeStack.push( ScopeOpener { hasBeenOpened: false, typ: ScopeOpenerType::ELSE, cinstruct_size: body.len() });
-                                                        },
-                                                        _ => {}
-                                                    }
-                                                }
-                                                _ => {}
-                                            } 
-                                        }
-                                        len = body.len();
-                                    }
-                                    let body = &mut currentFunc.body;
-                                    let (_, p) = par_expect!(token.location.clone(),body.get_mut(sc.cinstruct_size+1), "Error");
-                                    match p {
-                                        Instruction::JUMP(loc) => {
-                                            *loc = len;
-                                        }
-                                        _ => par_error!(token,"Unexpected Instruction! This is probably due to a bug inside the program! {:?}",p)
-                                    }
+                                ScopeType::NORMAL(normal) => {
+                                    match normal.typ {
+                                        NormalScopeType::IF => {
+                                            let currentScope = getTopMut(&mut scopeStack).unwrap();
 
-                                    build.functions.get_mut(currentFunction.as_mut().unwrap()).unwrap().body.push((token.location.clone(),Instruction::SCOPEEND))
-                                },
-                                ScopeOpenerType::EMPTY => {
-                                    build.functions.get_mut(currentFunction.as_mut().unwrap()).unwrap().body.push((token.location.clone(),Instruction::SCOPEEND))
-                                }
-                                ScopeOpenerType::ELSE => {
-                                    let body = &mut currentFunc.body;
-                                    let len = body.len();
-                                    
-                                    let (_,toc) = body.get_mut(sc.cinstruct_size-1).unwrap();
-                                    match toc {
-                                        Instruction::JUMP(data) => {
-                                            *data = len;
+                                            let body = par_expect!(token,currentScope.body_unwrap_mut(), "Error: Can not close if, because it is inside a {} which doesn't support instructions!",currentScope.typ.to_string(false));
+                                            body.push((token.location.clone(),Instruction::EXPAND_IF_SCOPE(normal)))
+                                        },
+                                        NormalScopeType::EMPTY => {
+                                            let currentScope = getTopMut(&mut scopeStack).unwrap();
+                                            let body = par_expect!(token,currentScope.body_unwrap_mut(), "Error: Can not close if, because it is inside a {} which doesn't support instructions!",currentScope.typ.to_string(false));
+                                            body.push((token.location.clone(),Instruction::EXPAND_SCOPE(normal)));
                                         }
-                                        _ => {
-                                            par_error!(token, "Invalid instruction for else token! Expected jump! This is probably due to a bug in the system {:?}",toc)
-                                        }
+                                        NormalScopeType::ELSE => {
+                                            let currentScope = getTopMut(&mut scopeStack).unwrap();
+
+                                            let body = par_expect!(token,currentScope.body_unwrap_mut(), "Error: Can not close if, because it is inside a {} which doesn't support instructions!",currentScope.typ.to_string(false));
+                                            body.push((token.location.clone(),Instruction::EXPAND_ELSE_SCOPE(normal)));
+                                        },
                                     }
-                                    build.functions.get_mut(currentFunction.as_mut().unwrap()).unwrap().body.push((token.location.clone(),Instruction::SCOPEEND))
-                                },
+                                }
                             }
                             
                         }
@@ -1920,30 +2113,37 @@ fn parse_tokens_to_build(lexer: &mut Lexer, program: &mut CmdProgram) -> BuildPr
                         }
                     }
                     IntrinsicType::POP => {
-                        build.functions.get_mut(currentFunction.as_mut().unwrap()).unwrap().body.push((token.location.clone(),Instruction::POP(OfP::REGISTER(Register::RAX))));
+                        par_assert!(token, scopeStack.len() > 0 && getTopMut(&mut scopeStack).unwrap().body_is_some(), "Error: Unexpected pop intrinsic outside of scope! Scopes of type {} do not support instructions!",getTopMut(&mut scopeStack).unwrap().typ.to_string(false));
+                        let body = getTopMut(&mut scopeStack).unwrap().body_unwrap_mut().unwrap();
+                        body.push((token.location.clone(),Instruction::POP(OfP::REGISTER(Register::RAX))));
                     }
                     IntrinsicType::PUSH => todo!("{}",lexer.currentLocation.loc_display()),
                     IntrinsicType::SET => todo!("{}",lexer.currentLocation.loc_display()),
                     IntrinsicType::ADD => {
-                        par_assert!(token,currentFunction.is_some(), "Unexpected ADD operation of entry point!");
-                        build.functions.get_mut(currentFunction.as_mut().unwrap()).unwrap().body.push((token.location.clone(),Instruction::POP(OfP::REGISTER(Register::EAX))));
-                        build.functions.get_mut(currentFunction.as_mut().unwrap()).unwrap().body.push((token.location.clone(),Instruction::POP(OfP::REGISTER(Register::R8D))));
-                        build.functions.get_mut(currentFunction.as_mut().unwrap()).unwrap().body.push((token.location.clone(),Instruction::ADD(OfP::REGISTER(Register::EAX), OfP::REGISTER(Register::R8D))))
+                        par_assert!(token, scopeStack.len() > 0 && getTopMut(&mut scopeStack).unwrap().body_is_some(), "Error: Unexpected add intrinsic outside of scope! Scopes of type {} do not support instructions!",getTopMut(&mut scopeStack).unwrap().typ.to_string(false));
+                        let body = getTopMut(&mut scopeStack).unwrap().body_unwrap_mut().unwrap();
+                        body.push((token.location.clone(),Instruction::POP(OfP::REGISTER(Register::EAX))));
+                        body.push((token.location.clone(),Instruction::POP(OfP::REGISTER(Register::R8D))));
+                        body.push((token.location.clone(),Instruction::ADD(OfP::REGISTER(Register::EAX), OfP::REGISTER(Register::R8D))))
                     }
                     IntrinsicType::SUB => {
-                        par_assert!(token,currentFunction.is_some(), "Unexpected SUB operation of entry point!");
-                        build.functions.get_mut(currentFunction.as_mut().unwrap()).unwrap().body.push((token.location.clone(),Instruction::POP(OfP::REGISTER(Register::EAX))));
-                        build.functions.get_mut(currentFunction.as_mut().unwrap()).unwrap().body.push((token.location.clone(),Instruction::POP(OfP::REGISTER(Register::R8D))));
-                        build.functions.get_mut(currentFunction.as_mut().unwrap()).unwrap().body.push((token.location.clone(),Instruction::SUB(OfP::REGISTER(Register::EAX), OfP::REGISTER(Register::R8D))))
+                        par_assert!(token, scopeStack.len() > 0 && getTopMut(&mut scopeStack).unwrap().body_is_some(), "Error: Unexpected sub intrinsic outside of scope! Scopes of type {} do not support instructions!",getTopMut(&mut scopeStack).unwrap().typ.to_string(false));
+                        let body = getTopMut(&mut scopeStack).unwrap().body_unwrap_mut().unwrap();
+                        body.push((token.location.clone(),Instruction::POP(OfP::REGISTER(Register::EAX))));
+                        body.push((token.location.clone(),Instruction::POP(OfP::REGISTER(Register::R8D))));
+                        body.push((token.location.clone(),Instruction::SUB(OfP::REGISTER(Register::EAX), OfP::REGISTER(Register::R8D))))
                     }
                     IntrinsicType::MUL => {
-                        par_assert!(token,currentFunction.is_some(), "Unexpected MUL operation of entry point!");
-                        build.functions.get_mut(currentFunction.as_mut().unwrap()).unwrap().body.push((token.location.clone(),Instruction::POP(OfP::REGISTER(Register::EAX))));
-                        build.functions.get_mut(currentFunction.as_mut().unwrap()).unwrap().body.push((token.location.clone(),Instruction::POP(OfP::REGISTER(Register::R8D))));
-                        build.functions.get_mut(currentFunction.as_mut().unwrap()).unwrap().body.push((token.location.clone(),Instruction::MUL(OfP::REGISTER(Register::EAX), OfP::REGISTER(Register::R8D))))
+                        par_assert!(token, scopeStack.len() > 0 && getTopMut(&mut scopeStack).unwrap().body_is_some(), "Error: Unexpected multiply intrinsic outside of scope! Scopes of type {} do not support instructions!",getTopMut(&mut scopeStack).unwrap().typ.to_string(false));
+                        let body = getTopMut(&mut scopeStack).unwrap().body_unwrap_mut().unwrap();
+                        body.push((token.location.clone(),Instruction::POP(OfP::REGISTER(Register::EAX))));
+                        body.push((token.location.clone(),Instruction::POP(OfP::REGISTER(Register::R8D))));
+                        body.push((token.location.clone(),Instruction::MUL(OfP::REGISTER(Register::EAX), OfP::REGISTER(Register::R8D))))
                     }
                     IntrinsicType::RET => {
-                        build.functions.get_mut(currentFunction.as_mut().unwrap()).unwrap().body.push((token.location.clone(),Instruction::RET()));
+                        par_assert!(token, scopeStack.len()> 0 && getTopMut(&mut scopeStack).unwrap().body_is_some(), "Error: Unexpected return intrinsic outside of scope! Scopes of type {} do not support instructions!",getTopMut(&mut scopeStack).unwrap().typ.to_string(false));
+                        let body = getTopMut(&mut scopeStack).unwrap().body_unwrap_mut().unwrap();
+                        body.push((token.location.clone(),Instruction::RET()));
                     },
                     IntrinsicType::INCLUDE => {
                         let includeName = par_expect!(lexer.currentLocation,lexer.next(),"Error: abruptly ran out of tokens");
@@ -1982,7 +2182,7 @@ fn parse_tokens_to_build(lexer: &mut Lexer, program: &mut CmdProgram) -> BuildPr
                                         for (_floc, funcDef) in build2.functions.iter_mut() {
                                             for (_iloc,Inst) in funcDef.body.iter_mut() {
                                                 match Inst {
-                                                    Instruction::PUSH(strid) => {
+                                                    Instruction::PUSH(ref mut strid) => {
                                                         match strid {
                                                             OfP::STR(strid,_) => {
                                                                 if *strid == orgstrdefId {
@@ -2025,13 +2225,15 @@ fn parse_tokens_to_build(lexer: &mut Lexer, program: &mut CmdProgram) -> BuildPr
                         }
                     },
                     IntrinsicType::IF => {
-                        scopeStack.push( ScopeOpener { hasBeenOpened: false, typ: ScopeOpenerType::IF, cinstruct_size: build.functions.get_mut(currentFunction.as_mut().unwrap()).unwrap().body.len().clone() });
+                        scopeStack.push(Scope { typ: ScopeType::NORMAL(NormalScope { typ: NormalScopeType::IF, body: vec![] }), hasBeenOpened: false })
+                        //scopeStack.push( ScopeOpener { hasBeenOpened: false, typ: ScopeType::IF, cinstruct_size: build.functions.get_mut(currentFunction.as_mut().unwrap()).unwrap().body.len().clone() });
                     },
                     IntrinsicType::EQ => {
-                        let currentFunc = build.functions.get_mut(currentFunction.as_mut().unwrap()).unwrap();
-                        currentFunc.body.push((token.location.clone(),Instruction::POP(OfP::REGISTER(Register::RAX))));
-                        currentFunc.body.push((token.location.clone(),Instruction::POP(OfP::REGISTER(Register::R8))));
-                        currentFunc.body.push((token.location.clone(),Instruction::EQUALS(OfP::REGISTER(Register::RAX), OfP::REGISTER(Register::R8))));
+                        par_assert!(token, scopeStack.len() > 0 && getTopMut(&mut scopeStack).unwrap().body_is_some(), "Error: Unexpected equals intrinsic outside of scope! Scopes of type {} do not support instructions!",getTopMut(&mut scopeStack).unwrap().typ.to_string(false));
+                        let body = getTopMut(&mut scopeStack).unwrap().body_unwrap_mut().unwrap();
+                        body.push((token.location.clone(),Instruction::POP(OfP::REGISTER(Register::RAX))));
+                        body.push((token.location.clone(),Instruction::POP(OfP::REGISTER(Register::R8))));
+                        body.push((token.location.clone(),Instruction::EQUALS(OfP::REGISTER(Register::RAX), OfP::REGISTER(Register::R8))));
                         
                     },
                     IntrinsicType::CONSTANT => {
@@ -2039,7 +2241,7 @@ fn parse_tokens_to_build(lexer: &mut Lexer, program: &mut CmdProgram) -> BuildPr
                         let first = par_expect!(lexer.currentLocation,first,"abruptly ran out of tokens in constant name definition");
                         let name: String = match first.typ {
                             TokenType::WordType(ref word) => {
-                                par_assert!(first, !build.constdefs.contains_key(word) && !build.functions.contains_key(word), "Error: multiple constant symbol definitions");
+                                par_assert!(first, !build.constdefs.contains_key(word) && !foundFuncs.contains(word), "Error: multiple constant symbol definitions");
                                 word.to_string()
                             }
                             _ => {
@@ -2091,15 +2293,19 @@ fn parse_tokens_to_build(lexer: &mut Lexer, program: &mut CmdProgram) -> BuildPr
                         let loc = nametok.location.clone();
                         match nametok.typ {
                             TokenType::WordType(name) => {
-                                par_assert!(loc, !build.constdefs.contains_key(&name) && !build.functions.contains_key(&name), "Error: multiply defined symbols");
-                                let currentFunc = build.functions.get_mut(&currentFunction.clone().expect("Todo: Global variables are not yet implemented :|")).unwrap();
+                                par_assert!(loc, !build.constdefs.contains_key(&name) && !foundFuncs.contains(&name), "Error: multiply defined symbols");
+                                //let currentFunc = build.functions.get_mut(&currentFunction.clone().expect("Todo: Global variables are not yet implemented :|")).unwrap();
+                                par_assert!(token, scopeStack.len() > 0 && getTopMut(&mut scopeStack).unwrap().body_is_some(), "Error: Unexpected multiply intrinsic outside of scope! Scopes of type {} do not support instructions!",getTopMut(&mut scopeStack).unwrap().typ.to_string(false));
+                                let currentScope = getTopMut(&mut scopeStack).unwrap();
+                                //let body = currentScope.body_unwrap_mut().unwrap();
+                                //let locals = currentScope.locals_unwrap_mut().unwrap();
                                 let typ = par_expect!(lexer.currentLocation, lexer.next(), "Error: abruptly ran out of tokens for let type");                                
                                 par_assert!(typ,typ.typ==TokenType::IntrinsicType(IntrinsicType::DOUBLE_COLIN), "Error: You probably forgot to put a : after the name!");
                                 let typ = par_expect!(lexer.currentLocation, lexer.next(), "Error: abruptly ran out of tokens for let type");
                                 match typ.typ {
                                     TokenType::Definition(def) => {
-                                        currentFunc.locals.insert(name.clone(), LocalVariable { typ: def, operand: 0 });
-                                        currentFunc.body.push((lexer.currentLocation.clone(),Instruction::DEFVAR(name)))
+                                        currentScope.locals_unwrap_mut().unwrap().insert(name.clone(), LocalVariable { typ: def, operand: 0 });
+                                        currentScope.body_unwrap_mut().unwrap().push((lexer.currentLocation.clone(),Instruction::DEFVAR(name)))
                                     }
                                     _ => {
                                         par_error!(typ, "Error: unexpected token type in let definition. Expected VarType but found {}",typ.typ.to_string(false))
@@ -2113,14 +2319,15 @@ fn parse_tokens_to_build(lexer: &mut Lexer, program: &mut CmdProgram) -> BuildPr
                     },
                     IntrinsicType::INTERRUPT => {
                         // TODO: Fix the whole system of currentFunction as this is REALLY REALLY REALLY wasteful
-                        let currentFunc = build.functions.get_mut(&currentFunction.clone().expect("Error: Can not have interrupt outside of functions!")).unwrap();
+                        par_assert!(token, scopeStack.len() > 0 && getTopMut(&mut scopeStack).unwrap().body_is_some(), "Error: Unexpected interrupt intrinsic outside of scope! Scopes of type {} do not support instructions!",getTopMut(&mut scopeStack).unwrap().typ.to_string(false));
+                        let body = getTopMut(&mut scopeStack).unwrap().body_unwrap_mut().unwrap();
                         let lexerNext = par_expect!(lexer.currentLocation,lexer.next(),"Stream of tokens ended abruptly at INTERRUPT call");
                         match lexerNext.typ {
                             TokenType::Number32(val) => {
-                                currentFunc.body.push((lexer.currentLocation.clone(),Instruction::INTERRUPT(val as i64)));
+                                body.push((lexer.currentLocation.clone(),Instruction::INTERRUPT(val as i64)));
                             }
                             TokenType::Number64(val) => {
-                                currentFunc.body.push((lexer.currentLocation.clone(),Instruction::INTERRUPT(val)));
+                                body.push((lexer.currentLocation.clone(),Instruction::INTERRUPT(val)));
                             }
                             _ => {
                                 par_error!(lexerNext, "Unexpected token type for INTERRUPT, {}",lexerNext.typ.to_string(false))
@@ -2129,8 +2336,8 @@ fn parse_tokens_to_build(lexer: &mut Lexer, program: &mut CmdProgram) -> BuildPr
                         
                     },
                     IntrinsicType::RS => {
-                        par_assert!(token,currentFunction.is_some(), "Unexpected rs outside of entry point!");
-                        let currentFunc = build.functions.get_mut(&currentFunction.clone().unwrap()).unwrap();
+                        par_assert!(token, scopeStack.len() > 0 && getTopMut(&mut scopeStack).unwrap().body_is_some(), "Error: Unexpected rs intrinsic outside of scope! Scopes of type {} do not support instructions!",getTopMut(&mut scopeStack).unwrap().typ.to_string(false));
+                        let body = getTopMut(&mut scopeStack).unwrap().body_unwrap_mut().unwrap();
                         //                             Call here: ⌄
                         // PARAM <Reserve Space for return stack> RIP
                         let lexerNext = par_expect!(lexer.currentLocation,lexer.next(),"Stream of tokens ended abruptly at RS call");
@@ -2142,7 +2349,7 @@ fn parse_tokens_to_build(lexer: &mut Lexer, program: &mut CmdProgram) -> BuildPr
                                     match typ {
                                         IntrinsicType::PUSH => {
                                             let Reg = par_expect!(lexer.currentLocation, Register::from_string(Word), "Error: Expected Register but found: {}",Word);
-                                            currentFunc.body.push((lexer.currentLocation.clone(), Instruction::RSPUSH(OfP::REGISTER(Reg))))            
+                                            body.push((lexer.currentLocation.clone(), Instruction::RSPUSH(OfP::REGISTER(Reg))))            
                                         }
                                         _ => {
                                             par_error!(lexerNext.location, "Error: Unexpected Intrinsic Type: {}",typ.to_string(false))
@@ -2164,18 +2371,19 @@ fn parse_tokens_to_build(lexer: &mut Lexer, program: &mut CmdProgram) -> BuildPr
                 }
             }
             TokenType::StringType(Word) => {
-                par_assert!(token.location,currentFunction.is_some(), "Unexpected string definition outside of entry point!");
 
-                
+                par_assert!(lexer.currentLocation, scopeStack.len() > 0 && getTopMut(&mut scopeStack).unwrap().body_is_some(), "Error: Unexpected string outside of scope! Scopes of type {} do not support instructions!",getTopMut(&mut scopeStack).unwrap().typ.to_string(false));
+                let body = getTopMut(&mut scopeStack).unwrap().body_unwrap_mut().unwrap();
                 let mut UUID = Uuid::new_v4();
                 while build.stringdefs.contains_key(&UUID) {
                     UUID = Uuid::new_v4();
                 }
                 build.stringdefs.insert(UUID,ProgramString {Data: Word, Typ: ProgramStringType::STR});
-                build.functions.get_mut(currentFunction.as_mut().unwrap()).unwrap().body.push((token.location,Instruction::PUSH(OfP::STR(UUID,ProgramStringType::STR))));
+                body.push((token.location,Instruction::PUSH(OfP::STR(UUID,ProgramStringType::STR))));
             }
             TokenType::CStringType(Word) => {
-                par_assert!(token.location,currentFunction.is_some(), "Unexpected string definition outside of entry point!");
+                par_assert!(lexer.currentLocation, scopeStack.len() > 0 && getTopMut(&mut scopeStack).unwrap().body_is_some(), "Error: Unexpected cstring outside of scope! Scopes of type {} do not support instructions!",getTopMut(&mut scopeStack).unwrap().typ.to_string(false));
+                let body = getTopMut(&mut scopeStack).unwrap().body_unwrap_mut().unwrap();
 
                 
                 let mut UUID = Uuid::new_v4();
@@ -2183,23 +2391,28 @@ fn parse_tokens_to_build(lexer: &mut Lexer, program: &mut CmdProgram) -> BuildPr
                     UUID = Uuid::new_v4();
                 }
                 build.stringdefs.insert(UUID,ProgramString {Data: Word, Typ: ProgramStringType::CSTR}); 
-                build.functions.get_mut(currentFunction.as_mut().unwrap()).unwrap().body.push((token.location,Instruction::PUSH(OfP::STR(UUID,ProgramStringType::CSTR))));
+                body.push((token.location,Instruction::PUSH(OfP::STR(UUID,ProgramStringType::CSTR))));
             }
             
             TokenType::CharType(_) => {
-                par_assert!(token,currentFunction.is_some(), "Unexpected char definition outside of entry point!");
+                todo!("{}: Unexpected char! Chars",token.loc_display())
+                //par_assert!(token,currentFunction.is_some(), "Unexpected char definition outside of entry point!");
             }
             TokenType::Number32(val) => {
-                par_assert!(token,currentFunction.is_some(), "Unexpected number (64) definition outside of entry point!");
+                let len = scopeStack.len();
+                let a = &mut scopeStack;
+                par_assert!(token, len > 0 && getTopMut(a).unwrap().body_is_some(), "Error: Unexpected interrupt intrinsic outside of scope! Scopes of type {} do not support instructions!",getTopMut(a).unwrap().typ.to_string(false));
+                let body = getTopMut(a).unwrap().body_unwrap_mut().unwrap();
                 // TODO: implement this
-                build.functions.get_mut(currentFunction.as_mut().unwrap()).unwrap().body.push((token.location.clone(),Instruction::MOV(OfP::REGISTER(Register::EAX), OfP::RAW(val as i64))));
-                build.functions.get_mut(currentFunction.as_mut().unwrap()).unwrap().body.push((token.location.clone(),Instruction::PUSH(OfP::REGISTER(Register::EAX))));
-                
+                body.push((token.location.clone(),Instruction::MOV(OfP::REGISTER(Register::EAX), OfP::RAW(val as i64))));
+                body.push((token.location.clone(),Instruction::PUSH(OfP::REGISTER(Register::EAX))));
             }
             TokenType::Number64(val) => {
-                par_assert!(token,currentFunction.is_some(), "Unexpected number (64) definition outside of entry point!");
-                build.functions.get_mut(currentFunction.as_mut().unwrap()).unwrap().body.push((token.location.clone(),Instruction::PUSH(OfP::RAW(val))));
-                
+                let len = scopeStack.len();
+                let a = &mut scopeStack;
+                par_assert!(token,  len > 0 && getTopMut(a).unwrap().body_is_some(), "Error: Unexpected interrupt intrinsic outside of scope! Scopes of type {} do not support instructions!",getTopMut(a).unwrap().typ.to_string(false));
+                let body = getTopMut(a).unwrap().body_unwrap_mut().unwrap();
+                body.push((token.location.clone(),Instruction::PUSH(OfP::RAW(val))));
             }
             TokenType::Definition(_) => todo!(),
             TokenType::CStringType(_) => todo!(),
@@ -2207,7 +2420,6 @@ fn parse_tokens_to_build(lexer: &mut Lexer, program: &mut CmdProgram) -> BuildPr
     }
     for (fn_name, fn_fn)in build.functions.iter_mut() {
         if fn_name != "main" && fn_fn.location.file == lexer.currentLocation.file {
-     
             fn_fn.body.push((fn_fn.location.clone(),Instruction::RET()))
         }
     }
@@ -2535,6 +2747,7 @@ fn to_nasm_x86_64(build: &mut BuildProgram, program: &CmdProgram) -> io::Result<
                                 OfP::REGISTER(_) => todo!(),
                                 OfP::LOCALVAR(var2) => {
                                     com_assert!(_location, function.locals.contains_key(var1) && function.locals.contains_key(var2), "Unknown variable");
+                                    let local_vars = &local_vars;
                                     let var1 = local_vars.get(var1).unwrap();
                                     let var2 = local_vars.get(var2).unwrap();
                                     com_assert!(_location, var1.typ.get_size(program) == var2.typ.get_size(program), "Unknown variable size");
@@ -2679,27 +2892,27 @@ fn to_nasm_x86_64(build: &mut BuildProgram, program: &CmdProgram) -> io::Result<
                     // TODO: do the same thing we did for functions but for scopes
                     writeln!(&mut f, "   .{}_S_{}:",function_name,i)?;
                 }
-                Instruction::CONDITIONAL_JUMP(ni) => {
-                    let (_,prev) = function.body.get(i-1).unwrap();
-                    match prev {
-                        Instruction::EQUALS(Reg, _) => {
-                            match Reg {
-                                OfP::REGISTER(Reg) => {
-                                    writeln!(&mut f, "   cmp {}, 1",Reg.to_byte_size(1).to_string())?;        
-                                }
-                                _ => todo!()
-                            }
+                // Instruction::CONDITIONAL_JUMP(ni) => {
+                //     let (_,prev) = function.body.get(i-1).unwrap();
+                //     match prev {
+                //         Instruction::EQUALS(Reg, _) => {
+                //             match Reg {
+                //                 OfP::REGISTER(Reg) => {
+                //                     writeln!(&mut f, "   cmp {}, 1",Reg.to_byte_size(1).to_string())?;        
+                //                 }
+                //                 _ => todo!()
+                //             }
                             
-                        }
-                        _ => {
-                            todo!("Implement parsing of if:\nif RBX {{}}\n")
-                        }
-                    }
-                    writeln!(&mut f, "   jz .{}_S_{}",function_name,ni)?;
-                }
-                Instruction::JUMP(ni) => {
-                    writeln!(&mut f, "   jmp .{}_S_{}",function_name,ni)?;
-                }
+                //         }
+                //         _ => {
+                //             todo!("Implement parsing of if:\nif RBX {{}}\n")
+                //         }
+                //     }
+                //     writeln!(&mut f, "   jz .{}_S_{}",function_name,ni)?;
+                // }
+                // Instruction::JUMP(ni) => {
+                //     writeln!(&mut f, "   jmp .{}_S_{}",function_name,ni)?;
+                // }
                 Instruction::EQUALS(op1, op2) => {
                     match op1 {
                         OfP::REGISTER(Reg1) => {
@@ -2746,6 +2959,9 @@ fn to_nasm_x86_64(build: &mut BuildProgram, program: &CmdProgram) -> io::Result<
                         OfP::STR(_, _) => todo!(),
                     }
                 },
+                Instruction::EXPAND_SCOPE(_) => todo!(),
+                Instruction::EXPAND_IF_SCOPE(_) => todo!(),
+                Instruction::EXPAND_ELSE_SCOPE(_) => todo!(),
             }
         }
         if function_name == "main" {
@@ -2869,8 +3085,8 @@ fn type_check_build(build: &mut BuildProgram, program: &CmdProgram) {
                     */
                 },
                 Instruction::SCOPEEND            => {},//eprintln!("WARNING: Not implemented yet"),
-                Instruction::CONDITIONAL_JUMP(_) => todo!("Branching"),
-                Instruction::JUMP(_)             => todo!("JUMP to index"),
+                // Instruction::CONDITIONAL_JUMP(_) => todo!("Branching"),
+                // Instruction::JUMP(_)             => todo!("JUMP to index"),
                 Instruction::INTERRUPT(_)        => {},
                 Instruction::RSPUSH(typ)           => {
                     match typ {
@@ -2885,6 +3101,9 @@ fn type_check_build(build: &mut BuildProgram, program: &CmdProgram) {
                         OfP::STR(_, _)   => todo!(),
                     }
                 },
+                Instruction::EXPAND_SCOPE(_) => todo!(),
+                Instruction::EXPAND_IF_SCOPE(_) => todo!(),
+                Instruction::EXPAND_ELSE_SCOPE(_) => todo!(),
             }
         }
         if !typeStack.is_empty() {
@@ -3045,7 +3264,6 @@ fn main() {
     Definitions.insert("short".to_string(), VarType::SHORT);
     Definitions.insert("str".to_string(), VarType::STR);
     let info = fs::read_to_string(&program.path).expect("Error: could not open file!");
-
     let mut lexer = Lexer::new(&info, & Intrinsics, &Definitions);
     // dump_tokens(&mut lexer);
     // exit(1);
