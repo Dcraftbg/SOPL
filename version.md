@@ -1,6 +1,6 @@
 **(Latest patch versions in github history)**
 
-Newest Version: [0.10A](#010a)
+Newest Version: [0.10.1A](#0101a)
 # Manual:
   - [0.10.1A](#0101a)
     - [0.10A](#010a)

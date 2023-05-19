@@ -73,7 +73,7 @@ interrupt 128, 1, 1, "Hello World!" // Print Hello World! on linux
 ```
 ## Requirements
 **NASM**:
-- Any nasm version that can support 64 bit assembly.
+- Any nasm version that can support 64 bit or 32 bit assembly.
 - Any linker or executable builder (gcc, ld, etc.)
 ## Startup
 ```cmd

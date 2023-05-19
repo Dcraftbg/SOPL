@@ -1,8 +1,9 @@
 extern "C" scanf
 extern "C" printf
+
 func main() {
     "Whats your name? "c printf EAX pop
-    "                    "c "%s"c scanf EAX pop
+    "                                  "c "%s"c scanf EAX pop
     "Hello %s\n"c
     printf
     EAX pop

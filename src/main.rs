@@ -6,7 +6,7 @@
 #![allow(unreachable_patterns)]
 
 use std::{env, process::{exit, Command, Stdio}, path::{Path, PathBuf}, ffi::OsStr, str::{FromStr, Chars}, collections::{HashMap, HashSet}, hash::Hash, fs::{File, self}, io::{Read, Write, self}, fmt::format, borrow::{BorrowMut, Borrow}, clone, time::{SystemTime, Instant}, rc::Rc, iter::Peekable, cell::{RefCell, Ref, RefMut}, ops::{Deref, DerefMut}, vec};
-use uuid::Uuid;
+use uuid::Uuid; 
 macro_rules! time_func {
     ($func:expr $(, $arg:expr)*) => {{
         let start = Instant::now();
@@ -255,6 +255,7 @@ enum IntrinsicType {
     IF,
     ELSE,
 }
+
 impl IntrinsicType {
     fn to_string(&self,isplural: bool) -> String{
         match self {
@@ -348,6 +349,7 @@ enum TokenType {
     Number32      (i32),
     Number64      (i64)
 }
+
 impl TokenType {
     fn to_string(&self,isplural:bool) -> String{
         match self {
@@ -613,21 +615,30 @@ impl Iterator for Lexer<'_> {
                             return Some(Token { typ: TokenType::WordType(outstr), location: self.currentLocation.clone() });
                         }
                     }
-                    else if (c == '-' && self.cchar_offset(1)?.is_alphanumeric()) || c.is_alphanumeric(){
+                    else if (c == '-' && self.cchar_offset(1)?.is_numeric()) || c.is_numeric(){
                         if c=='-' {
                             outstr.push(c);
                             self.cursor += 1;
                             c = self.cchar_s()?;
                         }
-                        while self.is_not_empty() && c.is_alphanumeric() {
+                        while self.is_not_empty() && c.is_numeric() {
                             c = self.cchar_s()?;
+                            //println!("l.is_numeric(): {}",'l'.is_numeric());
+                            //println!("Adding char: '{}', self.is_not_empty() && c.is_numeric(): {}",c,self.is_not_empty() && c.is_numeric() );
+                            if c == '_' {
+                                //println!("having to do _");
+                                self.cursor+=1;
+                                c = self.cchar_s()?;
+                                continue;
+                            }
                             self.cursor += 1;
                             outstr.push(c);
                         }
+                        //println!("Current outstr: \"{}\"",outstr);
                         outstr.pop();
                         self.cursor -= 1;
                         self.currentLocation.character += outstr.len() as i32;
-                        if let Some(nc) = self.cchar_offset(1) {
+                        if let Some(nc) = self.cchar_s() {
                             if nc == 'l' {
                                 self.cursor += 1;
                                 self.currentLocation.character += 1;
@@ -643,7 +654,7 @@ impl Iterator for Lexer<'_> {
                                     return Some(Token {location: self.currentLocation.clone(), typ: TokenType::Number32(val)});
                                 }   
                                 else {
-                                    todo!("Error message for this")
+                                    todo!("Error message for this: {}: \"{}\"",self.currentLocation.loc_display(),outstr);
                                 } 
                             }
                         }
@@ -683,46 +694,6 @@ impl Iterator for Lexer<'_> {
                             return  Some(Token { typ: TokenType::WordType(outstr), location: self.currentLocation.clone() });
                         }
                     }
-                    // let org = c;
-                    // while self.is_not_empty() && self.cchar().is_alphanumeric() || self.cchar() == '_' || self.cchar() == '-'{
-                    //     let _c = self.cchar();
-                    //     outstr.push(self.cchar());
-                    //     self.drop_char();
-                    // }       
-                    // if org.is_alphabetic() || org == '_'{
-                    //     if let Some(o) = self.Intrinsics.get(&outstr){                        
-                    //         return Some(Token { typ: TokenType::IntrinsicType((*o).clone()), location: self.currentLocation.clone() });
-                    //     }
-                    //     else if let Some(o) = self.Definitions.get(&outstr){                        
-                    //         return Some(Token { typ: TokenType::Definition((*o).clone()), location: self.currentLocation.clone() });
-                    //     }
-                    //     else {
-                    //         return Some(Token { typ: TokenType::WordType(outstr), location: self.currentLocation.clone() });
-                    //     }
-                    // }
-                    // else {
-                    //     let nc = self.source.chars().nth(self.cursor-1);
-                    //     if nc.is_some() {
-                    //         if nc.unwrap() == 'l' {
-                    //             outstr.pop();
-                    //             let num = outstr.parse::<i64>();
-                    //             if num.is_ok(){
-                    //                 return Some(Token { typ: TokenType::Number64(num.unwrap()), location: self.currentLocation.clone() });
-                    //             }
-                    //             else {
-                    //                 println!("INVALID Integer for 64 (long) size!");
-                    //             }
-                    //         }
-                    //     }
-                    //     let num = outstr.parse::<i32>();
-
-                    //     if num.is_ok(){
-                    //         return Some(Token { typ: TokenType::Number32(num.unwrap()), location: self.currentLocation.clone() });
-                    //     }
-                    //     else {
-                    //         todo!()
-                    //     }
-                    // }
                 }
             }
         }
@@ -1729,7 +1700,6 @@ fn parse_tokens_to_build(lexer: &mut Lexer, program: &mut CmdProgram) -> BuildPr
                         match regOp.typ {
                         TokenType::IntrinsicType(typ) => {
                             match typ {
-                                
                                 IntrinsicType::POP => {
                                     let body = currentScope.body_unwrap_mut().unwrap();
                                     body.push((token.location.clone(),Instruction::POP(OfP::REGISTER(reg))));
@@ -1753,13 +1723,34 @@ fn parse_tokens_to_build(lexer: &mut Lexer, program: &mut CmdProgram) -> BuildPr
                                                 body.push((token.location,Instruction::MOV(OfP::REGISTER(reg), OfP::RAW(data))))
                                             }
                                         }
+                                        TokenType::WordType(ref data) => {
+                                            if let Some(reg2) = Register::from_string(data) {
+                                                currentScope.body_unwrap_mut().unwrap().push((token.location.clone(),Instruction::MOV(OfP::REGISTER(reg), OfP::REGISTER(reg2))));
+                                            }
+                                            else if currentScope.contract_is_some() {
+                                                let contract = currentScope.contract_unwrap().unwrap();
+                                                let mut found = false;
+                                                for (name,val) in contract.Inputs.iter() 
+                                                {
+                                                    if name == data {
+                                                        par_assert!(token, val.get_size(program)==reg.size(), "Error: Can not move parameter into register of different size: Register: {} of size {}, parameter {name} of size {}",reg.to_string(),reg.size(),val.get_size(program));
+                                                        currentScope.body_unwrap_mut().unwrap().push((token.location.clone(),Instruction::MOV(OfP::REGISTER(reg), OfP::PARAM(data.to_owned()))));
+                                                        found = true;
+                                                        break;
+                                                    }
+                                                }
+                                                par_assert!(token, found, "Error: Unexpected word for register: '{}'",data);
+                                            }
+                                            else {
+                                                par_error!(token,"Unexpected Type for Mov Intrinsic. Expected Number32/Number64 but found {}",token.typ.to_string(false))
+                                            }
+                                        }
                                         _ => par_error!(token,"Unexpected Type for Mov Intrinsic. Expected Number32/Number64 but found {}",token.typ.to_string(false))
                                     }
                                 }
                                 Other => {
                                     par_error!(token,"Unexpected Intrinsic Type: {}, Registers can only perform register operations \"pop\" \"push\" \"mov\" ",Other.to_string(false))
                                 }
-
                             }
                         },
                         TokenType::WordType(Word) => {
@@ -1797,8 +1788,14 @@ fn parse_tokens_to_build(lexer: &mut Lexer, program: &mut CmdProgram) -> BuildPr
                                     }
                                 }
                             }
+                            // else if currentScope.contract_is_some() {
+                                
+                            //     // if let Some(local) = currentScope.contract_unwrap().unwrap().Inputs.get{
+
+                            //     // }
+                            // }
                             else{
-                                par_error!(token, "unknown word {} found after Register operation",Word);
+                                par_error!(token, "unknown word '{}' found after Register operation",Word);
                             }
                         }
                         typ => {
@@ -2480,7 +2477,7 @@ fn optimization_ops(build: &mut BuildProgram, program: &CmdProgram) -> optim_ops
     }
 }
 
-
+//fn nasm_x86_64_handle_scope(build: &mut BuildProgram, program: &CmdProgram, scope: &
 fn to_nasm_x86_64(build: &mut BuildProgram, program: &CmdProgram) -> io::Result<()>{
     let optimization = optimization_ops(build, program);
     let mut f = File::create(&program.opath).expect(&format!("Error: could not open output file {}",program.opath.as_str()));
@@ -2563,8 +2560,9 @@ fn to_nasm_x86_64(build: &mut BuildProgram, program: &CmdProgram) -> io::Result<
         
         if function_name == "main" {
             writeln!(&mut f, "_{}:",function_name)?;
-            writeln!(&mut f, "   push rsp")?;
-            writeln!(&mut f, "   mov rbp, rsp")?;
+            //writeln!(&mut f, "   push rsp")?;
+            //writeln!(&mut f, "   sub rsp, 4")?;
+            //writeln!(&mut f, "   mov rbp, rsp")?;
         }
         else {
             writeln!(&mut f, "_F_{}:",function_name)?;
@@ -2605,7 +2603,8 @@ fn to_nasm_x86_64(build: &mut BuildProgram, program: &CmdProgram) -> io::Result<
                                             stack_size += 16
                                         }
                                     }
-                                    writeln!(&mut f, "   mov qword [rsp], _LEN_STRING_{}_",UUID.to_string().replace("-", ""))?;
+                                    writeln!(&mut f, "   mov qword [rsp], {}",build.stringdefs.get(&UUID).unwrap().Data.len())?;
+                                    //writeln!(&mut f, "   mov qword [rsp], _LEN_STRING_{}_",UUID.to_string().replace("-", ""))?;
                                 },
                                 ProgramStringType::CSTR => {
                                     match program.build_architecture.as_str() {
@@ -2681,12 +2680,47 @@ fn to_nasm_x86_64(build: &mut BuildProgram, program: &CmdProgram) -> io::Result<
                                     writeln!(&mut f, "   mov {}, {}",Reg1.to_string(), Data)?;
                                 },
                                 OfP::STR(_, _) => todo!(),
-                                OfP::PARAM(_) => todo!(),
+                                OfP::PARAM(data) => {
+                                    for (i,(name, _)) in function.contract.Inputs.iter().enumerate() {
+                                        if name == data {
+                                            let offset = stack_size+{
+                                                let mut o: usize = 0;
+                                                for (_, p) in &function.contract.Inputs[i..] {                                        
+                                                    o += p.get_size(program)
+                                                }
+                                                o
+                                            } as i64+{
+                                                let mut o: usize = 0;
+                                                for i in function.contract.Outputs.iter() {
+                                                    o += i.get_size(program)
+                                                }
+                                                o
+                                            } as i64;
+                                            writeln!(&mut f, "   mov {}, qword [rsp+{}]",Reg1.to_string(),offset)?;
+                                            break;
+                                        }
+                                    }
+                                },
                             }
                         }
                         OfP::LOCALVAR(varOrg) => {
                             match Op2 {
-                                OfP::REGISTER(_) => todo!(),
+                                OfP::REGISTER(val) => {
+                                    let var = com_expect!(_location,local_vars.get(varOrg),"Error: Unknown variable found during compilation {}",varOrg);
+                                    
+                                    if var.typ.get_size(program) <= 8  {
+                                        if callstack_size as usize-var.operand-var.typ.get_size(program) == 0 {
+                                            writeln!(&mut f, "   mov {} [_CALLSTACK_BUF_PTR], {}",size_to_nasm_type(var.typ.get_size(program)), val.to_string())?;
+                                        }
+                                        else {
+                                            writeln!(&mut f, "   mov {} [_CALLSTACK_BUF_PTR+{}], {}",size_to_nasm_type(var.typ.get_size(program)),callstack_size as usize-var.operand-var.typ.get_size(program), val.to_string())?;
+                                        }
+                                    }
+                                    else {
+                                        todo!()
+                                    }
+ 
+                                },
                                 OfP::LOCALVAR(_) => todo!("vars"),
                                 OfP::RAW(val) => {
                                     let var = com_expect!(_location,local_vars.get(varOrg),"Error: Unknown variable found during compilation {}",varOrg);
@@ -2865,13 +2899,15 @@ fn to_nasm_x86_64(build: &mut BuildProgram, program: &CmdProgram) -> io::Result<
                     for i in build.functions.get(Func).unwrap().contract.Outputs.iter() {
                         o += i.get_size(program)
                     }
-                    writeln!(&mut f, "   sub rsp, {}",o)?;
+                    if o > 0 {
+                        writeln!(&mut f, "   sub rsp, {}",o)?;
+                    }
                     writeln!(&mut f, "   call _F_{}",Func)?;
                     stack_size += o as i64;
 
                 }
                 Instruction::FNBEGIN() => {
-                    writeln!(&mut f, "   push rbp")?;
+                    //writeln!(&mut f, "   push rbp")?;
                 }
                 Instruction::RET() => {
                     let mut functionSize: usize = 0;
@@ -2884,7 +2920,7 @@ fn to_nasm_x86_64(build: &mut BuildProgram, program: &CmdProgram) -> io::Result<
                             writeln!(&mut f, "   add r10, {}",functionSize)?;
                             writeln!(&mut f, "   mov [_CALLSTACK_BUF_PTR], r10")?;
                         }
-                        writeln!(&mut f, "   pop rbp")?;
+                        //writeln!(&mut f, "   pop rbp")?;
                         
                         writeln!(&mut f, "   ret")?;
                         hasFoundRet = true;
@@ -2964,14 +3000,14 @@ fn to_nasm_x86_64(build: &mut BuildProgram, program: &CmdProgram) -> io::Result<
                         OfP::STR(_, _) => todo!(),
                     }
                 },
-                Instruction::EXPAND_SCOPE(_) => todo!(),
-                Instruction::EXPAND_IF_SCOPE(_) => todo!(),
-                Instruction::EXPAND_ELSE_SCOPE(_) => todo!(),
+                Instruction::EXPAND_SCOPE(scope) => todo!("EXPAND_SCOPE"),
+                Instruction::EXPAND_IF_SCOPE(_) => todo!("EXPAND_IF_SCOPE"),
+                Instruction::EXPAND_ELSE_SCOPE(_) => todo!("EXPAND_ELSE_SCOPE"),
             }
         }
         if function_name == "main" {
-            writeln!(&mut f, "   mov rsp, rbp")?;
-            writeln!(&mut f, "   pop rbp")?;
+            //writeln!(&mut f, "   mov rsp, rbp")?;
+            //writeln!(&mut f, "   pop rbp")?;
             writeln!(&mut f, "   xor rax,rax")?;
             writeln!(&mut f, "   ret")?;
         }
