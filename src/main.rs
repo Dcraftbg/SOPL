@@ -1370,9 +1370,12 @@ struct Function {
 //     //funcs: Option<Vec<Function>>,  
 // }
 type ScopeBody = Vec<(ProgramLocation,Instruction)>;
+type ContractInputs = HashMap<String, usize>;
+type ContractInputPool = Vec<VarType>;
 #[derive(Debug, Clone)]
 struct FunctionContract {
-    Inputs: Vec<(String, VarType)>,
+    Inputs: ContractInputs,
+    InputPool: ContractInputPool,
     Outputs: Vec<VarType>
 }
 #[derive(Debug)]
@@ -1382,7 +1385,7 @@ enum NormalScopeType {
     EMPTY
 }
 // impl NormalScopeType {
-//     //TODO: Get rid of ScopeType as a whole
+//    
 //     fn to_scope_type(&self) -> ScopeType {
 //         match self {
 //             NormalScopeType::IF => ScopeType::IF,
@@ -1576,7 +1579,7 @@ fn eval_const_def(lexer: &mut Lexer, build: &mut BuildProgram) -> ConstValue {
 }
 
 fn parse_function_contract(lexer: &mut Lexer) -> FunctionContract {
-    let mut out = FunctionContract {Inputs: vec![], Outputs: vec![]};
+    let mut out = FunctionContract {Inputs: HashMap::new(), InputPool: vec![], Outputs: vec![]};
     let mut is_input = true;
     let first = lexer.next();
     let first = par_expect!(lexer.currentLocation,first,"abruptly ran out of tokens in function contract");
@@ -1617,7 +1620,9 @@ fn parse_function_contract(lexer: &mut Lexer) -> FunctionContract {
                 match f.typ {
                     TokenType::Definition(Def) => {
                         expectNextSY = true;    
-                        out.Inputs.push((Word,Def))
+                        out.Inputs.insert(Word, out.InputPool.len());
+                        out.InputPool.push(Def);
+                        //out.Inputs.push((Word,Def))
                     }
                     _ => {
                         par_error!(f, "Error: Unexpected token type in parameter definition");
@@ -1647,9 +1652,12 @@ fn parse_tokens_to_build(lexer: &mut Lexer, program: &mut CmdProgram) -> BuildPr
     let mut build: BuildProgram = BuildProgram { externals: HashMap::new(), functions: HashMap::new(),stringdefs: HashMap::new(), constdefs: HashMap::new()};
     let mut scopeStack: ScopeStack = vec![];
     let mut foundFuncs: HashSet<String> = HashSet::new();
+    //let mut currentLocals: Locals = HashSet::new();
+    //^ preparing for IFS and others that inherit their locals
     //let mut currentFunction: Option<String> = None;
     //let mut ctime: Instant= Instant::now();
     //let tokens: Vec<Token> = lexer.collect();
+    
     while let Some(token) = lexer.next() {
         //time_func!()
         // let t = Instant::now();
@@ -1729,8 +1737,8 @@ fn parse_tokens_to_build(lexer: &mut Lexer, program: &mut CmdProgram) -> BuildPr
                                             }
                                             else if currentScope.contract_is_some() {
                                                 let contract = currentScope.contract_unwrap().unwrap();
-                                                let mut found = false;
-                                                for (name,val) in contract.Inputs.iter() 
+                                                //let mut found = false;
+                                                /*for (name,val) in contract.Inputs.iter() 
                                                 {
                                                     if name == data {
                                                         par_assert!(token, val.get_size(program)==reg.size(), "Error: Can not move parameter into register of different size: Register: {} of size {}, parameter {name} of size {}",reg.to_string(),reg.size(),val.get_size(program));
@@ -1738,8 +1746,10 @@ fn parse_tokens_to_build(lexer: &mut Lexer, program: &mut CmdProgram) -> BuildPr
                                                         found = true;
                                                         break;
                                                     }
-                                                }
-                                                par_assert!(token, found, "Error: Unexpected word for register: '{}'",data);
+                                                }*/
+                                                let val = contract.InputPool.get(par_expect!(token, contract.Inputs.get(data), "Error: Unexpected word for register: '{}'",data).clone()).unwrap();
+                                                
+//                                                par_assert!(token, found, "Error: Unexpected word for register: '{}'",data);
                                             }
                                             else {
                                                 par_error!(token,"Unexpected Type for Mov Intrinsic. Expected Number32/Number64 but found {}",token.typ.to_string(false))
@@ -2639,7 +2649,7 @@ fn to_nasm_x86_64(build: &mut BuildProgram, program: &CmdProgram) -> io::Result<
                             writeln!(&mut f, "   push r10")?;
                         }
                         OfP::PARAM(var) => {
-                            for (i,(name, p)) in function.contract.Inputs.iter().enumerate() {
+                            /*for (i,(name, p)) in function.contract.Inputs.iter().enumerate() {
                                 if name == var {
                                     let offset = stack_size+{
                                         let mut o: usize = 0;
@@ -2660,7 +2670,26 @@ fn to_nasm_x86_64(build: &mut BuildProgram, program: &CmdProgram) -> io::Result<
                                     stack_size += p.get_size(program) as i64;
                                     break;
                                 }
-                            }
+                            }*/
+                            let i = com_expect!(_location,function.contract.Inputs.get(var), "Error: Unknown Parameter {}",var).clone();
+                            let offset = stack_size as usize+
+                            {
+                                let mut o: usize = 0;
+                                for typ in &function.contract.InputPool[i..] {
+                                   o += typ.get_size(program) 
+                                }
+                                o
+                            }+{
+                                let mut o: usize = 0;
+                                for i in function.contract.Outputs.iter() {
+                                    o += i.get_size(program)
+                                }
+                                o
+                            };
+                            writeln!(&mut f, "   mov rbx, qword [rsp+{}]",offset)?;
+                            writeln!(&mut f, "   sub rsp, {}", function.contract.InputPool.get(i).unwrap().get_size(program) )?;
+                            writeln!(&mut f, "   mov qword [rsp], rbx")?;
+                            stack_size += function.contract.InputPool.get(i).unwrap().get_size(program) as i64;                                                                                                             
                         }
                         _ => {
                             todo!("Unsupported")
@@ -2681,6 +2710,25 @@ fn to_nasm_x86_64(build: &mut BuildProgram, program: &CmdProgram) -> io::Result<
                                 },
                                 OfP::STR(_, _) => todo!(),
                                 OfP::PARAM(data) => {
+                                    let i = com_expect!(_location, function.contract.Inputs.get(data),"Error: Unexpected variable {}",data).clone();
+                                    //for typ in &function.contract.InputPool[i..] {
+                                    let offset = stack_size as usize+{
+                                        let mut o: usize = 0;
+                                        for typ in &function.contract.InputPool[i..] {
+                                            o+=typ.get_size(program)
+                                        }
+                                        o
+                                    }+{
+                                         let mut o: usize = 0;
+                                         for i in function.contract.Outputs.iter() {
+                                             o += i.get_size(program)
+                                         }
+                                         o
+                                    };
+                                    writeln!(&mut f, "   mov {}, qword [rsp+{}]",Reg1.to_string(),offset)?;
+                                        
+                                    //}
+                                    /*
                                     for (i,(name, _)) in function.contract.Inputs.iter().enumerate() {
                                         if name == data {
                                             let offset = stack_size+{
@@ -2700,6 +2748,7 @@ fn to_nasm_x86_64(build: &mut BuildProgram, program: &CmdProgram) -> io::Result<
                                             break;
                                         }
                                     }
+                                    */
                                 },
                             }
                         }
@@ -3049,12 +3098,15 @@ fn type_check_build(build: &mut BuildProgram, program: &CmdProgram) {
                             }
                         },
                         OfP::PARAM(word) => {
+                            /*
                             for (name,p) in func.contract.Inputs.iter() {
                                 if word == name {
                                     typeStack.push(p.clone());
                                     break;
                                 }
-                            }
+                            }*/
+                            // TODO: make it use par_expect
+                            typeStack.push(func.contract.InputPool.get(func.contract.Inputs.get(word).unwrap().clone()).unwrap().clone())
                         }
                     }
                 },
@@ -3088,7 +3140,7 @@ fn type_check_build(build: &mut BuildProgram, program: &CmdProgram) {
                     com_assert!(loc, function.contract.Inputs.len() <= typeStack.len(), "Error: Not enough arguments for {} in {}",func,name);
                     let raw_inputs = {
                         let mut o: Vec<VarType> = Vec::with_capacity(function.contract.Inputs.len());
-                        for (_, typ) in function.contract.Inputs.iter() {
+                        for typ in function.contract.InputPool.iter() {
                             o.push(typ.clone())
                         }
                         o
@@ -3096,8 +3148,17 @@ fn type_check_build(build: &mut BuildProgram, program: &CmdProgram) {
                     com_assert!(loc, typeStack.ends_with(&raw_inputs), "Error: Arguments for function don't match, function expected:\n {}, But found\n: {}",
                     {
                         
-                        for (name, typ) in function.contract.Inputs.iter() {
-                            eprintln!("   {} ({})",typ.to_string(false).to_uppercase(),name)
+                        for (i,typ) in function.contract.InputPool.iter().enumerate() {
+                            eprintln!("   {} ({})",typ.to_string(false).to_uppercase(),{
+                                let mut n: &str = "Unknown";
+                                for (name,val) in function.contract.Inputs.iter(){
+                                    if *val==i {
+                                        n = name.as_str();
+                                        break;
+                                    }
+                                }
+                                n
+                            });
                         }
                         ""
                     },
