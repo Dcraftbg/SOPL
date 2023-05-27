@@ -1,4 +1,9 @@
 extern "C" puts(ptr : int);
+func printstr(a: ptr) {
+    let cpy: ptr;
+    cpy = a
+    puts(cpy)
+}
 func main() {
-    puts("Hello World!")
+    printstr("Hello World!"c)
 }
