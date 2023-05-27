@@ -1,6 +1,6 @@
 **(Latest patch versions in github history)**
 
-Newest Version: [0.11A](#011a)
+Newest Version: [0.11.1A](#0111a)
 # Manual:
   - [0.11A](#011a)
   - [0.10.1A](#0101a)
@@ -23,6 +23,15 @@ Newest Version: [0.11A](#011a)
   - [0.2A](#02a)
   - [0.1A](#01a)
 # Change Log
+ ## 0.11.1A 
+   - Fixed function parameters (still not done with returning)
+   - Added typechecking for externals and functions
+   - Fixed arguments for main
+   - Fixed examples:
+      - Updated [argstest.spl](examples/argstest.spl)
+      - Updated [typecheck.spl](examples/mundane/typecheck.spl)
+
+
  ## 0.11A
    - Made a lot of dramatic changes in terms of function/external syntax.
    - Added support for the rest of the registers in x86 64
@@ -49,8 +58,8 @@ Newest Version: [0.11A](#011a)
     - Broken [argstest.spl](examples/argstest.spl) - arguments to functions are still yet to be implemented with the new standard
     - Broken [div.spl](examples/div.spl) - broken because of a lot of other stupid reasons regarding the usage of idiv
     - Broken [functions.spl](examples/functions.spl) - for obvious reasons, functions are yet to be fixed with the new syntax
-    - Broken [functions2.spl](examples/functions.spl) - for obvious reasons, functions are yet to be fixed with the new syntax
-    - Broken [typecheck.spl](examples/typecheck.spl) - broken because typechecking for arguments isn't implemented yet
+    - Broken [functions2.spl](examples/functions2.spl) - for obvious reasons, functions are yet to be fixed with the new syntax
+    - Broken [typecheck.spl](examples/mundane/typecheck.spl) - broken because typechecking for arguments isn't implemented yet
     
 
    - Migrated to x64 and its style of syntax

@@ -1,8 +1,6 @@
 //TODO: fix tests with printf, since printf no longer works
 
-//Only works in 32 bit mode:
-extern "C" printf(ptr, int);
-//Args test is broken until we fix arguments
+extern "C" printf(ptr, int : int);
 func main(argc: int,argv: ptr) {
     argc push
     printf("Amount of arguments: %d\n"c, top);
