@@ -1,0 +1,7 @@
+extern "C" puts(ptr : int)
+func a() {
+    puts("Hello from a!"c)
+}
+func main() {
+    puts("Hello from main!\n"c)
+}

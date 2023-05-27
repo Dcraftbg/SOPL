@@ -1,12 +1,11 @@
-extern "C" printf
-extern "C" exit
+extern "C" puts(ptr : int)
 func main() { 
     RBX = 5
     R8 = 5
     if RBX R8 == {
-        "Hello World!"c printf pop
+        puts("Hello World!"c)
     }
     else {
-        "Goodbye World!"c printf pop
+        puts("Goodbye World!"c)
     }
 }

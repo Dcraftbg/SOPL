@@ -1,5 +1,10 @@
-extern "C" printf
-func main(argv: ptr, argc: long) {
-    argc push "Amount of arguments: %ld\n"c printf EAX pop
-    pop
+//TODO: fix tests with printf, since printf no longer works
+
+//Only works in 32 bit mode:
+extern "C" printf(ptr, int);
+//Args test is broken until we fix arguments
+func main(argc: int,argv: ptr) {
+    argc push
+    printf("Amount of arguments: %d\n"c, top);
+    EAX pop
 }

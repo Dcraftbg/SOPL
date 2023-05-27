@@ -1,0 +1,8 @@
+include "../src/C/stdio.spl"
+func main(){
+	let f: ptr;
+	fopen("examples/hello.txt"c, "w")
+	f = RAX
+	fwrite("Hello"c,5,1,f)
+	fclose(f)
+}

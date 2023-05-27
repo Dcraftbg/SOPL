@@ -1,4 +1,4 @@
 include "../src/C/stdio.spl"
 func main() {
-    "Hello World!\n"c printf EAX pop
+    puts("Hello World!\n"c)
 }

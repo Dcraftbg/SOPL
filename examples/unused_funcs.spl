@@ -1,7 +1,0 @@
-extern "C" printf
-func a() {
-    "Hello World!"c printf EAX pop
-}
-func main() {
-    "Hello from main!\n"c printf EAX pop
-}

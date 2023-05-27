@@ -1,0 +1,10 @@
+extern "C" puts(ptr : int);
+//extern "C" printf(ptr, ptr : int);
+func print_str(a: ptr : int) {
+    let b: ptr;
+    b = a
+    ret puts(b)
+}
+func main() {
+    print_str("Hello World!"c)
+}

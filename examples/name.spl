@@ -1,11 +1,30 @@
-extern "C" scanf
-extern "C" printf
+//extern "C" scanf;
+//extern "C" printf;
+//
+//func main() {
+//    "Whats your name? "c printf EAX pop
+//    "                                  "c "%s"c scanf EAX pop
+//    "Hello %s\n"c
+//    printf
+//    EAX pop
+//    EAX pop
+//}
 
+extern "C" printf(ptr : int);
+extern "C" malloc(long : ptr);
+extern "C" free(ptr);
+extern "C" memset(ptr, int, long);
+extern "C" gets(ptr);
+const NAMELEN = 50l;
 func main() {
-    "Whats your name? "c printf EAX pop
-    "                                  "c "%s"c scanf EAX pop
-    "Hello %s\n"c
-    printf
-    EAX pop
-    EAX pop
+    let name: ptr;
+    malloc(NAMELEN)
+    name = RAX
+    memset(name, 0, NAMELEN);
+    printf("What is your name? "c);
+    gets(name);
+    printf("Hello ");
+    printf(name);
+    printf("!\n");
+    free(name)
 }

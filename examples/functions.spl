@@ -1,5 +1,5 @@
-extern "C" printf
-extern "C" exit
+extern "C" printf;
+extern "C" exit;
 func getVersons( : long, long) {
     RCX = 5
     RBX = 4

@@ -1,7 +1,8 @@
 **(Latest patch versions in github history)**
 
-Newest Version: [0.10.1A](#0101a)
+Newest Version: [0.11A](#011a)
 # Manual:
+  - [0.11A](#011a)
   - [0.10.1A](#0101a)
     - [0.10A](#010a)
   - [0.9.2A](#092a)
@@ -22,10 +23,51 @@ Newest Version: [0.10.1A](#0101a)
   - [0.2A](#02a)
   - [0.1A](#01a)
 # Change Log
+ ## 0.11A
+   - Made a lot of dramatic changes in terms of function/external syntax.
+   - Added support for the rest of the registers in x86 64
+   - Changed a lot of examples
+   - Broke some of the examples
+   - Broke dynamic functions like printf and scanf
+   - Added mundane folder for examples that are not very interesting
+   - List of entirely fixed examples:
+      - Updated [constants.spl](examples/constants.spl)
+      - Updated [cstring.spl](examples/cstrings.spl)
+      - Updated [helloWorld.spl](examples/helloWorld.spl)
+      - Updated [localvars.spl](examples/localvars.spl)
+      - Updated [name.spl](examples/name.spl)
+
+      Mundane:
+        - Updated [basicHelloWorld.spl](examples/mundane/basicHelloWorld.spl)
+        - Updated [fHelloWorld.spl](examples/mundane/fHelloWorld.spl)
+        - Updated [negative.spl](examples/mundane/negative.spl)
+        - Updated [helloC.spl](examples/mundane/helloC.spl)
+        - Updated [stack_test.spl](examples/mundane/stack_test.spl)
+        - Updated [stdio_files.spl](examples/mundane/helloC.spl)
+
+   - List of partially broken examples (hopefully fixed in next Change log):
+    - Broken [argstest.spl](examples/argstest.spl) - arguments to functions are still yet to be implemented with the new standard
+    - Broken [div.spl](examples/div.spl) - broken because of a lot of other stupid reasons regarding the usage of idiv
+    - Broken [functions.spl](examples/functions.spl) - for obvious reasons, functions are yet to be fixed with the new syntax
+    - Broken [functions2.spl](examples/functions.spl) - for obvious reasons, functions are yet to be fixed with the new syntax
+    - Broken [typecheck.spl](examples/typecheck.spl) - broken because typechecking for arguments isn't implemented yet
+    
+
+   - Migrated to x64 and its style of syntax
+   - Added architectures: 
+   > **[NOTE]:** Checkout examples of architectures [here](examples/arcs/)
+
+   - Added built in architectures:
+      - windows_x86/win_x86
+      - windows_x86_64/win_x86_64
+      - linux_x86
+      - linux_x86_64
+   - If not specified with the -arc flag, the compiler would try to default to the current OS architecture, if it doesn't find it, it will inform you and prompt you to specify the architecture
+   
  ## 0.10.1A
    - Made externals to use HashMap instead of Vector to reduce O(n) situation for finding externals
  ## 0.10A
-   - Entirely changed the way scopes are handled! Broke a lot of examples with IF statements which are expected to be fixed in the next patch
+   - Entirely changed the way scopes are handled! Broke a lot of examples with IF statements which are expected to be fixed in the next patch (NOTE: They are not fixed yet)
    - Prepared to add local variables, constants and more to scopes
  ## 0.9.2A
    - HUGE OPTIMIZATION because string system in rust is bad

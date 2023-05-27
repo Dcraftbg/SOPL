@@ -1,6 +1,0 @@
-extern "C" printf
-const Hello = "Hello World\n";
-func main() {
-    "Hello World!\n"c
-    pop
-}

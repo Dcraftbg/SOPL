@@ -1,5 +1,0 @@
-extern "C" printf
-func main() {
-    5l
-    "%ld"c printf EAX pop pop   
-}

@@ -1,0 +1,13 @@
+{
+    "bits": 64,
+    "os":"windows",
+    "options": {
+        "argumentPassing": {
+            "num_ptrs": ["RCX","RDX","R8","R9"],
+            "floats": ["XMM0","XMM1","XMM2","XMM3"],
+            "returns": ["RAX"],
+            "on_overflow_stack": true,
+            "shadow_space": 40
+        }
+    }
+}

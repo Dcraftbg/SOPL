@@ -1,14 +1,4 @@
-include "./functions.spl"
-
+extern "C" puts(ptr : int);
 func main() {
-    35l
-    34l
-    add
-    "Added: %ld\n"c printf EAX pop pop
-    pop
-    pop
-
-    getVersons
-    "Version 1: %ld\n"c printf EAX pop pop
-    "Version 2: %ld\n"c printf EAX pop pop
+    puts("Hello World!")
 }

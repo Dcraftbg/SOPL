@@ -1,9 +1,5 @@
-extern "C" printf
-func dup(long : long, long) {
-    RAX pop
-    RAX push
-    RAX push
-}
+extern "C" printf(ptr, long : int);
+extern "C" puts(ptr: int);
 const A = 5l ;
 const B = 4l ;
 const C = 4l 5l + ;
@@ -13,8 +9,10 @@ const World = "World";
 const HelloWorld = Hello World + ;
 
 func main() {
-    D "%d"c printf
-    EAX pop
-    pop
-    HelloWorld pop printf
+    printf("%ld"c,D);
+    // D "%d"c printf
+    // EAX pop
+    // pop
+    
+    puts(HelloWorld);
 }

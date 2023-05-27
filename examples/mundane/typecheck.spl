@@ -1,0 +1,7 @@
+extern "C" puts(ptr : int);
+const Hello = "Hello World\n";
+func main() {
+    "Hello World!\n"c
+    puts(top)
+    //Should warn that there are types left on the stack
+}

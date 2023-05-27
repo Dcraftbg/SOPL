@@ -1,4 +1,4 @@
-extern "C" printf
+extern "C" puts(ptr : int);
 func main() {
-    "Hello World!"c printf pop
+    puts("Hello World!"c)
 }

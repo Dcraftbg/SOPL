@@ -5,7 +5,9 @@
 #![allow(unused_imports)]
 #![allow(unreachable_patterns)]
 
-use std::{env, process::{exit, Command, Stdio}, path::{Path, PathBuf}, ffi::OsStr, str::{FromStr, Chars}, collections::{HashMap, HashSet}, hash::Hash, fs::{File, self}, io::{Read, Write, self}, fmt::format, borrow::{BorrowMut, Borrow}, clone, time::{SystemTime, Instant}, rc::Rc, iter::Peekable, cell::{RefCell, Ref, RefMut}, ops::{Deref, DerefMut}, vec};
+use core::num;
+use std::{env, process::{exit, Command, Stdio}, path::{Path, PathBuf}, ffi::OsStr, str::{FromStr, Chars}, collections::{HashMap, HashSet}, hash::Hash, fs::{File, self}, io::{Read, Write, self}, fmt::format, borrow::{BorrowMut, Borrow}, clone, time::{SystemTime, Instant}, rc::Rc, iter::Peekable, cell::{RefCell, Ref, RefMut}, ops::{Deref, DerefMut}, vec, sync::Arc, os, f32::consts::E};
+use serde_json::Value;
 use uuid::Uuid; 
 macro_rules! time_func {
     ($func:expr $(, $arg:expr)*) => {{
@@ -147,14 +149,13 @@ macro_rules! com_warn {
 }
 macro_rules! com_assert {
     ($location:expr, $condition:expr, $($arg:tt)*) => ({
-        if !$condition {
+        if !($condition) {
             let message = format!($($arg)*);
             eprintln!("(C) [ERROR] {}: {}", $location.loc_display(), message);
             exit(1);
         }
     });
 }
-
 
 
 fn is_symbolic(c: char) -> bool {
@@ -196,6 +197,58 @@ enum OptimizationMode {
     RELEASE,
     DEBUG
 }
+#[derive(Debug,Clone, PartialEq)]
+struct ArcCustomOps {
+    // None means they are via the stack
+    nums_ptrs: Option<Vec<Register>>,
+    floats: Option<Vec<Register>>,
+    returns: Option<Vec<Register>>,
+    on_overflow_stack: bool,
+    shadow_space: usize
+}
+impl ArcCustomOps {
+    fn new() -> Self {
+        Self {nums_ptrs: None, floats: None, returns: None, on_overflow_stack: true, shadow_space: 0 }
+    }
+}
+#[derive(Debug,Clone, PartialEq)]
+enum ArcPassType {
+    NONE,
+    PUSHALL,
+    CUSTOM(ArcCustomOps)
+}
+impl ArcPassType {
+    fn custom_get(&self) -> Option<&ArcCustomOps> {
+        match self {
+            Self::NONE => None,
+            Self::PUSHALL => None,
+            Self::CUSTOM(c) => Some(c),
+        }
+    }
+}
+#[derive(Debug,Clone)]
+struct ArcOps {
+    argumentPassing: ArcPassType,
+}
+impl ArcOps {
+    fn new() -> Self {
+        Self {  argumentPassing: ArcPassType::NONE}
+    }
+    
+}
+#[derive(Debug,Clone)]
+struct Architecture {
+    bits: u32,
+    platform: String,
+    options: ArcOps,
+    func_prefix: String,
+    cextern_prefix: String,
+}
+impl Architecture {
+    fn new() -> Self {
+        Self { bits: 32, platform: String::new(),options: ArcOps::new(), func_prefix: String::new(), cextern_prefix: String::new() }
+    }
+}
 #[derive(Debug, Clone)]
 struct CmdProgram {
     path: String,
@@ -213,12 +266,13 @@ struct CmdProgram {
 
     remove_unused_functions: bool,
     in_mode: OptimizationMode,
-    build_architecture: String,
+    //build_architecture: String,
+    architecture: Architecture,
     call_stack_size: usize,
 }
 impl CmdProgram {
     fn new() -> Self {
-        Self { path: String::new(), opath: String::new(), should_build: false, typ: String::new(), warn_rax_usage: true, call_stack_size: 64000, in_mode: OptimizationMode::DEBUG, use_type_checking: true, print_unused_warns: true, build_architecture: String::new(), remove_unused_functions: false, print_unused_funcs: true, print_unused_externs: true, print_unused_strings: true }
+        Self { path: String::new(), opath: String::new(), should_build: false, typ: String::new(), warn_rax_usage: true, call_stack_size: 64000, in_mode: OptimizationMode::DEBUG, use_type_checking: true, print_unused_warns: true,  remove_unused_functions: false, print_unused_funcs: true, print_unused_externs: true, print_unused_strings: true, architecture: Architecture::new() }
     }
 }
 #[repr(u32)]
@@ -254,8 +308,22 @@ enum IntrinsicType {
     INCLUDE,
     IF,
     ELSE,
+    
+    TOP,
+}
+#[derive(Debug,Clone,PartialEq)]
+enum PtrTyp {
+    VOID,
+    TYP(Box<VarType>),
 }
 
+enum FuncParam {
+    TOP,
+    LOCAL(String),
+    REGISTER(Register),
+    CONSTVAL(), 
+
+}
 impl IntrinsicType {
     fn to_string(&self,isplural: bool) -> String{
         match self {
@@ -334,6 +402,9 @@ impl IntrinsicType {
             IntrinsicType::RS => {
                 if isplural {"Return Stacks".to_string()} else {"Return Stack".to_string()}
             },
+            IntrinsicType::TOP => {
+                if isplural {"Tops".to_string()} else {"top".to_string()}
+            },
         }
     }
 }
@@ -341,8 +412,10 @@ impl IntrinsicType {
 #[derive(Debug,PartialEq,Clone)]
 enum TokenType {
     WordType      (String),
+    Register      (Register),
     IntrinsicType (IntrinsicType),
     Definition    (VarType),
+    Function      (String),
     StringType    (String),
     CStringType   (String),
     CharType      (String),
@@ -351,7 +424,7 @@ enum TokenType {
 }
 
 impl TokenType {
-    fn to_string(&self,isplural:bool) -> String{
+    fn to_string(&self,isplural:bool) -> String {
         match self {
             TokenType::WordType(word) => {
                 if isplural {format!("Words").to_string()} else {format!("Word {}",word).to_string()}
@@ -377,10 +450,17 @@ impl TokenType {
             TokenType::CStringType(st) => {
                 if isplural {format!("CString").to_string()} else {format!("CString {}",st).to_string()}
             },
+            TokenType::Function(name) => {
+                if isplural {format!("Functions").to_string()} else {format!("Function {}",name).to_string()}
+            },
+            TokenType::Register(reg) => {
+                if isplural {format!("Registers").to_string()} else {format!("Register {}",reg.to_string()).to_string()}
+            }
+
         }
     }
 }
-#[derive(Clone,Debug)]
+#[derive(Clone,Debug, PartialEq)]
 struct ProgramLocation {
     file: Rc<String>,
     linenumber: i32,
@@ -406,7 +486,8 @@ struct Lexer<'a> {
     cursor: usize,
     currentLocation: ProgramLocation,
     Intrinsics: &'a HashMap<String,IntrinsicType>,
-    Definitions: &'a HashMap<String,VarType>
+    Definitions: &'a HashMap<String,VarType>,
+    CurrentFuncs: HashSet<String>
 }
 
 impl<'a> Lexer<'a> {
@@ -433,13 +514,14 @@ impl<'a> Lexer<'a> {
     fn is_not_empty_offset(&self, offset: usize) -> bool {
         self.cursor+offset < self.source.len()
     }
-    fn new(source: &'a String, Intrinsics: &'a HashMap<String, IntrinsicType>, Definitions: &'a HashMap<String,VarType>) -> Self {
+    fn new(source: &'a String, Intrinsics: &'a HashMap<String, IntrinsicType>, Definitions: &'a HashMap<String,VarType>, CurrentFuncs: HashSet<String>) -> Self {
         Self { 
             source: source.chars().collect(), 
             cursor: 0, 
             currentLocation: ProgramLocation { file: Rc::new(String::new()), linenumber: 1, character: 0 },
             Intrinsics,
             Definitions,
+            CurrentFuncs,
         }
     }
     fn drop_char(&mut self){
@@ -609,7 +691,10 @@ impl Iterator for Lexer<'_> {
                             return Some(Token { typ: TokenType::IntrinsicType(o.clone()), location: self.currentLocation.clone() });
                         }
                         else if let Some(o) = self.Definitions.get(&outstr){                        
-                                return Some(Token { typ: TokenType::Definition(o.clone()), location: self.currentLocation.clone() });
+                            return Some(Token { typ: TokenType::Definition(o.clone()), location: self.currentLocation.clone() });
+                        }      
+                        else if let Some(reg) = Register::from_string(&outstr) {
+                            return Some(Token { typ: TokenType::Register(reg), location: self.currentLocation.clone() })
                         }
                         else{
                             return Some(Token { typ: TokenType::WordType(outstr), location: self.currentLocation.clone() });
@@ -670,10 +755,9 @@ impl Iterator for Lexer<'_> {
                             }
                         }
                     }
-                    else if c == ';' || c==')' || c=='(' || c=='{' || c=='}' || c=='[' || c==']' {
+                    else if c == ';' || c==')' || c=='(' || c=='{' || c=='}' || c=='[' || c==']' || c == ','{
                         self.cursor += 1;
                         self.currentLocation.character += 1;
-                        //println!("Got here!");
                         return Some(Token {typ: TokenType::IntrinsicType(self.Intrinsics.get(&c.to_string()).expect("Unhandled intrinsic :(").clone()), location: self.currentLocation.clone()});
                     }
                     else {
@@ -687,8 +771,12 @@ impl Iterator for Lexer<'_> {
                         //self.cursor -= 1;
                         //println!("Debug: {}",self.cchar());
                         self.currentLocation.character += outstr.len() as i32;
+                        //TODO: implement pointers
                         if let Some(intrinsic) = self.Intrinsics.get(&outstr) {
                             return Some(Token { typ: TokenType::IntrinsicType(intrinsic.clone()), location: self.currentLocation.clone() })
+                        }
+                        else if self.CurrentFuncs.contains(&outstr) {
+                            return Some(Token { typ: TokenType::Function(outstr), location: self.currentLocation.clone() })
                         }
                         else {
                             return  Some(Token { typ: TokenType::WordType(outstr), location: self.currentLocation.clone() });
@@ -702,21 +790,22 @@ impl Iterator for Lexer<'_> {
         
     }
 }
-#[derive(Debug)]
+#[derive(Debug,Clone)]
 enum ExternalType {
     RawExternal,
     CExternal
 }
-#[derive(Debug)]
+#[derive(Debug,Clone)]
 struct External {
     typ: ExternalType,
-    loc: ProgramLocation
+    loc: ProgramLocation,
+    contract: Option<AnyContract>
 }
 impl ExternalType {
-    fn prefix(&self) -> String {
+    fn prefix(&self, program: &CmdProgram) -> String {
         match self {
-            ExternalType::RawExternal => String::new(),
-            ExternalType::CExternal => "_".to_string(),
+        ExternalType::RawExternal => String::new(),
+            ExternalType::CExternal => program.architecture.cextern_prefix.clone(),
             _ => String::new()
         }
     }
@@ -776,6 +865,20 @@ enum Register {
 
     // General Purpose registers
     R8,
+    R9,
+    R10,
+    R11,
+    R12,
+    R13,
+    R14,
+    R15,
+    //TODO: Implement the rest of the floating point arithmetic registers
+    //Floating point arithmetics
+    XMM0,
+    XMM1,
+    XMM2,
+    XMM3,
+    
     R8D,
     
 }
@@ -811,41 +914,64 @@ impl Register {
             Register::CH  => "ch".to_string(),
             Register::DH  => "dh".to_string(),
             Register::R8  => "r8".to_string(),
-            Register::R8D => "r8d".to_string()
+            Register::R8D => "r8d".to_string(),
+            Register::R9  => "r9".to_string(),
+            Register::R10 => "r10".to_string(),
+            Register::R11 => "r11".to_string(),
+            Register::R12 => "r12".to_string(),
+            Register::R13 => "r13".to_string(),
+            Register::R14 => "r14".to_string(),
+            Register::R15 => "r15".to_string(),
+            Register::XMM0 => "xmm0".to_string(),
+            Register::XMM1 => "xmm1".to_string(),
+            Register::XMM2 => "xmm2".to_string(),
+            Register::XMM3 => "xmm3".to_string(),
         }
     }
     fn from_string(stri: &String) -> Option<Self> {
         match stri.as_str() {
-             "RAX" | "rax" => Some(Register::RAX), 
-             "RBX" | "rbx" => Some(Register::RBX), 
-             "RCX" | "rcx" => Some(Register::RCX), 
-             "RDX" | "rdx" => Some(Register::RDX), 
-             "RSP" | "rsp" => Some(Register::RSP), 
-             "RBP" | "rbp" => Some(Register::RBP), 
-             "EAX" | "eax" => Some(Register::EAX), 
-             "EBX" | "ebx" => Some(Register::EBX), 
-             "ECX" | "ecx" => Some(Register::ECX), 
-             "EDX" | "edx" => Some(Register::EDX), 
-             "ESP" | "esp" => Some(Register::ESP), 
-             "EBP" | "ebp" => Some(Register::EBP), 
-             "AX"  | "ax"  => Some(Register::AX ), 
-             "BX"  | "bx"  => Some(Register::BX ), 
-             "CX"  | "cx"  => Some(Register::CX ), 
-             "DX"  | "dx"  => Some(Register::DX ), 
-             "SP"  | "sp"  => Some(Register::SP ), 
-             "BP"  | "bp"  => Some(Register::BP ), 
-             "AL"  | "al"  => Some(Register::AL ), 
-             "BL"  | "bl"  => Some(Register::BL ), 
-             "CL"  | "cl"  => Some(Register::CL ), 
-             "DL"  | "dl"  => Some(Register::DL ), 
-             "AH"  | "ah"  => Some(Register::AH ), 
-             "BH"  | "bh"  => Some(Register::BH ), 
-             "CH"  | "ch"  => Some(Register::CH ), 
-             "DH"  | "dh"  => Some(Register::DH ), 
-             "R8"  | "r8"  => Some(Register::R8),
+             "RAX"  | "rax"  => Some(Register::RAX), 
+             "RBX"  | "rbx"  => Some(Register::RBX), 
+             "RCX"  | "rcx"  => Some(Register::RCX), 
+             "RDX"  | "rdx"  => Some(Register::RDX), 
+             "RSP"  | "rsp"  => Some(Register::RSP), 
+             "RBP"  | "rbp"  => Some(Register::RBP), 
+             "EAX"  | "eax"  => Some(Register::EAX), 
+             "EBX"  | "ebx"  => Some(Register::EBX), 
+             "ECX"  | "ecx"  => Some(Register::ECX), 
+             "EDX"  | "edx"  => Some(Register::EDX), 
+             "ESP"  | "esp"  => Some(Register::ESP), 
+             "EBP"  | "ebp"  => Some(Register::EBP), 
+             "AX"   | "ax"   => Some(Register::AX ), 
+             "BX"   | "bx"   => Some(Register::BX ), 
+             "CX"   | "cx"   => Some(Register::CX ), 
+             "DX"   | "dx"   => Some(Register::DX ), 
+             "SP"   | "sp"   => Some(Register::SP ), 
+             "BP"   | "bp"   => Some(Register::BP ), 
+             "AL"   | "al"   => Some(Register::AL ), 
+             "BL"   | "bl"   => Some(Register::BL ), 
+             "CL"   | "cl"   => Some(Register::CL ), 
+             "DL"   | "dl"   => Some(Register::DL ), 
+             "AH"   | "ah"   => Some(Register::AH ), 
+             "BH"   | "bh"   => Some(Register::BH ), 
+             "CH"   | "ch"   => Some(Register::CH ), 
+             "DH"   | "dh"   => Some(Register::DH ), 
+             "R8"   | "r8"   => Some(Register::R8),
+             "R9"   | "r9"   => Some(Register::R9),
+             "R10"  | "r10"  => Some(Register::R10),
+             "R11"  | "r11"  => Some(Register::R11),
+             "R12"  | "r12"  => Some(Register::R12),
+             "R13"  | "r13"  => Some(Register::R13),
+             "R14"  | "r14"  => Some(Register::R14),
+             "R15"  | "r15"  => Some(Register::R15),
+             "XMM0" | "XMM0" => Some(Register::XMM0),
+             "XMM1" | "XMM1" => Some(Register::XMM1),
+             "XMM2" | "XMM2" => Some(Register::XMM2),
+             "XMM3" | "XMM3" => Some(Register::XMM3),
              "R8D" | "r8d" => Some(Register::R8D),
              "RSI" | "rsi" => Some(Register::RSI),
              "RDI" | "rdi" => Some(Register::RDI),
+             
             _ => None 
         }
     }
@@ -881,6 +1007,17 @@ impl Register {
             Register::R8D => 4,
             Register::RSI => 8,
             Register::RDI => 8,
+            Register::R9  => 8,
+            Register::R10 => 8,
+            Register::R11 => 8,
+            Register::R12 => 8,
+            Register::R13 => 8,
+            Register::R14 => 8,
+            Register::R15 => 8,
+            Register::XMM0 => 8,
+            Register::XMM1 => 8,
+            Register::XMM2 => 8,
+            Register::XMM3 => 8,
         }
     }
     fn to_byte_size(&self, size: usize) -> Self {
@@ -909,6 +1046,17 @@ impl Register {
                 Register::R8D => todo!(),
                 Register::RSI => todo!(),
                 Register::RDI => todo!(),
+                Register::R9 => todo!(),
+                Register::R10 => todo!(),
+                Register::R11 => todo!(),
+                Register::R12 => todo!(),
+                Register::R13 => todo!(),
+                Register::R14 => todo!(),
+                Register::R15 => todo!(),
+                Register::XMM0 => todo!(),
+                Register::XMM1 => todo!(),
+                Register::XMM2 => todo!(),
+                Register::XMM3 => todo!(),
               }  
             },
             4 => {
@@ -935,6 +1083,17 @@ impl Register {
                     Register::R8D => todo!(),
                     Register::RSI => todo!(),
                     Register::RDI => todo!(),
+                    Register::R9 => todo!(),
+                    Register::R10 => todo!(),
+                    Register::R11 => todo!(),
+                    Register::R12 => todo!(),
+                    Register::R13 => todo!(),
+                    Register::R14 => todo!(),
+                    Register::R15 => todo!(),
+                    Register::XMM0 => todo!(),
+                    Register::XMM1 => todo!(),
+                    Register::XMM2 => todo!(),
+                    Register::XMM3 => todo!(),
                   }  
             },
             2 => {
@@ -961,6 +1120,17 @@ impl Register {
                     Register::R8D => todo!(),
                     Register::RSI => todo!(),
                     Register::RDI => todo!(),
+                    Register::R9 => todo!(),
+                    Register::R10 => todo!(),
+                    Register::R11 => todo!(),
+                    Register::R12 => todo!(),
+                    Register::R13 => todo!(),
+                    Register::R14 => todo!(),
+                    Register::R15 => todo!(),
+                    Register::XMM0 => todo!(),
+                    Register::XMM1 => todo!(),
+                    Register::XMM2 => todo!(),
+                    Register::XMM3 => todo!(),
                   }  
             },
             1 => {
@@ -987,6 +1157,17 @@ impl Register {
                     Register::R8D => todo!(),
                     Register::RSI => todo!(),
                     Register::RDI => todo!(),
+                    Register::R9 => todo!(),
+                    Register::R10 => todo!(),
+                    Register::R11 => todo!(),
+                    Register::R12 => todo!(),
+                    Register::R13 => todo!(),
+                    Register::R14 => todo!(),
+                    Register::R15 => todo!(),
+                    Register::XMM0 => todo!(),
+                    Register::XMM1 => todo!(),
+                    Register::XMM2 => todo!(),
+                    Register::XMM3 => todo!(),
                   }  
             },
             _ => {
@@ -1001,13 +1182,13 @@ impl Register {
             },
             Register::RSP | Register::RBP => {
                 //TODO: introduce VarType::PTR64
-                VarType::PTR
+                VarType::PTR(PtrTyp::VOID)
             },
             Register::EAX | Register::EBX | Register::ECX | Register::EDX => {
                 VarType::INT
             },
             Register::ESP | Register::EBP => {
-                VarType::PTR
+                VarType::PTR(PtrTyp::VOID)
             }
             Register::AX |Register::BX |Register::CX |Register::DX |Register::SP |Register::BP => {
                 VarType::SHORT
@@ -1015,9 +1196,16 @@ impl Register {
             Register::AL |Register::BL |Register::CL |Register::DL |Register::AH |Register::BH |Register::CH |Register::DH => {
                 VarType::CHAR
             }
-            Register::R8 |Register::R8D => {
+            Register::R8 |Register::R9 | Register::R10  | Register::R11  | Register::R12  | Register::R13  | Register::R14  | Register::R15 => {
                 VarType::LONG
             },
+            Register::R8D => {
+                VarType::INT
+            }
+            Register::XMM0 => todo!("floats"),
+            Register::XMM1 => todo!("floats"),
+            Register::XMM2 => todo!("floats"),
+            Register::XMM3 => todo!("floats"),
         }
     }
 }
@@ -1042,9 +1230,64 @@ fn size_to_nasm_type(size: usize) -> String {
         }
     }
 }
-
-
-
+#[derive(Debug,PartialEq,Clone)]
+enum CallArgType {
+    TOP(Option<VarType>),
+    LOCALVAR(String),
+    REGISTER(Register),
+    CONSTANT(RawConstValueType)
+}
+#[derive(Debug,PartialEq,Clone)]
+struct CallArg {
+    typ: CallArgType,
+    loc: ProgramLocation
+}
+impl CallArg {
+    fn from_token(build: &mut BuildProgram, tok: &Token, currentLocals: Option<&Locals>) -> Option<Self> {
+        match &tok.typ {
+            TokenType::WordType(word) => {
+                if currentLocals.is_some() && currentLocals.unwrap().contains_key(word) {
+                    return Some(Self { typ: CallArgType::LOCALVAR(word.clone()), loc: tok.location.clone() });
+                }
+                else if build.constdefs.contains_key(word){
+                    return Some(Self { typ: CallArgType::CONSTANT(build.constdefs.get(word).unwrap().typ.clone()), loc: tok.location.clone() })
+                }
+                None
+            },
+            TokenType::IntrinsicType(typ) => {
+                if *typ == IntrinsicType::TOP {
+                    return Some(Self { typ: CallArgType::TOP(None), loc: tok.location.clone() });
+                }
+                None
+            },
+            TokenType::StringType(val) => {
+                let uuid = build.insert_unique_str(ProgramString { Typ: ProgramStringType::STR, Data: val.clone() });
+                Some(Self { typ: CallArgType::CONSTANT(RawConstValueType::STR(uuid)), loc: tok.location.clone()})
+            },
+            TokenType::CStringType(val) => {
+                let uuid = build.insert_unique_str(ProgramString { Typ: ProgramStringType::CSTR, Data: val.clone() });
+                Some(Self { typ: CallArgType::CONSTANT(RawConstValueType::STR(uuid)), loc: tok.location.clone()})
+            },
+            TokenType::Number32(val) => {
+                Some(Self { typ: CallArgType::CONSTANT(RawConstValueType::INT(val.clone())), loc: tok.location.clone()})
+            },
+            TokenType::Number64(val) => {
+                Some(Self { typ: CallArgType::CONSTANT(RawConstValueType::LONG(val.clone())), loc: tok.location.clone()})
+            },
+            TokenType::Register(reg) => {
+                Some(Self { typ: CallArgType::REGISTER(reg.clone()), loc: tok.location.clone() })
+            },
+            _ => {
+                None
+                //par_error!(tok,  "Error: Unexpected token type {} in argument contract!",tok.typ.to_string(false));
+            }
+        }
+    }
+    fn match_any(contract1: &Vec<Self>, contract: &AnyContract) -> bool {
+        true
+    }
+}
+type CallArgs = Vec<CallArg>;
 // TODO: Introduce this for ADD, SUB, MUL, DIV
 #[derive(Debug)]
 enum OfP {
@@ -1063,13 +1306,13 @@ enum Instruction {
     DEFVAR  (String),
     MOV     (OfP, OfP),
     POP     (OfP),
-    CALLRAW (String),
+    CALLRAW (String, CallArgs),
     ADD     (OfP, OfP),
     SUB     (OfP, OfP),
     MUL     (OfP, OfP),
     DIV     (OfP, OfP),
     EQUALS  (OfP, OfP),
-    CALL    (String),
+    CALL    (String, CallArgs),
     FNBEGIN (),
     RET     (),
     SCOPEBEGIN,
@@ -1084,12 +1327,12 @@ enum Instruction {
     EXPAND_ELSE_SCOPE(NormalScope),
 }
 
-#[derive(Debug,Clone)]
+#[derive(Debug,Clone,PartialEq)]
 enum ProgramStringType {
     STR,
     CSTR
 }
-#[derive(Debug,Clone)]
+#[derive(Debug,Clone,PartialEq)]
 struct ProgramString {
     Typ:  ProgramStringType,
     Data: String
@@ -1109,12 +1352,14 @@ struct Function {
 }
 
 
-#[derive(Debug, Clone)]
+#[derive(Debug, PartialEq, Clone)]
 enum ConstValueType {
     INT(i32),
     LONG(i64),
     STR(String),
+    PTR(PtrTyp),
 }
+#[derive(Debug,PartialEq,Clone)]
 struct ConstValue {
     typ: ConstValueType,
     loc: ProgramLocation
@@ -1133,6 +1378,7 @@ impl ConstValueType {
                     ConstValueType::STR(_nval) => {
                         return Err("Error: Unexpected - operation on int and string".to_string());
                     },
+                    ConstValueType::PTR(_) => { todo!("ConstValueType::PTR")}
                 }
             }
             ConstValueType::LONG(val) => {
@@ -1146,6 +1392,8 @@ impl ConstValueType {
                     ConstValueType::STR(_nval) => {
                         return Err("Error: Unexpected * operation on long and string".to_string());
                     },
+                    ConstValueType::PTR(_) => { todo!("ConstValueType::PTR")}
+ 
                 }
             }
             ConstValueType::STR(_) => {
@@ -1155,6 +1403,7 @@ impl ConstValueType {
                     }
                 }
             },
+            ConstValueType::PTR(_) => {todo!("ConstValueType::PTR")}
         }
     }
     fn sub(&self, Other: &ConstValueType) -> Result<ConstValueType,String> {
@@ -1170,6 +1419,8 @@ impl ConstValueType {
                     ConstValueType::STR(_nval) => {
                         return Err("Error: Unexpected - operation on int and string".to_string());
                     },
+                    ConstValueType::PTR(_) => { todo!("ConstValueType::PTR")}
+ 
                 }
             }
             ConstValueType::LONG(val) => {
@@ -1183,6 +1434,8 @@ impl ConstValueType {
                     ConstValueType::STR(_nval) => {
                         return Err("Error: Unexpected - operation on long and string".to_string());
                     },
+                    ConstValueType::PTR(_) => { todo!("ConstValueType::PTR")}
+ 
                 }
             }
             ConstValueType::STR(_) => {
@@ -1192,6 +1445,8 @@ impl ConstValueType {
                     }
                 }
             },
+            ConstValueType::PTR(_) => { todo!("ConstValueType::PTR")}
+             
         }
     }
     fn add(&self, Other: &ConstValueType) -> Result<ConstValueType,String> {
@@ -1207,6 +1462,8 @@ impl ConstValueType {
                     ConstValueType::STR(nval) => {
                         return Ok(ConstValueType::STR(val.to_string()+nval));
                     },
+                    ConstValueType::PTR(_) => { todo!("ConstValueType::PTR")}
+ 
                 }
             }
             ConstValueType::LONG(val) => {
@@ -1220,6 +1477,8 @@ impl ConstValueType {
                     ConstValueType::STR(nval) => {
                         return Ok(ConstValueType::STR(val.to_string()+nval));
                     },
+                    ConstValueType::PTR(_) => { todo!("ConstValueType::PTR")}
+ 
                 }
             }
             ConstValueType::STR(val) => {
@@ -1234,23 +1493,29 @@ impl ConstValueType {
                         let out = val.clone()+nval;
                         return Ok(ConstValueType::STR(out));
                     },
+                    ConstValueType::PTR(_) => { todo!("ConstValueType::PTR")}
+                     
                 }
             },
+            ConstValueType::PTR(_) => { todo!("ConstValueType::PTR")}
+             
         }
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone,PartialEq)]
 enum RawConstValueType{
     INT(i32),
     LONG(i64),
     STR(Uuid),
+    PTR(PtrTyp)
 }
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone,PartialEq)]
 struct RawConstValue {
     typ: RawConstValueType,
     loc: ProgramLocation,
 }
+type RawConstants = HashMap<String, RawConstValue>;
 #[derive(Debug)]
 struct BuildProgram {
     externals:    HashMap<String,External>,
@@ -1258,16 +1523,28 @@ struct BuildProgram {
     stringdefs:   HashMap<Uuid,ProgramString>,
     constdefs:    HashMap<String, RawConstValue>
 }
+impl BuildProgram {
+    fn insert_unique_str(&mut self, str: ProgramString) -> Uuid {
+        let mut UUID: Uuid = Uuid::new_v4();
+        while self.stringdefs.contains_key(&UUID) {
+            UUID = Uuid::new_v4();
+        }
+        //println!("Before: {:#?}, \nUUID: {}\n",self.stringdefs,UUID);
+        self.stringdefs.insert(UUID.clone(), str);
+        //println!("After: {:#?}, \nUUID: {}",self.stringdefs,UUID);
+        //println!("At: {:#?}",self.stringdefs.get(&UUID));
+        UUID
+    }
+}
 
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 enum VarType {
     CHAR,
     SHORT,
     BOOLEAN,
     INT,
     LONG,
-    STR,
-    PTR,
+    PTR(PtrTyp),
     CUSTOM(Uuid)   
 }
 impl VarType {
@@ -1288,10 +1565,8 @@ impl VarType {
             VarType::LONG => {
                 if isplural {"longs".to_string()} else {"long".to_string()}
             }
-            VarType::STR => {
-                if isplural {"strings".to_string()} else {"string".to_string()}
-            }
-            VarType::PTR => {
+            VarType::PTR(_) => {
+                //TODO: implement typ.to_string()!
                 if isplural {"pointers".to_string()} else {"pointer".to_string()}
             }
             VarType::CUSTOM(_) => {
@@ -1306,11 +1581,10 @@ impl VarType {
             VarType::BOOLEAN => 1,
             VarType::INT => 4,
             VarType::LONG => 8,
-            VarType::STR => 16,
-            VarType::PTR => {
-                match program.build_architecture.as_str() {
-                    "32" => 4,
-                    "64" => 8,
+            VarType::PTR(_) => {
+                match program.architecture.bits{
+                    32 => 4,
+                    64 => 8,
                     _    => 4
                 }
             },
@@ -1375,6 +1649,11 @@ type ContractInputPool = Vec<VarType>;
 #[derive(Debug, Clone)]
 struct FunctionContract {
     Inputs: ContractInputs,
+    InputPool: ContractInputPool,
+    Outputs: Vec<VarType>
+}
+#[derive(Debug, Clone)]
+struct AnyContract {    
     InputPool: ContractInputPool,
     Outputs: Vec<VarType>
 }
@@ -1557,6 +1836,9 @@ fn eval_const_def(lexer: &mut Lexer, build: &mut BuildProgram) -> ConstValue {
                     RawConstValueType::STR(ref UUID)       => {
                         varStack.push(ConstValueType::STR(build.stringdefs.get(UUID).unwrap().Data.clone()));
                     }
+                    RawConstValueType::PTR(ref ptr) => {
+                        varStack.push(ConstValueType::PTR(ptr.clone()));
+                    }
                 }
             }
             TokenType::StringType(word) => {
@@ -1577,7 +1859,100 @@ fn eval_const_def(lexer: &mut Lexer, build: &mut BuildProgram) -> ConstValue {
     lpar_assert!(lexer.currentLocation,varStack.len() == 1,"Error: Lazy constant stack handling! You need to correctly handle your constants");
     ConstValue {typ: varStack.pop().unwrap(), loc: orgLoc}
 }
-
+fn parse_argument_contract(lexer: &mut Lexer, build: &mut BuildProgram, currentLocals: Option<&Locals>) -> CallArgs {
+    //println!("Hello?!?!?!?!?!?!?!?");
+    //println!("Current locals: {:#?}", currentLocals);
+    let mut out: CallArgs = CallArgs::new();
+    let mut expectNextSY = false;
+    par_assert!(lexer.currentLocation, par_expect!(lexer.currentLocation,lexer.next(), "Error: abruptly ran out of tokens in argument contract definition").typ == TokenType::IntrinsicType(IntrinsicType::OPENPAREN), "Error: argument contract must begin with (");
+    while let Some(token) = lexer.next() {
+        match token.typ {
+            TokenType::IntrinsicType(Typ) => {
+                match Typ {
+                    IntrinsicType::COMA => {
+                        par_assert!(token.location,expectNextSY, "undefined coma placed inside argument contract! Comas only seperate Input parameters");
+                        expectNextSY = false;
+                    }
+                    IntrinsicType::CLOSEPAREN => {
+                        //println!("Output args: {:?}",out);
+                        return out},
+                    IntrinsicType::TOP => {
+                        expectNextSY = true;
+                        out.push(par_expect!(token, CallArg::from_token(build,&token, currentLocals),"Unexpected Token Type in argument Contract. Expected Definition but found: {}",token.typ.to_string(false)));
+                    }
+                    other => par_error!(token, "Unexpected intrinsic in argument contract! {}",other.to_string(false))
+                }
+            }
+            /*
+            top,
+            localvar,
+            constant_name,
+            */    
+            _ => {
+                out.push(par_expect!(token, CallArg::from_token(build,&token, currentLocals),"Unexpected Token Type in argument Contract. Expected Definition but found: {}",token.typ.to_string(false)));
+                expectNextSY = true;
+                //println!("WTF DUDE JUST PRINT IT FOR FUCK SAKE: {:?}",CallArg::from_token(build,&token, currentLocals).unwrap());
+            }
+        }
+    }
+    //println!("HELLO?!??!?!?!\n\n\nOutput args: {:?}",out);
+    out
+}
+/*
+[NOTE] For future me using this function: 
+IT DOES NOT CONSUME THE FIRST (
+*/
+fn parse_any_contract(lexer: &mut Lexer) -> AnyContract {
+    let mut out = AnyContract { InputPool: vec![], Outputs: vec![] };
+    // let first = lexer.next();
+    // let first = par_expect!(lexer.currentLocation,first,"abruptly ran out of tokens in any contract");
+    let mut expectNextSY = false;
+    let mut is_input = true;
+    // match first.typ {
+    //     TokenType::IntrinsicType(typ) => {
+    //         match typ {
+    //             IntrinsicType::OPENPAREN => {},
+    //             Other => {
+    //                 par_error!(first,"INVALID TOKEN FOR PARSING, Expected an Open paren but found other {}",Other.to_string(false));
+    //             }
+    //         }
+    //     }
+    //     Other => {assert!(false, "INVALID TOKEN FOR PARSING, Expected an Open paren intrinsic but found: {}",Other.to_string(false));}
+    // }
+    while let Some(token) = lexer.next() {
+        match token.typ {
+            TokenType::IntrinsicType(Typ) => {
+                match Typ {
+                    IntrinsicType::COMA => {
+                        assert!(expectNextSY, "undefined coma placed inside any contract! Comas only seperate Input or Output parameters");
+                        expectNextSY = false;
+                    }
+                    IntrinsicType::CLOSEPAREN => return out,
+                    IntrinsicType::DOUBLE_COLIN => {
+                        par_assert!(token,is_input, "multiple double colin seperators found in any contract!");
+                        is_input = false;
+                        expectNextSY = false;
+                    },
+                    other => par_error!(token, "Unexpected intrinsic in any contract! {}",other.to_string(false))
+                }
+            }
+            TokenType::Definition(Def) => {
+                expectNextSY = true;    
+                if is_input {
+                    out.InputPool.push(Def);
+                }
+                else {
+                    out.Outputs.push(Def)
+                }
+            }
+            _ => {
+                par_error!(token, "Unexpected Token Type in any Contract. Expected Definition but found: {}",token.typ.to_string(false))
+            }
+        }
+    }
+    
+    out
+}
 fn parse_function_contract(lexer: &mut Lexer) -> FunctionContract {
     let mut out = FunctionContract {Inputs: HashMap::new(), InputPool: vec![], Outputs: vec![]};
     let mut is_input = true;
@@ -1651,7 +2026,7 @@ fn getTopMut(scopeStack: &mut ScopeStack) -> Option<&mut Scope> {
 fn parse_tokens_to_build(lexer: &mut Lexer, program: &mut CmdProgram) -> BuildProgram {
     let mut build: BuildProgram = BuildProgram { externals: HashMap::new(), functions: HashMap::new(),stringdefs: HashMap::new(), constdefs: HashMap::new()};
     let mut scopeStack: ScopeStack = vec![];
-    let mut foundFuncs: HashSet<String> = HashSet::new();
+    //let mut lexer.CurrentFuncs: &HashSet<String> = &lexer.CurrentFuncs;
     //let mut currentLocals: Locals = HashSet::new();
     //^ preparing for IFS and others that inherit their locals
     //let mut currentFunction: Option<String> = None;
@@ -1670,149 +2045,12 @@ fn parse_tokens_to_build(lexer: &mut Lexer, program: &mut CmdProgram) -> BuildPr
                 par_assert!(token,currentScope.body_is_some(), "Error: can not insert word operation at the top level of a {} as it does not support instructions",currentScope.typ.to_string(false));
                 
                 let mut isvalid = false;
-                // for (name,external) in build.externals.iter() {
-                //     match external.typ {
-                //         ExternalType::RawExternal => {
-                //             if word == name {
-                //                 let body = currentScope.body_unwrap_mut().unwrap();
-                //                 isvalid = true;
-                //                 // TODO: There might be some optimization here to do with Strings, and instead making them references
-                //                 body.push((token.location.clone(),Instruction::CALLRAW(ext.clone())));
-                //                 break;
-                //             }
-                //         }
-                //         ExternalType::CExternal => {
-                //             if word == ext {
-                //                 let body = currentScope.body_unwrap_mut().unwrap();
-                //                 isvalid = true;
-                //                 // TODO: There might be some optimization here to do with Strings, and instead making them references
-                //                 body.push((token.location.clone(),Instruction::CALLRAW(external.typ.prefix().clone()+&ext+&external.typ.suffix())));
-                //                 break;
-                //             }
-                //         }
-                //     }
-                // }
                 if let Some(external) = build.externals.get(word) {
                     isvalid = true;
+                    let external2: External = external.clone();
+                    let contract = parse_argument_contract(lexer, &mut build, currentScope.locals_unwrap());
                     let body = currentScope.body_unwrap_mut().unwrap();
-                    body.push((token.location.clone(),Instruction::CALLRAW(external.typ.prefix().clone()+word+&external.typ.suffix())));
-                }
-                if let Some(reg) = Register::from_string(&word) {
-                    if !isvalid {
-                        isvalid = true;
-                        let regOp = par_expect!(lexer.currentLocation,lexer.next(),"Unexpected register operation or another register!");
-                        if reg == Register::RAX && program.warn_rax_usage {
-                            eprintln!("(P) [WARNING] {}:{}:{}: Usage of RAX is not recommended since RAX is used for popping and might be manipulated! Consider using registers like RBX, RCX, RDX etc.", token.location.file, token.location.linenumber,token.location.character);
-                            program.warn_rax_usage = false
-                        }
-                        match regOp.typ {
-                        TokenType::IntrinsicType(typ) => {
-                            match typ {
-                                IntrinsicType::POP => {
-                                    let body = currentScope.body_unwrap_mut().unwrap();
-                                    body.push((token.location.clone(),Instruction::POP(OfP::REGISTER(reg))));
-                                }
-                                IntrinsicType::PUSH => {
-                                    let body = currentScope.body_unwrap_mut().unwrap();
-                                    body.push((token.location.clone(),Instruction::PUSH(OfP::REGISTER(reg))));
-                                }
-                                IntrinsicType::SET => {
-                                    let token = par_expect!(lexer.currentLocation,lexer.next(),"abruptly ran out of tokens");
-                                    match token.typ {
-                                        TokenType::Number32(data) => {
-                                            if reg.size() >= 4 {
-                                                let body = currentScope.body_unwrap_mut().unwrap();
-                                                body.push((token.location,Instruction::MOV(OfP::REGISTER(reg), OfP::RAW(data as i64))))
-                                            }
-                                        }
-                                        TokenType::Number64(data) => {
-                                            if reg.size() >= 8 {
-                                                let body = currentScope.body_unwrap_mut().unwrap();
-                                                body.push((token.location,Instruction::MOV(OfP::REGISTER(reg), OfP::RAW(data))))
-                                            }
-                                        }
-                                        TokenType::WordType(ref data) => {
-                                            if let Some(reg2) = Register::from_string(data) {
-                                                currentScope.body_unwrap_mut().unwrap().push((token.location.clone(),Instruction::MOV(OfP::REGISTER(reg), OfP::REGISTER(reg2))));
-                                            }
-                                            else if currentScope.contract_is_some() {
-                                                let contract = currentScope.contract_unwrap().unwrap();
-                                                //let mut found = false;
-                                                /*for (name,val) in contract.Inputs.iter() 
-                                                {
-                                                    if name == data {
-                                                        par_assert!(token, val.get_size(program)==reg.size(), "Error: Can not move parameter into register of different size: Register: {} of size {}, parameter {name} of size {}",reg.to_string(),reg.size(),val.get_size(program));
-                                                        currentScope.body_unwrap_mut().unwrap().push((token.location.clone(),Instruction::MOV(OfP::REGISTER(reg), OfP::PARAM(data.to_owned()))));
-                                                        found = true;
-                                                        break;
-                                                    }
-                                                }*/
-                                                let val = contract.InputPool.get(par_expect!(token, contract.Inputs.get(data), "Error: Unexpected word for register: '{}'",data).clone()).unwrap();
-                                                
-//                                                par_assert!(token, found, "Error: Unexpected word for register: '{}'",data);
-                                            }
-                                            else {
-                                                par_error!(token,"Unexpected Type for Mov Intrinsic. Expected Number32/Number64 but found {}",token.typ.to_string(false))
-                                            }
-                                        }
-                                        _ => par_error!(token,"Unexpected Type for Mov Intrinsic. Expected Number32/Number64 but found {}",token.typ.to_string(false))
-                                    }
-                                }
-                                Other => {
-                                    par_error!(token,"Unexpected Intrinsic Type: {}, Registers can only perform register operations \"pop\" \"push\" \"mov\" ",Other.to_string(false))
-                                }
-                            }
-                        },
-                        TokenType::WordType(Word) => {
-                            if let Some(reg2) = Register::from_string(&Word) {
-                                par_assert!(token,reg.size()==reg2.size(),"Gotten two differently sized registers to one op!");
-                                let regOp = lexer.next().expect(&format!("(P) [ERROR] {}:{}:{}: Unexpected register operation!",token.location.clone().file,&token.location.clone().linenumber,&token.location.clone().character));
-                                let body = currentScope.body_unwrap_mut().unwrap();
-                                match regOp.typ {
-                                    TokenType::IntrinsicType(typ) => {
-                                        
-                                        match typ {
-                                            IntrinsicType::ADD => {
-                                                body.push((token.location.clone(),Instruction::ADD(OfP::REGISTER(reg), OfP::REGISTER(reg2))))
-                                            }
-                                            IntrinsicType::SUB => {
-                                                body.push((token.location.clone(),Instruction::SUB(OfP::REGISTER(reg), OfP::REGISTER(reg2))))
-                                            }
-                                            IntrinsicType::MUL => {
-                                                body.push((token.location.clone(),Instruction::MUL(OfP::REGISTER(reg), OfP::REGISTER(reg2))))
-                                            }
-                                            IntrinsicType::EQ => {
-                                                body.push((token.location.clone(),Instruction::EQUALS(OfP::REGISTER(reg), OfP::REGISTER(reg2))))
-                                            }
-                                            IntrinsicType::DIV => {
-                                                body.push((token.location.clone(),Instruction::DIV(OfP::REGISTER(reg), OfP::REGISTER(reg2))))
-                                            }
-                                            IntrinsicType::SET => {
-                                                body.push((token.location.clone(),Instruction::MOV(OfP::REGISTER(reg), OfP::REGISTER(reg2))))
-                                            }
-                                            other => par_error!(token,"Unexpected Intrinsic! Expected Register Intrinsic but found {}",other.to_string(false))
-                                        }
-                                    }
-                                    other => {
-                                        par_error!(token, "Unexpected token type: Expected Intrinsic but found {}",other.to_string(false));
-                                    }
-                                }
-                            }
-                            // else if currentScope.contract_is_some() {
-                                
-                            //     // if let Some(local) = currentScope.contract_unwrap().unwrap().Inputs.get{
-
-                            //     // }
-                            // }
-                            else{
-                                par_error!(token, "unknown word '{}' found after Register operation",Word);
-                            }
-                        }
-                        typ => {
-                            par_error!(token,"Unexpected register operation! Expected Intrinsic or another Register but found {}",typ.to_string(false));
-                        }
-                    }
-                    }
+                    body.push((token.location.clone(),Instruction::CALLRAW(external2.typ.prefix(&program).clone()+word+&external2.typ.suffix(), contract)));
                 }
                 if !isvalid && currentScope.locals_is_some() {
                     
@@ -1837,6 +2075,12 @@ fn parse_tokens_to_build(lexer: &mut Lexer, program: &mut CmdProgram) -> BuildPr
                                     IntrinsicType::SET => {
                                         let operand = par_expect!(lexer.currentLocation,lexer.next(),"Expected another variable, a constant integer or a (string: not yet implemented)!");
                                         match operand.typ {
+                                            TokenType::Register(reg) => {
+                                                par_assert!(operand,reg.size() == currentScope.locals_unwrap().unwrap().get(word).unwrap().typ.get_size(program), "Register assigned to differently sized variable, Variable size: {}, Register size: {}",reg.size(),currentScope.locals_unwrap_mut().unwrap().get(word).unwrap().typ.get_size(program));
+                                                // TODO: There might be some optimzation to do with references of strings instead of actual strings
+                                                let body = currentScope.body_unwrap_mut().unwrap();
+                                                body.push((operand.location,Instruction::MOV(OfP::LOCALVAR(word.clone()), OfP::REGISTER(reg))))
+                                            }
                                             TokenType::WordType(ref other) => {
                                                 
                                                 if currentScope.locals_unwrap().unwrap().contains_key(other) {
@@ -1844,11 +2088,9 @@ fn parse_tokens_to_build(lexer: &mut Lexer, program: &mut CmdProgram) -> BuildPr
                                                     let body = currentScope.body_unwrap_mut().unwrap();
                                                     body.push((operand.location,Instruction::MOV(OfP::LOCALVAR(word.clone()), OfP::LOCALVAR(other.clone()))))
                                                 }
-                                                else if let Some(reg) = Register::from_string(&other) {
-                                                    par_assert!(operand,reg.size() == currentScope.locals_unwrap().unwrap().get(word).unwrap().typ.get_size(program), "Register assigned to differently sized variable, Variable size: {}, Register size: {}",reg.size(),currentScope.locals_unwrap_mut().unwrap().get(word).unwrap().typ.get_size(program));
-                                                    // TODO: There might be some optimzation to do with references of strings instead of actual strings
+                                                else if currentScope.contract_is_some() && currentScope.contract_unwrap().unwrap().Inputs.contains_key(other) {
                                                     let body = currentScope.body_unwrap_mut().unwrap();
-                                                    body.push((operand.location,Instruction::MOV(OfP::LOCALVAR(word.clone()), OfP::REGISTER(reg))))
+                                                    body.push((operand.location,Instruction::MOV(OfP::LOCALVAR(word.clone()), OfP::PARAM(other.clone()))))
                                                 }
                                                 else {
                                                     par_error!(operand,"Could not find variable or register {}",other);
@@ -1921,14 +2163,6 @@ fn parse_tokens_to_build(lexer: &mut Lexer, program: &mut CmdProgram) -> BuildPr
                         }
                     }
                 }
-                if !isvalid {
-                    isvalid = foundFuncs.contains(word);
-                    let body = currentScope.body_unwrap_mut().unwrap();
-                    if isvalid {
-                        // TODO: There might be some optimzation to do with references of strings instead of actual strings
-                        body.push((token.location.clone(),Instruction::CALL(word.clone())));
-                    }
-                }
                 if !isvalid  {
                     isvalid = build.constdefs.contains_key(word);
                     if isvalid {
@@ -1948,11 +2182,12 @@ fn parse_tokens_to_build(lexer: &mut Lexer, program: &mut CmdProgram) -> BuildPr
                                 let body = currentScope.body_unwrap_mut().unwrap();
                                 body.push((token.location.clone(),Instruction::PUSH(OfP::STR(val, ProgramStringType::STR))));
                             }
+                            RawConstValueType::PTR(_) => { todo!("RawConstValueType::PTR")}
+                                                 
                         }
                     }
                 }
                 if !isvalid && currentScope.contract_is_some(){
-                    //let func = build.functions.get_mut(currentFunction.as_mut().unwrap()).unwrap();
                     let contract = currentScope.contract_unwrap().unwrap();
                     for (p_name,_) in contract.Inputs.iter() {
                         if p_name == word {
@@ -1977,13 +2212,22 @@ fn parse_tokens_to_build(lexer: &mut Lexer, program: &mut CmdProgram) -> BuildPr
                                 TokenType::CharType(_) => todo!(),
                                 TokenType::Number32(_) => todo!(),
                                 TokenType::Number64(_) => todo!(),
+                                TokenType::Function(word) => {
+                                    //TODO: Finish function calling....
+                                    let argcontract = parse_argument_contract(lexer, &mut build, currentScope.locals_unwrap(),);
+                                    let body = currentScope.body_unwrap_mut().unwrap();
+                                    //todo!("Parse arguments list");
+                                    // TODO: There might be some optimzation to do with references of strings instead of actual strings
+                                    body.push((token.location.clone(),Instruction::CALL(word,argcontract)));
+                                },
+                                TokenType::Register(_) => todo!(),
                             }
                             break;
                         }
                     }
                     
                 }
-                par_assert!(token,isvalid,"Unknown word type: {}",word);
+                par_assert!(token,isvalid,"Unknown word type: {}, funcs: {:#?}",word,build.functions);
             }
             TokenType::IntrinsicType(Type) => {
                 match Type {
@@ -1992,7 +2236,19 @@ fn parse_tokens_to_build(lexer: &mut Lexer, program: &mut CmdProgram) -> BuildPr
                         let externType = par_expect!(lexer.currentLocation,externType,"Error: Unexpected abtrupt end of tokens in extern");
                         match externType.typ {
                             TokenType::WordType(Word) => {
-                                build.externals.insert(Word,External { typ: ExternalType::RawExternal, loc: externType.location.clone()});
+                                let mut contract: Option<AnyContract> = None;
+                       
+                                if let Some(tok) = lexer.peekable().peek() {
+                                    if tok.typ == TokenType::IntrinsicType(IntrinsicType::OPENPAREN) {
+                                        let tok = tok.clone();
+                                        contract = Some(parse_any_contract(lexer));
+                                        par_assert!(tok, tok.typ==TokenType::IntrinsicType(IntrinsicType::DOTCOMA),"Error: Expected dotcoma at the end of extern definition!");
+                                    }
+                                    else{
+                                        par_assert!(tok, tok.typ==TokenType::IntrinsicType(IntrinsicType::DOTCOMA),"Error: Expected dotcoma at the end of extern definition!");
+                                    }
+                                }
+                                build.externals.insert(Word,External { typ: ExternalType::RawExternal, loc: externType.location.clone(), contract});
                             }
                             TokenType::IntrinsicType(_) => assert!(false,"Unexpected behaviour! expected type Word or String but found Intrinsic"),
                             TokenType::StringType(Type) => {
@@ -2002,7 +2258,22 @@ fn parse_tokens_to_build(lexer: &mut Lexer, program: &mut CmdProgram) -> BuildPr
                                         let externWord = externWord.expect("Error: C type extern defined but stream of tokens abruptly ended!");
                                         match externWord.typ {
                                             TokenType::WordType(Word) => {
-                                                build.externals.insert(Word,External { typ: ExternalType::CExternal, loc: externWord.location.clone()});
+                                                let mut contract: Option<AnyContract> = None;
+                                                //println!("Lexer current loc: {}",lexer.currentLocation.loc_display());                                                
+                                                if let Some(tok) = lexer.peekable().peek() {
+                                                    if tok.typ == TokenType::IntrinsicType(IntrinsicType::OPENPAREN) {
+                                                        // let tok2 = tok.clone();
+                                                        // println!("Lexer current loc: {}",lexer.currentLocation.loc_display());
+                                                        contract = Some(parse_any_contract(lexer));
+                                                        let ntc = par_expect!(lexer.currentLocation,lexer.next(),"Error: stream of tokens abruptly ended in extern definition");
+                                                        par_assert!(ntc, ntc.typ==TokenType::IntrinsicType(IntrinsicType::DOTCOMA),"Error: Expected dotcoma at the end of extern definition! But found {}",ntc.typ.to_string(false));
+                                                    }
+                                                    else {
+                                                        par_assert!(tok, tok.typ==TokenType::IntrinsicType(IntrinsicType::DOTCOMA),"Error: Expected dotcoma at the end of extern definition!");
+                                                    }
+                                                }
+                                                build.externals.insert(Word,External { typ: ExternalType::CExternal, loc: externWord.location.clone(), contract});
+
                                             }
                                             TokenType::StringType(Word) => {
                                                 par_error!(token, "Error: Expected type Word but found String \"{}\"",Word)
@@ -2031,17 +2302,18 @@ fn parse_tokens_to_build(lexer: &mut Lexer, program: &mut CmdProgram) -> BuildPr
                             TokenType::WordType(Word) => {
                                 par_assert!(token,build.functions.get(&Word).is_none(),"Multiply defined symbols {}!",Word);
                                 let contract = parse_function_contract(lexer);
+                                //println!("Contract parsed: {:#?}",contract);
                                 //currentFunction = Some(Word.clone()); // Make currentFunction a shared reference with Rc<RefCell<>>
                                 if Word == "main" {
                                     //build.functions.insert(Word.clone(), None); //Function { contract: contract.clone(), body:  vec![], location: token.location.clone(), locals: HashMap::new() }
-                                    foundFuncs.insert(Word.clone());
-                                    scopeStack.push(Scope { typ: ScopeType::FUNCTION(Function { contract: contract.clone(), body:  vec![], location: token.location.clone(), locals: HashMap::new() }, Word), hasBeenOpened: false });
+                                    lexer.CurrentFuncs.insert(Word.clone());
+                                    scopeStack.push(Scope { typ: ScopeType::FUNCTION(Function { contract, body:  vec![], location: token.location.clone(), locals: HashMap::new() }, Word), hasBeenOpened: false });
                                     build.functions.reserve(1);
                                 }
                                 else {
                                     //build.functions.insert(Word.clone(), None);//Function { contract: contract.clone(), body:  vec![(token.location.clone(),Instruction::FNBEGIN())], location: token.location.clone(), locals:  HashMap::new() }
-                                    foundFuncs.insert(Word.clone());
-                                    scopeStack.push(Scope { typ: ScopeType::FUNCTION(Function { contract: contract.clone(), body:  vec![(token.location.clone(),Instruction::FNBEGIN())], location: token.location.clone(), locals: HashMap::new() }, Word), hasBeenOpened: false });
+                                    lexer.CurrentFuncs.insert(Word.clone());
+                                    scopeStack.push(Scope { typ: ScopeType::FUNCTION(Function { contract, body:  vec![(token.location.clone(),Instruction::FNBEGIN())], location: token.location.clone(), locals: HashMap::new() }, Word), hasBeenOpened: false });
                                     build.functions.reserve(1);
                                 }
                                 //let v = build.functions.get_mut(&Word).unwrap();
@@ -2052,7 +2324,7 @@ fn parse_tokens_to_build(lexer: &mut Lexer, program: &mut CmdProgram) -> BuildPr
                         }
 
                     }
-                    IntrinsicType::OPENPAREN => todo!(),
+                    IntrinsicType::OPENPAREN => todo!("loc: {}",token.location.loc_display()),
                     IntrinsicType::CLOSEPAREN => todo!(),
                     IntrinsicType::DOUBLE_COLIN => todo!("Context {:#?}",build),
                     IntrinsicType::COMA => todo!(),
@@ -2165,7 +2437,7 @@ fn parse_tokens_to_build(lexer: &mut Lexer, program: &mut CmdProgram) -> BuildPr
                                 let p = p.parent().unwrap();
                                 let include_p  = PathBuf::from(path);
                                 let info = fs::read_to_string(String::from(p.join(&include_p).to_str().unwrap().replace("\\", "/"))).expect(&format!("Error: could not open file: {}",String::from(p.join(&include_p).to_str().unwrap()).replace("\\", "/")));
-                                let mut lf = Lexer::new(&info,lexer.Intrinsics,lexer.Definitions);
+                                let mut lf = Lexer::new(&info,lexer.Intrinsics,lexer.Definitions,HashSet::new());
                                 lf.currentLocation.file = Rc::new(String::from(p.join(&include_p).to_str().unwrap().replace("\\", "/")));
                                 let mut nprogram = program.clone();
                                 
@@ -2253,7 +2525,7 @@ fn parse_tokens_to_build(lexer: &mut Lexer, program: &mut CmdProgram) -> BuildPr
                         let first = par_expect!(lexer.currentLocation,first,"abruptly ran out of tokens in constant name definition");
                         let name: String = match first.typ {
                             TokenType::WordType(ref word) => {
-                                par_assert!(first, !build.constdefs.contains_key(word) && !foundFuncs.contains(word), "Error: multiple constant symbol definitions");
+                                par_assert!(first, !build.constdefs.contains_key(word) && !lexer.CurrentFuncs.contains(word), "Error: multiple constant symbol definitions");
                                 word.to_string()
                             }
                             _ => {
@@ -2291,8 +2563,9 @@ fn parse_tokens_to_build(lexer: &mut Lexer, program: &mut CmdProgram) -> BuildPr
                                 }
                                 build.stringdefs.insert(UUID,ProgramString {Data: rval, Typ: ProgramStringType::STR});
                                 RawConstValue {typ: RawConstValueType::STR(UUID), loc: val.loc}
-                                
                             }
+                            ConstValueType::PTR(_) => { todo!("ConstValueType::PTR")}
+ 
                         });
                         
                     },
@@ -2305,7 +2578,7 @@ fn parse_tokens_to_build(lexer: &mut Lexer, program: &mut CmdProgram) -> BuildPr
                         let loc = nametok.location.clone();
                         match nametok.typ {
                             TokenType::WordType(name) => {
-                                par_assert!(loc, !build.constdefs.contains_key(&name) && !foundFuncs.contains(&name), "Error: multiply defined symbols");
+                                par_assert!(loc, !build.constdefs.contains_key(&name) && !lexer.CurrentFuncs.contains(&name), "Error: multiply defined symbols");
                                 //let currentFunc = build.functions.get_mut(&currentFunction.clone().expect("Todo: Global variables are not yet implemented :|")).unwrap();
                                 par_assert!(token, scopeStack.len() > 0 && getTopMut(&mut scopeStack).unwrap().body_is_some(), "Error: Unexpected multiply intrinsic outside of scope! Scopes of type {} do not support instructions!",getTopMut(&mut scopeStack).unwrap().typ.to_string(false));
                                 let currentScope = getTopMut(&mut scopeStack).unwrap();
@@ -2354,14 +2627,14 @@ fn parse_tokens_to_build(lexer: &mut Lexer, program: &mut CmdProgram) -> BuildPr
                         // PARAM <Reserve Space for return stack> RIP
                         let lexerNext = par_expect!(lexer.currentLocation,lexer.next(),"Stream of tokens ended abruptly at RS call");
                         match lexerNext.typ {
-                            TokenType::WordType(ref Word) => {
+                            TokenType::Register(reg) => {
                                 let optyp = par_expect!(lexer.currentLocation,lexer.next(),"Stream of tokens ended abruptly at RS push call");
                                 match optyp.typ {
                                     TokenType::IntrinsicType(typ) => {
                                     match typ {
                                         IntrinsicType::PUSH => {
-                                            let Reg = par_expect!(lexer.currentLocation, Register::from_string(Word), "Error: Expected Register but found: {}",Word);
-                                            body.push((lexer.currentLocation.clone(), Instruction::RSPUSH(OfP::REGISTER(Reg))))            
+                                            
+                                            body.push((lexer.currentLocation.clone(), Instruction::RSPUSH(OfP::REGISTER(reg))))            
                                         }
                                         _ => {
                                             par_error!(lexerNext.location, "Error: Unexpected Intrinsic Type: {}",typ.to_string(false))
@@ -2380,6 +2653,7 @@ fn parse_tokens_to_build(lexer: &mut Lexer, program: &mut CmdProgram) -> BuildPr
                             
                         }
                     },
+                    IntrinsicType::TOP => todo!(),
                 }
             }
             TokenType::StringType(Word) => {
@@ -2428,6 +2702,105 @@ fn parse_tokens_to_build(lexer: &mut Lexer, program: &mut CmdProgram) -> BuildPr
             }
             TokenType::Definition(_) => todo!(),
             TokenType::CStringType(_) => todo!(),
+            TokenType::Function(name) => {
+                println!("Got to {}",name);
+                exit(1);
+            },
+            TokenType::Register(reg) => {
+                let currentScope = getTopMut(&mut scopeStack).unwrap();
+                let regOp = par_expect!(lexer.currentLocation,lexer.next(),"Unexpected register operation or another register!");
+                //TODO: remove warn_rax_usage
+                if reg == Register::RAX && program.warn_rax_usage {
+                    eprintln!("(P) [WARNING] {}:{}:{}: Usage of RAX is not recommended since RAX is used for popping and might be manipulated! Consider using registers like RBX, RCX, RDX etc.", token.location.file, token.location.linenumber,token.location.character);
+                    program.warn_rax_usage = false
+                }
+                match regOp.typ {
+                    TokenType::IntrinsicType(typ) => {
+                        match typ {
+                            IntrinsicType::POP => {
+                                let body = currentScope.body_unwrap_mut().unwrap();
+                                body.push((token.location.clone(),Instruction::POP(OfP::REGISTER(reg))));
+                            }
+                            IntrinsicType::PUSH => {
+                                let body = currentScope.body_unwrap_mut().unwrap();
+                                body.push((token.location.clone(),Instruction::PUSH(OfP::REGISTER(reg))));
+                            }
+                            IntrinsicType::SET => {
+                                let token = par_expect!(lexer.currentLocation,lexer.next(),"abruptly ran out of tokens");
+                                match token.typ {
+                                    TokenType::Number32(data) => {
+                                        if reg.size() >= 4 {
+                                            let body = currentScope.body_unwrap_mut().unwrap();
+                                            body.push((token.location,Instruction::MOV(OfP::REGISTER(reg), OfP::RAW(data as i64))))
+                                        }
+                                    }
+                                    TokenType::Number64(data) => {
+                                        if reg.size() >= 8 {
+                                            let body = currentScope.body_unwrap_mut().unwrap();
+                                            body.push((token.location,Instruction::MOV(OfP::REGISTER(reg), OfP::RAW(data))))
+                                        }
+                                    }
+                                    TokenType::Register(reg2) => {
+                                        currentScope.body_unwrap_mut().unwrap().push((token.location.clone(),Instruction::MOV(OfP::REGISTER(reg), OfP::REGISTER(reg2))));
+
+                                    }
+                                    TokenType::WordType(ref data) => {
+                                        if currentScope.contract_is_some() {
+                                            let contract = currentScope.contract_unwrap().unwrap();
+                                            par_assert!(token, contract.Inputs.contains_key(data), "Error: Unexpected word for register: '{}'",data);
+                                            currentScope.body_unwrap_mut().unwrap().push((token.location.clone(), Instruction::MOV(OfP::REGISTER(reg), OfP::PARAM(data.to_owned()))))
+                                        }
+                                        else {
+                                            par_error!(token,"Unexpected Type for Mov Intrinsic. Expected Number32/Number64 but found {}",token.typ.to_string(false))
+                                        }
+                                    }
+                                    _ => par_error!(token,"Unexpected Type for Mov Intrinsic. Expected Number32/Number64 but found {}",token.typ.to_string(false))
+                                }
+                            }
+                            Other => {
+                                par_error!(token,"Unexpected Intrinsic Type: {}, Registers can only perform register operations \"pop\" \"push\" \"mov\" ",Other.to_string(false))
+                            }
+                        }
+                    },
+                    TokenType::Register(reg2) => {
+                        par_assert!(token,reg.size()==reg2.size(),"Gotten two differently sized registers to one op!");
+                        let regOp = lexer.next().expect(&format!("(P) [ERROR] {}:{}:{}: Unexpected register operation!",token.location.clone().file,&token.location.clone().linenumber,&token.location.clone().character));
+                        let body = currentScope.body_unwrap_mut().unwrap();
+                        match regOp.typ {
+                            TokenType::IntrinsicType(typ) => {
+                                
+                                match typ {
+                                    IntrinsicType::ADD => {
+                                        body.push((token.location.clone(),Instruction::ADD(OfP::REGISTER(reg), OfP::REGISTER(reg2))))
+                                    }
+                                    IntrinsicType::SUB => {
+                                        body.push((token.location.clone(),Instruction::SUB(OfP::REGISTER(reg), OfP::REGISTER(reg2))))
+                                    }
+                                    IntrinsicType::MUL => {
+                                        body.push((token.location.clone(),Instruction::MUL(OfP::REGISTER(reg), OfP::REGISTER(reg2))))
+                                    }
+                                    IntrinsicType::EQ => {
+                                        body.push((token.location.clone(),Instruction::EQUALS(OfP::REGISTER(reg), OfP::REGISTER(reg2))))
+                                    }
+                                    IntrinsicType::DIV => {
+                                        body.push((token.location.clone(),Instruction::DIV(OfP::REGISTER(reg), OfP::REGISTER(reg2))))
+                                    }
+                                    IntrinsicType::SET => {
+                                        body.push((token.location.clone(),Instruction::MOV(OfP::REGISTER(reg), OfP::REGISTER(reg2))))
+                                    }
+                                    other => par_error!(token,"Unexpected Intrinsic! Expected Register Intrinsic but found {}",other.to_string(false))
+                                }
+                            }
+                            other => {
+                                par_error!(token, "Unexpected token type: Expected Intrinsic but found {}",other.to_string(false));
+                            }
+                        }
+                    }
+                    typ => {
+                        par_error!(token,"Unexpected register operation! Expected Intrinsic or another Register but found {}",typ.to_string(false));
+                    }
+                }
+            },
         }
     }
     for (fn_name, fn_fn)in build.functions.iter_mut() {
@@ -2469,11 +2842,40 @@ fn optimization_ops(build: &mut BuildProgram, program: &CmdProgram) -> optim_ops
                         Instruction::DEFVAR(_) => {
                             out.should_use_callstack = true;
                         }
-                        Instruction::CALLRAW(r) => {
+                        Instruction::CALLRAW(r, args) => {
                             //TODO: Make callraw use reference instead of raw
+                            for arg in args {
+                                match &arg.typ {
+                                    CallArgType::CONSTANT(val) => {
+                                        match val {
+                                            RawConstValueType::STR(uuid) => {
+                                                out.usedStrings.insert(uuid.clone(), fn_name.clone());
+                                            },
+                                            _ => {}
+                                        }
+                                    },
+
+                                    _ => {}
+                                }
+                            }
                             out.usedExterns.insert(r.clone());
                         }
-                        Instruction::CALL(r) => {
+                        //TODO: loop through arguments to find used strings
+                        Instruction::CALL(r,args) => {
+                            for arg in args {
+                                match &arg.typ {
+                                    CallArgType::CONSTANT(val) => {
+                                        match val {
+                                            RawConstValueType::STR(uuid) => {
+                                                out.usedStrings.insert(uuid.clone(), fn_name.clone());
+                                            },
+                                            _ => {}
+                                        }
+                                    },
+
+                                    _ => {}
+                                }
+                            }
                             //TODO: Make call use reference instead of raw
                             out.usedFuncs.insert(r.clone());
                         }
@@ -2492,11 +2894,12 @@ fn to_nasm_x86_64(build: &mut BuildProgram, program: &CmdProgram) -> io::Result<
     let optimization = optimization_ops(build, program);
     let mut f = File::create(&program.opath).expect(&format!("Error: could not open output file {}",program.opath.as_str()));
     writeln!(&mut f,"BITS 64")?;
+    writeln!(&mut f,"default rel")?;
     writeln!(&mut f, "section .data")?;
     
     
     for (UUID,stridef) in build.stringdefs.iter(){                
-        if program.in_mode == OptimizationMode::DEBUG || (optimization.usedStrings.contains_key(UUID) && optimization.usedFuncs.contains(optimization.usedStrings.get(UUID).unwrap()) || optimization.usedStrings.get(UUID).unwrap() == "main") {
+        if program.in_mode == OptimizationMode::DEBUG || (optimization.usedStrings.contains_key(UUID) && (optimization.usedFuncs.contains(optimization.usedStrings.get(UUID).unwrap()) || optimization.usedStrings.get(UUID).expect(&format!("Could not find: {}",UUID)) == "main")) {
             write!(&mut f, "   _STRING_{}_: db ",UUID.to_string().replace("-", ""))?;
             for chr in stridef.Data.chars() {
                 write!(&mut f, "{}, ",(chr as u8))?;
@@ -2534,11 +2937,12 @@ fn to_nasm_x86_64(build: &mut BuildProgram, program: &CmdProgram) -> io::Result<
     }
     for function_name in build.functions.keys() {
         if function_name == "main" {
-            writeln!(&mut f,"global _{}",function_name)?;
+            
+            writeln!(&mut f,"global {}{}",program.architecture.func_prefix,function_name)?;
         }
         else {
             if program.in_mode == OptimizationMode::DEBUG || !program.remove_unused_functions || optimization.usedFuncs.contains(function_name){
-                writeln!(&mut f,"global _F_{}",function_name)?;
+                writeln!(&mut f,"global {}{}",program.architecture.func_prefix,function_name)?;
             }
             else if program.print_unused_warns && program.print_unused_funcs {
                 println!("[NOTE] {}: Unused function: \"{}\"", build.functions.get(function_name).unwrap().location.loc_display(),function_name);
@@ -2548,8 +2952,8 @@ fn to_nasm_x86_64(build: &mut BuildProgram, program: &CmdProgram) -> io::Result<
     for (Word,exter) in build.externals.iter() {
         match exter.typ {            
             ExternalType::CExternal| ExternalType::RawExternal => {
-                if program.in_mode == OptimizationMode::DEBUG || optimization.usedExterns.contains(&format!("{}{}{}",exter.typ.prefix(),Word,exter.typ.suffix())) {
-                    writeln!(&mut f,"  extern {}{}{}",exter.typ.prefix(),Word,exter.typ.suffix())?;
+                if program.in_mode == OptimizationMode::DEBUG || optimization.usedExterns.contains(&format!("{}{}{}",exter.typ.prefix(&program),Word,exter.typ.suffix())) {
+                    writeln!(&mut f,"  extern {}{}{}",exter.typ.prefix(&program),Word,exter.typ.suffix())?;
                 }
                 else if program.print_unused_warns && program.print_unused_externs {
                     println!("[NOTE] {}: Unused external: \"{}\"",exter.loc.loc_display(),Word);
@@ -2569,13 +2973,14 @@ fn to_nasm_x86_64(build: &mut BuildProgram, program: &CmdProgram) -> io::Result<
         let mut stack_size: i64 = 0;
         
         if function_name == "main" {
-            writeln!(&mut f, "_{}:",function_name)?;
+            writeln!(&mut f, "{}{}:",program.architecture.func_prefix,function_name)?;
+            writeln!(&mut f, "   sub rsp, {}",program.architecture.bits/8)?;
             //writeln!(&mut f, "   push rsp")?;
             //writeln!(&mut f, "   sub rsp, 4")?;
             //writeln!(&mut f, "   mov rbp, rsp")?;
         }
         else {
-            writeln!(&mut f, "_F_{}:",function_name)?;
+            writeln!(&mut f, "{}{}:",program.architecture.func_prefix,function_name)?;
         }
         let mut rs_stack_offset: usize = {
             let mut o: usize = 0;
@@ -2601,15 +3006,18 @@ fn to_nasm_x86_64(build: &mut BuildProgram, program: &CmdProgram) -> io::Result<
                         OfP::STR(UUID,typ) => {
                             match typ {
                                 ProgramStringType::STR => {
-                                    match program.build_architecture.as_str() {
-                                        "64" => {
+                                    match program.architecture.bits {
+                                        64 => {
                                             writeln!(&mut f, "   sub rsp, 12")?;
-                                            writeln!(&mut f, "   mov qword [rsp+8], _STRING_{}_",UUID.to_string().replace("-", ""))?;
+                                            writeln!(&mut f, "   lea rax, [rel _STRING_{}_]",UUID.to_string().replace("-", ""))?;
+                                            writeln!(&mut f, "   mov qword [rsp+8], rax")?;
                                             stack_size += 12
                                         }
-                                        "32" | _ => {
+                                        32 | _ => {
                                             writeln!(&mut f, "   sub rsp, 16")?;
-                                            writeln!(&mut f, "   mov dword [rsp+8], _STRING_{}_",UUID.to_string().replace("-", ""))?;
+                                            writeln!(&mut f, "   lea rax, [rel _STRING_{}_]",UUID.to_string().replace("-", ""))?;
+                                            writeln!(&mut f, "   mov dword [rsp+8], rax")?;
+                                            //writeln!(&mut f, "   mov dword [rsp+8], _STRING_{}_",UUID.to_string().replace("-", ""))?;
                                             stack_size += 16
                                         }
                                     }
@@ -2617,15 +3025,17 @@ fn to_nasm_x86_64(build: &mut BuildProgram, program: &CmdProgram) -> io::Result<
                                     //writeln!(&mut f, "   mov qword [rsp], _LEN_STRING_{}_",UUID.to_string().replace("-", ""))?;
                                 },
                                 ProgramStringType::CSTR => {
-                                    match program.build_architecture.as_str() {
-                                        "64" => {
+                                    match program.architecture.bits {
+                                        64 => {
                                             writeln!(&mut f, "   sub rsp, 8")?;
-                                            writeln!(&mut f, "   mov qword [rsp], _STRING_{}_",UUID.to_string().replace("-", ""))?;
+                                            writeln!(&mut f, "   lea rax, [rel _STRING_{}_]",UUID.to_string().replace("-", ""))?;
+                                            writeln!(&mut f, "   mov qword [rsp], rax")?;
                                             stack_size += 8
                                         }
-                                        "32" | _ => {
+                                        32 | _ => {
                                             writeln!(&mut f, "   sub rsp, 4")?;
-                                            writeln!(&mut f, "   mov dword [rsp], _STRING_{}_",UUID.to_string().replace("-", ""))?;
+                                            writeln!(&mut f, "   lea rax, [rel _STRING_{}_]",UUID.to_string().replace("-", ""))?;
+                                            writeln!(&mut f, "   mov dword [rsp], rax")?;
                                             stack_size += 4
                                         }
                                     }
@@ -2640,12 +3050,13 @@ fn to_nasm_x86_64(build: &mut BuildProgram, program: &CmdProgram) -> io::Result<
                         OfP::LOCALVAR(var) => {
                             let var = local_vars.get(var).expect(&format!("Error: could not find variable {}",var));
                             if callstack_size as usize-var.operand-var.typ.get_size(program) == 0 {
-                                writeln!(&mut f, "   mov r10, [_CALLSTACK_BUF_PTR]")?;
+                                writeln!(&mut f, "   mov rax, qword [_CALLSTACK_BUF_PTR]")?;
                             }
                             else {
-                                writeln!(&mut f, "   mov r10, [_CALLSTACK_BUF_PTR+{}]",callstack_size as usize-var.operand-var.typ.get_size(program))?;
+                                writeln!(&mut f, "   mov rax, qword [_CALLSTACK_BUF_PTR+{}]",callstack_size as usize-var.operand-var.typ.get_size(program))?;
                             }
                             stack_size += var.typ.get_size(program) as i64;
+                            todo!("Remove push r10");
                             writeln!(&mut f, "   push r10")?;
                         }
                         OfP::PARAM(var) => {
@@ -2686,9 +3097,11 @@ fn to_nasm_x86_64(build: &mut BuildProgram, program: &CmdProgram) -> io::Result<
                                 }
                                 o
                             };
-                            writeln!(&mut f, "   mov rbx, qword [rsp+{}]",offset)?;
+                            let osize = function.contract.InputPool.get(i).unwrap().get_size(program);
+                            let reg = Register::RAX.to_byte_size(osize);
+                            writeln!(&mut f, "   mov {}, {} [rsp+{}]",reg.to_string(),size_to_nasm_type(osize),offset)?;
                             writeln!(&mut f, "   sub rsp, {}", function.contract.InputPool.get(i).unwrap().get_size(program) )?;
-                            writeln!(&mut f, "   mov qword [rsp], rbx")?;
+                            writeln!(&mut f, "   mov {} [rsp], {}",size_to_nasm_type(osize),reg.to_string())?;
                             stack_size += function.contract.InputPool.get(i).unwrap().get_size(program) as i64;                                                                                                             
                         }
                         _ => {
@@ -2808,9 +3221,243 @@ fn to_nasm_x86_64(build: &mut BuildProgram, program: &CmdProgram) -> io::Result<
                         }
                     }
                 }
-                Instruction::CALLRAW(Word) => {
+                Instruction::CALLRAW(Word, contract) => {
+                    let mut shadow_space = 0;
+                    if let Some(ops) = program.architecture.options.argumentPassing.custom_get() {
+                        if ops.shadow_space > 0 {
+                            shadow_space = ops.shadow_space;
+                            writeln!(&mut f, "   sub rsp, {}",ops.shadow_space)?;
+                        }
+                    }
+                    //todo!("use contract");
+                    //TODO: Check if its dynamic or not;
+                    let dcontract = contract.clone();
+                    //dcontract.reverse();
+                    let external = build.externals.get(Word).expect("Error: unknown external raw call");
+                    let mut externContract = external.contract.as_ref().expect("TODO: implement rawcall without contract").clone();
+                    //TODO: Implement this with traits
+                    com_assert!(_location, CallArg::match_any(contract, &externContract), "Error: Expected contract: {:?}\nFound {:?}",externContract, contract);
+                    //externContract.InputPool.reverse();
+                    let mut stack_space_taken: usize = 0;
+                    let mut int_ptr_count:  usize = 0;
+                    let mut _float_count:    usize = 0;
+                    for arg in dcontract {
+                        match arg.typ {
+                            CallArgType::TOP(_)      => {
+                                if program.architecture.options.argumentPassing == ArcPassType::PUSHALL {
+                                    let o = com_expect!(arg.loc, externContract.InputPool.pop(), "Error: ran out of parameters for contract!");
+                                    let osize = o.get_size(program);
+                                    stack_space_taken += osize;
+                                    stack_size += osize as i64;
+                                    let oreg = Register::RAX.to_byte_size(osize);
+                                    writeln!(&mut f, "   sub rsp, {}",osize)?;                
+                                    writeln!(&mut f, "   mov {}, qword [rsp+{}]",oreg.to_string(),stack_space_taken+shadow_space)?;
+                                    writeln!(&mut f, "   mov {} [rsp], {}",size_to_nasm_type(osize),oreg.to_string())?;
+                                    int_ptr_count += 1;
+                                    //o.get_size(program)
+                                    //                                   
+                                    //printf("Hello World %d, %d", top, top);
+                                    //                                                                                           
+                                }
+                                else {
+                                    //TODO: Make sure to check for floats once we introduce them!
+                                    let o = com_expect!(arg.loc, externContract.InputPool.pop(), "Error: ran out of parameters for contract!");
+                                    let osize = o.get_size(program);
+                                    let ops = program.architecture.options.argumentPassing.custom_get().unwrap();
+                                    if let Some(numptrs) = &ops.nums_ptrs {
+                                        if int_ptr_count > numptrs.len() && ops.on_overflow_stack{
+                                            todo!("Handle overflow situation");
+                                        }
+                                        else {                                                    
+                                            let ireg = numptrs.get(int_ptr_count).unwrap();
+                                            let ireg = ireg.to_byte_size(osize);
+                                            writeln!(&mut f, "   mov {}, {} [rsp+{}]",ireg.to_string(),size_to_nasm_type(ireg.size()),stack_space_taken+shadow_space)?;    
+                                        }
+                                    }
+                                    else {
+                                        stack_space_taken += osize;
+                                        stack_size += osize as i64;
+                                        let oreg = Register::RAX.to_byte_size(osize);
+                                        writeln!(&mut f, "   sub rsp, {}",osize)?;                
+                                        writeln!(&mut f, "   mov {}, qword [rsp+{}]",oreg.to_string(),stack_space_taken+shadow_space)?;
+                                        writeln!(&mut f, "   mov {} [rsp], {}",size_to_nasm_type(osize),oreg.to_string())?;
+                                    }
+                                    int_ptr_count += 1;
+                                }
+                            },
+                            CallArgType::LOCALVAR(name) => {
+                                let var1 = local_vars.get(&name).expect("Unknown local variable parameter");
+                                if callstack_size as usize-var1.operand-var1.typ.get_size(program) == 0 {
+                                    writeln!(&mut f, "   mov rax, [_CALLSTACK_BUF_PTR]")?;
+                                }
+                                else {
+                                    writeln!(&mut f, "   mov rax, [_CALLSTACK_BUF_PTR+{}]",callstack_size as usize-var1.operand-var1.typ.get_size(program))?;
+                                }
+                                let osize = var1.typ.get_size(program);
+                                if program.architecture.options.argumentPassing == ArcPassType::PUSHALL {
+                                    stack_space_taken += osize;
+                                    stack_size += osize as i64;
+                                    writeln!(&mut f, "   sub rsp, {}",osize)?;
+                                    writeln!(&mut f, "   mov qword [rsp], rax")?;
+                                }
+                                else {
+                                    match &program.architecture.options.argumentPassing {
+                                        ArcPassType::CUSTOM(ops) => {
+                                            if let Some(numptrs) = &ops.nums_ptrs {
+                                                if int_ptr_count > numptrs.len() && ops.on_overflow_stack{
+                                                    stack_space_taken += osize;
+                                                    stack_size += osize as i64;
+                                                    writeln!(&mut f, "   sub rsp, {}",osize)?;    
+                                                    writeln!(&mut f, "   mov qword [rsp], rax")?;
+                                                }
+                                                else {                                                    
+                                                    let ireg = numptrs.get(int_ptr_count).unwrap();
+                                                    writeln!(&mut f, "   mov {}, rax",ireg.to_string())?;    
+                                                }
+                                            }
+                                            else {
+                                                stack_space_taken += osize;
+                                                stack_size += osize as i64;
+                                                writeln!(&mut f, "   sub rsp, {}",osize)?;    
+                                                writeln!(&mut f, "   mov qword [rsp], rax")?;
+                                            }
+                                        }
+                                        _ => todo!("Unhandled")
+                                    }
+                                }
+                                int_ptr_count += 1;
+                            },
+                            CallArgType::REGISTER(_) => {
+                                todo!("Registers are disabled!");
+                            },
+                            CallArgType::CONSTANT(val) => {
+                                match val {
+                                    RawConstValueType::INT(val) => {
+                                        if program.architecture.options.argumentPassing == ArcPassType::PUSHALL {
+                                            let osize = 4;
+                                            stack_space_taken += osize;
+                                            stack_size += osize as i64;
+                                            writeln!(&mut f, "   sub rsp, {}",osize)?;
+                                            writeln!(&mut f, "   mov rax, {}",val)?;
+                                            writeln!(&mut f, "   mov dword [rsp], rax")?;
+                                            int_ptr_count += 1;
+                                        }
+                                        else {
+                                            let ops = program.architecture.options.argumentPassing.custom_get().unwrap();
+                                            if let Some(num_ptrs) = &ops.nums_ptrs {
+                                                let ireg = num_ptrs.get(int_ptr_count).unwrap();
+                                                writeln!(&mut f, "   mov {}, {}",ireg.to_string(), val)?;    
+                                            }
+                                            else {
+                                                let osize = 4;
+                                                stack_space_taken += osize;
+                                                stack_size += osize as i64;
+                                                writeln!(&mut f, "   sub rsp, {}",osize)?;
+                                                writeln!(&mut f, "   mov rax, {}",val)?;
+                                                writeln!(&mut f, "   mov dword [rsp], rax")?;
+                                            }
+                                            int_ptr_count += 1;
+                                        }
+                                    },
+                                    RawConstValueType::LONG(val) => {
+                                        let osize = 8;
+                                        if program.architecture.options.argumentPassing == ArcPassType::PUSHALL {
+                                            stack_space_taken += osize;
+                                            stack_size += osize as i64;
+                                            writeln!(&mut f, "   sub rsp, {}",osize)?;
+                                            writeln!(&mut f, "   mov rax, {}",val)?;
+                                            writeln!(&mut f, "   mov qword [rsp], rax")?;
+                                            int_ptr_count += 1;
+                                        }
+                                        else {
+                                            let ops = program.architecture.options.argumentPassing.custom_get().unwrap();
+                                            if let Some(num_ptrs) = &ops.nums_ptrs {
+                                                let ireg = num_ptrs.get(int_ptr_count).unwrap();
+                                                println!("Got to here");
+                                                writeln!(&mut f, "   mov {}, {}",ireg.to_string(), val)?;    
+                                            }
+                                            else {
+                                                stack_space_taken += osize;
+                                                stack_size += osize as i64;
+                                                writeln!(&mut f, "   sub rsp, {}",osize)?;
+                                                writeln!(&mut f, "   mov rax, {}",val)?;
+                                                writeln!(&mut f, "   mov qword [rsp], rax")?;
+                                            }
+                                            int_ptr_count += 1;
+                                        }
+                                    },
+                                    RawConstValueType::STR(UUID) => {
+                                        let osize: usize = program.architecture.bits as usize /8;
+                                        if program.architecture.options.argumentPassing == ArcPassType::PUSHALL {
+                                            stack_space_taken += osize;
+                                            stack_size += osize as i64;
+                                            let typ = &build.stringdefs.get(&UUID).unwrap().Typ;
+                                            match typ {
+                                                ProgramStringType::STR => {
+                                                    match program.architecture.bits {
+                                                        64 => {
+                                                            writeln!(&mut f, "   sub rsp, 12")?;
+                                                            writeln!(&mut f, "   mov qword [rsp+8], _STRING_{}_",UUID.to_string().replace("-", ""))?;
+                                                            stack_size += 12
+                                                        }
+                                                        32 | _ => {
+                                                            writeln!(&mut f, "   sub rsp, 16")?;
+                                                            writeln!(&mut f, "   mov dword [rsp+8], _STRING_{}_",UUID.to_string().replace("-", ""))?;
+                                                            stack_size += 16
+                                                        }
+                                                    }
+                                                    writeln!(&mut f, "   mov qword [rsp], {}",build.stringdefs.get(&UUID).unwrap().Data.len())?;
+                                                    //writeln!(&mut f, "   mov qword [rsp], _LEN_STRING_{}_",UUID.to_string().replace("-", ""))?;
+                                                },
+                                                ProgramStringType::CSTR => {
+                                                    match program.architecture.bits {
+                                                        64 => {
+                                                            writeln!(&mut f, "   sub rsp, 8")?;
+                                                            writeln!(&mut f, "   mov qword [rsp], _STRING_{}_",UUID.to_string().replace("-", ""))?;
+                                                            stack_size += 8
+                                                        }
+                                                        32 | _ => {
+                                                            writeln!(&mut f, "   sub rsp, 4")?;
+                                                            writeln!(&mut f, "   mov dword [rsp], _STRING_{}_",UUID.to_string().replace("-", ""))?;
+                                                            stack_size += 4
+                                                        }
+                                                    }
+                                                },
+                                            }
+                                            int_ptr_count += 1;
+                                        }
+                                        else {
+                                            let ops = program.architecture.options.argumentPassing.custom_get().unwrap();
+                                            if let Some(num_ptrs) = &ops.nums_ptrs {
+                                                let ireg = num_ptrs.get(int_ptr_count).unwrap();
+                                                writeln!(&mut f, "   lea {}, [rel _STRING_{}_]",ireg.to_string(), UUID.to_string().replace("-", ""))?;    
+                                            }
+                                            else {
+                                                stack_space_taken += osize;
+                                                stack_size += osize as i64;
+                                                writeln!(&mut f, "   sub rsp, {}",osize)?;
+                                                writeln!(&mut f, "   lea rax, [rel _STRING_{}_]",UUID.to_string().replace("-", ""))?;
+                                                writeln!(&mut f, "   mov {} [rsp], rax",size_to_nasm_type(osize))?;
+                                                int_ptr_count += 1;
+                                            }
+                                            int_ptr_count += 1;
+                                        }
+                                    },
+                                    RawConstValueType::PTR(_) => {
+                                        todo!("Fix ptrs");
+                                    },
+                                }
+
+                            },
+                        }
+                    }
                     writeln!(&mut f, "   xor rax, rax")?;
                     writeln!(&mut f, "   call {}",Word)?;
+                    if let Some(ops) = program.architecture.options.argumentPassing.custom_get() {
+                        if ops.shadow_space > 0 {
+                            writeln!(&mut f, "   add rsp, {}",ops.shadow_space)?;
+                        }
+                    }
                 }
                 Instruction::ADD(op1, op2) => {
                     match op1 {
@@ -2840,22 +3487,22 @@ fn to_nasm_x86_64(build: &mut BuildProgram, program: &CmdProgram) -> io::Result<
                                     let var2 = local_vars.get(var2).unwrap();
                                     com_assert!(_location, var1.typ.get_size(program) == var2.typ.get_size(program), "Unknown variable size");
                                     if callstack_size as usize-var1.operand-var1.typ.get_size(program) == 0 {
-                                        writeln!(&mut f, "   mov r10, [_CALLSTACK_BUF_PTR]")?;
+                                        writeln!(&mut f, "   mov rax, [_CALLSTACK_BUF_PTR]")?;
                                     }
                                     else {
-                                        writeln!(&mut f, "   mov r10, [_CALLSTACK_BUF_PTR+{}]",callstack_size as usize-var1.operand-var1.typ.get_size(program))?;
+                                        writeln!(&mut f, "   mov rax, [_CALLSTACK_BUF_PTR+{}]",callstack_size as usize-var1.operand-var1.typ.get_size(program))?;
                                     }
                                     if callstack_size as usize-var2.operand-var2.typ.get_size(program) == 0{
-                                        writeln!(&mut f, "   add r10, [_CALLSTACK_BUF_PTR]")?;  
+                                        writeln!(&mut f, "   add rax, [_CALLSTACK_BUF_PTR]")?;  
                                     }
                                     else {
-                                        writeln!(&mut f, "   add r10, [_CALLSTACK_BUF_PTR+{}]", callstack_size as usize-var2.operand-var2.typ.get_size(program))?;  
+                                        writeln!(&mut f, "   add rax, [_CALLSTACK_BUF_PTR+{}]", callstack_size as usize-var2.operand-var2.typ.get_size(program))?;  
                                     }
                                     if callstack_size as usize-var1.operand-var1.typ.get_size(program) == 0 {
-                                        writeln!(&mut f, "   mov [_CALLSTACK_BUF_PTR], r10")?;
+                                        writeln!(&mut f, "   mov [_CALLSTACK_BUF_PTR], rax")?;
                                     }
                                     else {
-                                        writeln!(&mut f, "   mov [_CALLSTACK_BUF_PTR+{}], r10",callstack_size as usize-var1.operand-var1.typ.get_size(program))?;
+                                        writeln!(&mut f, "   mov [_CALLSTACK_BUF_PTR+{}], rax",callstack_size as usize-var1.operand-var1.typ.get_size(program))?;
                                     }
                                 },
                                 OfP::RAW(_) => todo!(),
@@ -2943,7 +3590,17 @@ fn to_nasm_x86_64(build: &mut BuildProgram, program: &CmdProgram) -> io::Result<
                     }
                     
                 }
-                Instruction::CALL(Func) => {
+                Instruction::CALL(Func,args) => {
+                    todo!("use contract");
+                    //todo!("Finish type checking for arguments");
+                    for arg in args {
+                        match arg.typ {
+                            CallArgType::TOP(_)      => todo!(),
+                            CallArgType::LOCALVAR(_) => todo!(),
+                            CallArgType::REGISTER(_) => todo!(),
+                            CallArgType::CONSTANT(_) => todo!(),
+                        }
+                    }
                     let mut o: usize = 0;
                     for i in build.functions.get(Func).unwrap().contract.Outputs.iter() {
                         o += i.get_size(program)
@@ -2951,6 +3608,7 @@ fn to_nasm_x86_64(build: &mut BuildProgram, program: &CmdProgram) -> io::Result<
                     if o > 0 {
                         writeln!(&mut f, "   sub rsp, {}",o)?;
                     }
+
                     writeln!(&mut f, "   call _F_{}",Func)?;
                     stack_size += o as i64;
 
@@ -2965,9 +3623,9 @@ fn to_nasm_x86_64(build: &mut BuildProgram, program: &CmdProgram) -> io::Result<
                             functionSize += val.typ.get_size(program);
                         };
                         if functionSize > 0 {
-                            writeln!(&mut f, "   mov r10, [_CALLSTACK_BUF_PTR]")?;
-                            writeln!(&mut f, "   add r10, {}",functionSize)?;
-                            writeln!(&mut f, "   mov [_CALLSTACK_BUF_PTR], r10")?;
+                            writeln!(&mut f, "   mov rax, [_CALLSTACK_BUF_PTR]")?;
+                            writeln!(&mut f, "   add rax, {}",functionSize)?;
+                            writeln!(&mut f, "   mov [_CALLSTACK_BUF_PTR], rax")?;
                         }
                         //writeln!(&mut f, "   pop rbp")?;
                         
@@ -3029,9 +3687,9 @@ fn to_nasm_x86_64(build: &mut BuildProgram, program: &CmdProgram) -> io::Result<
                     var.operand     = callstack_size as usize;
                     callstack_size += var.typ.get_size(program) as i64;
 
-                    writeln!(&mut f, "   mov r10, [_CALLSTACK_BUF_PTR]")?;
-                    writeln!(&mut f, "   sub r10, {}",var.typ.get_size(program))?;
-                    writeln!(&mut f, "   mov [_CALLSTACK_BUF_PTR], r10")?;
+                    writeln!(&mut f, "   mov rax, [_CALLSTACK_BUF_PTR]")?;
+                    writeln!(&mut f, "   sub rax, {}",var.typ.get_size(program))?;
+                    writeln!(&mut f, "   mov [_CALLSTACK_BUF_PTR], rax")?;
                 },
                 Instruction::INTERRUPT(val) => {
                     writeln!(&mut f, "   int 0x{:x}",val)?;
@@ -3049,14 +3707,13 @@ fn to_nasm_x86_64(build: &mut BuildProgram, program: &CmdProgram) -> io::Result<
                         OfP::STR(_, _) => todo!(),
                     }
                 },
-                Instruction::EXPAND_SCOPE(scope) => todo!("EXPAND_SCOPE"),
+                Instruction::EXPAND_SCOPE(_) => todo!("EXPAND_SCOPE"),
                 Instruction::EXPAND_IF_SCOPE(_) => todo!("EXPAND_IF_SCOPE"),
                 Instruction::EXPAND_ELSE_SCOPE(_) => todo!("EXPAND_ELSE_SCOPE"),
             }
         }
         if function_name == "main" {
-            //writeln!(&mut f, "   mov rsp, rbp")?;
-            //writeln!(&mut f, "   pop rbp")?;
+            writeln!(&mut f, "   add rsp, 8")?;
             writeln!(&mut f, "   xor rax,rax")?;
             writeln!(&mut f, "   ret")?;
         }
@@ -3089,11 +3746,11 @@ fn type_check_build(build: &mut BuildProgram, program: &CmdProgram) {
                         OfP::STR(_, typ) => {
                             match typ {
                                 ProgramStringType::STR => {
-                                    typeStack.push(VarType::PTR);
+                                    typeStack.push(VarType::PTR(PtrTyp::TYP(Box::new(VarType::CHAR))));
                                     typeStack.push(VarType::LONG)
                                 },
                                 ProgramStringType::CSTR => {
-                                    typeStack.push(VarType::PTR)
+                                    typeStack.push(VarType::PTR(PtrTyp::TYP(Box::new(VarType::CHAR))))
                                 },
                             }
                         },
@@ -3129,13 +3786,14 @@ fn type_check_build(build: &mut BuildProgram, program: &CmdProgram) {
                         }
                     }
                 },
-                Instruction::CALLRAW(_)          => {},
+                Instruction::CALLRAW(_,_)          => {todo!("Use the contract")},
                 Instruction::ADD(_, _)           => {},
                 Instruction::SUB(_, _)           => {},
                 Instruction::MUL(_, _)           => {},
                 Instruction::DIV(_, _)           => {},
                 Instruction::EQUALS(_, _)        => {},
-                Instruction::CALL(func)             => {
+                Instruction::CALL(func, args)             => {
+                    todo!("Handle arguments");
                     let function =  com_expect!(loc, build.functions.get(func), "Error: unknown function call to {}, Function may not exist!",func);
                     com_assert!(loc, function.contract.Inputs.len() <= typeStack.len(), "Error: Not enough arguments for {} in {}",func,name);
                     let raw_inputs = {
@@ -3244,13 +3902,52 @@ fn usage(program: &String) {
     println!("         -release                            -> builds the program in release mode");
     println!("         -ntc                                -> (NoTypeChecking) Disable type checking");
     println!("         -nou (all, funcs, externs, strings) -> Disable unused warns for parameter");
-    println!("         -callstack (size)                   -> Set callstack size. The name is very deceiving but callstack is now only used for locals as of 0.0.6A (checkout versions.md)");
+    println!("         -callstack (size)                   -> Set callstack size.\n{}\n{}",
+             "                                                The name is very deceiving but callstack is now only used for locals as of 0.0.6A (checkout versions.md)",
+             "                                                [NOTE] it is planned for -callstack to be deprecated for instead using the stack as a way to store variables with the new function system");
+    println!("         -arc (builtin arc)                  -> builds for a builtin architecture");
+    println!("         -arc | (path to custom arc)         -> builds for a custom architecture following the syntax described in ./examples/arcs");
     println!("--------------------------------------------");
 }
 fn dump_tokens(lexer: &mut Lexer) {
     while let Some(token) = lexer.next() {
         println!("Token: {:?}",token);
     }
+}
+fn val_arr_to_reg_arr(list: &Vec<Value>) -> Option<Vec<Register>> {
+    let mut out: Vec<Register> = Vec::with_capacity(list.len());
+    for val in list {
+        out.push(Register::from_string(&val.as_str()?.to_owned())?);
+    }
+    Some(out)
+}
+fn json_to_arc(json: &serde_json::Map<String, Value>) -> Architecture {
+    let ops = json.get("options").expect("Expected options but found nothing!").as_object().expect("Ops must be an object!");
+    let argpassing = ops.get("argumentPassing").expect("Expected argumentPassing but found nothing!");
+    let oarc: Architecture = Architecture { 
+        bits: json.get("bits").expect("Error: expected value bits but found nothing!").as_u64().expect("Error: expected value of bits to be u64 but found string!") as u32, 
+        platform: json.get("os").expect("Error: expected value os but found nothing!").as_str().expect("os must be a string!").to_owned(),
+        options: {
+            if argpassing.is_string() && argpassing.as_str().unwrap() == "PUSHALL" {
+                ArcOps { argumentPassing: ArcPassType::PUSHALL}
+            }
+            else if let Value::Object(argpassing) = argpassing {
+                
+                ArcOps { argumentPassing: ArcPassType::CUSTOM(ArcCustomOps {
+                    nums_ptrs: Some(val_arr_to_reg_arr(argpassing.get("num_ptrs").expect("Error: expected num_ptrs but found nothing!").as_array().expect("Error: Value of num_ptrs must be array")).expect("Error: unknown syntax or register inside num_ptrs")),
+                    floats: Some(val_arr_to_reg_arr(argpassing.get("floats").expect("Error: expected floats but found nothing!").as_array().expect("Error: Value of floats must be array")).expect("Error: unknown syntax or register inside floats")),
+                    returns: Some(val_arr_to_reg_arr(argpassing.get("returns").expect("Error: expected returns but found nothing!").as_array().expect("Error: Value of returns must be array")).expect("Error: unknown syntax or register inside returns")),
+                    on_overflow_stack: argpassing.get("on_overflow_stack").expect("Expected on_overflow_stack but found nothing!").as_bool().expect("Value of on_overflow_stack must be boolean!"),
+                    shadow_space: argpassing.get("shadow_space").expect("Expected shadow_space but found nothing!").as_u64().expect("Value of shadow_space must be u64!") as usize }) } 
+            }
+            else {
+                todo!()
+            }
+        },
+        func_prefix: json.get("func_prefix").expect("Error: expected func_prefix but found nothing!").as_str().expect("Value of func_prefix must be string").to_string(),
+        cextern_prefix: json.get("cextern_prefix").expect("Error: expected cextern_prefix but found nothing!").as_str().expect("Value of cextern_prefix must be string").to_string(),
+    };
+    oarc
 }
 fn main() {
     let mut args: Vec<_> = env::args().collect();
@@ -3262,7 +3959,47 @@ fn main() {
     let mut program = CmdProgram::new();
     program.typ  = args.remove(0);
     program.path = args.remove(0);
-    program.opath = "a.asm".to_string();
+    program.opath = Path::new(&program.path).with_extension(".asm").to_str().unwrap().to_string();
+    let mut Architectures: HashMap<String, Architecture> = HashMap::new();
+    use Register::*;
+    Architectures.insert("windows_x86_64".to_owned(), Architecture { bits: 64, platform: "windows".to_string(), cextern_prefix: "".to_owned(), func_prefix:"".to_owned(), options: ArcOps { argumentPassing: ArcPassType::CUSTOM(ArcCustomOps { nums_ptrs: Some(vec![RCX, RDX,R8,R9]), floats: Some(vec![XMM0,XMM1,XMM2,XMM3]), returns: Some(vec![RAX]), on_overflow_stack: true, shadow_space: 32}) } });
+    Architectures.insert("windows_x86".to_owned(),    Architecture { bits: 32, platform: "windows".to_string(), cextern_prefix: "_".to_owned(), func_prefix:"_".to_owned(), options: ArcOps { argumentPassing: ArcPassType::PUSHALL }});
+    Architectures.insert("linux_x86_64".to_owned(),   Architecture { bits: 64, platform: "linux".to_string()  , cextern_prefix: "".to_owned(), func_prefix:"".to_owned(), options: ArcOps { argumentPassing: ArcPassType::CUSTOM(ArcCustomOps { nums_ptrs: Some(vec![RDI, RSI,RDX,RCX,R8,R9]), floats: Some(vec![XMM0,XMM1,XMM2,XMM3]), returns: Some(vec![RAX]), on_overflow_stack: true, shadow_space: 0 }) } });
+    Architectures.insert("linux_x86".to_owned(),      Architecture { bits: 32, platform: "linux".to_string()  , cextern_prefix: "_".to_owned(), func_prefix:"_".to_owned(), options: ArcOps { argumentPassing: ArcPassType::PUSHALL }});
+    //short calls
+    Architectures.insert("win_x86_64".to_owned(), Architectures.get("windows_x86_64").unwrap().clone());
+    Architectures.insert("win_x86".to_owned(), Architectures.get("windows_x86").unwrap().clone());
+    if let Some(arc) = Architectures.get(&("".to_owned()+env::consts::OS+"_"+env::consts::ARCH)) {
+        program.architecture = arc.clone();
+    }
+    else {
+        println!("[NOTE] No architecture found for {}_{}! Please specify the output architecture!",env::consts::OS,env::consts::ARCH);
+    }
+//     match env::var("SOPLARCS") {
+//         Ok(val) => {
+//             //println!("{}\n", val);
+//             let dir = fs::read_dir(val.clone()).expect(&format!("Error: unknown SOPLARCS directory: '{}'",val));
+//             for item in dir {
+//                 if item.is_err() {continue;}
+//                 let item = item.unwrap();
+//                 let p = item.path();
+//                 if p.extension().unwrap_or_default() == "json" {
+//                     Architectures.insert(p.file_stem().unwrap().to_str().unwrap().to_owned(), todo!("Finish implementing SOPLARCS syntax"));
+//                 }
+//             }
+//         },
+//         Err(_) => {
+//             println!("[NOTE] SOPLARCS not found! defaulting to current os architecture '{}':'{}'...",env::consts::OS,env::consts::ARCH);
+//             if Architectures.contains_key(&("".to_owned()+env::consts::OS+env::consts::ARCH)) {
+//                 println!("Defaulting to: '{}_{}'",env::consts::OS,env::consts::ARCH);
+//             }
+//             else {
+//                 eprintln!("Error: no built in architecture for {}_{}.\nSorry :(",env::consts::OS,env::consts::ARCH);
+//                 println!("[NOTE] Try adding SOPLARCS as an environment variable with your architecture")
+//             }
+// //            println!("")
+//         }
+//     }
     {
         let mut i: usize = 0;
         while i < args.len(){
@@ -3316,6 +4053,27 @@ fn main() {
                     program.call_stack_size = val;
                     i += 1;
                 }
+                "-arc" => {
+                    let val = args.get(i+1).expect("Error: Unexpected built-in target or path to json");
+                    if val == "|" {
+                        let path = Path::new(args.get(i+1).expect("Error: Path not specified for -arc"));
+                        let ext = path.extension().expect("Error: Path provided doesn't have an extension!");
+                        let ext = ext.to_str().unwrap();
+                        assert!(ext=="json","Error: only accepting arc files with the json format!");
+                        assert!(path.is_file() && path.exists(), "Error: path provided '{:?}' is not a file or does not exist!",path);
+                        let f = fs::read_to_string(path).expect("Error: file does not exist or can't be opened!");
+                        let arc: Value = serde_json::from_str(&f).expect("Contents of file not a json!");
+                        let arc = arc.as_object().unwrap();
+                        program.architecture = json_to_arc(arc);
+                        i+=2;
+                    }
+                    else {
+                        assert!(Architectures.contains_key(val),"Error: Unknown Architecture: {}. It is probably not built in!",val);
+                        program.architecture = Architectures.get(val).unwrap().clone();
+                        //println!("Building for architecture: {}, where: '{}' and '{}'",val,program.architecture.cextern_prefix,program.architecture.func_prefix);
+                        i+=1;
+                    }
+                }
                 flag => {
                     eprintln!("Error: undefined flag: {flag}\nUsage: ");
                     usage(&program_n);
@@ -3357,16 +4115,20 @@ fn main() {
     Intrinsics.insert("if".to_string(), IntrinsicType::IF);
     Intrinsics.insert("else".to_string(), IntrinsicType::ELSE);
     Intrinsics.insert("==".to_string(),IntrinsicType::EQ);
+    Intrinsics.insert("top".to_string(),IntrinsicType::TOP);
     let mut Definitions: HashMap<String,VarType> = HashMap::new();
     Definitions.insert("int".to_string(), VarType::INT);
     Definitions.insert("char".to_string(), VarType::CHAR);
     Definitions.insert("long".to_string(), VarType::LONG);
     Definitions.insert("bool".to_string(), VarType::BOOLEAN);
-    Definitions.insert("ptr".to_string(), VarType::PTR);
+    Definitions.insert("ptr".to_string(), VarType::PTR(PtrTyp::VOID));
     Definitions.insert("short".to_string(), VarType::SHORT);
-    Definitions.insert("str".to_string(), VarType::STR);
+    //Definitions.insert("str".to_string(), VarType::STR);
+    
+
+
     let info = fs::read_to_string(&program.path).expect("Error: could not open file!");
-    let mut lexer = Lexer::new(&info, & Intrinsics, &Definitions);
+    let mut lexer = Lexer::new(&info, & Intrinsics, &Definitions, HashSet::new());
     // dump_tokens(&mut lexer);
     // exit(1);
     lexer.currentLocation.file = Rc::new(program.path.clone());
@@ -3380,12 +4142,12 @@ fn main() {
             to_nasm_x86_64(&mut build, &program).expect("Could not build to nasm_x86_64");
             if program.should_build {
                 println!("-------------");
-                println!("   * nasm -f elf {}",program.opath.as_str());
-                let nasm = Command::new("nasm").args(["-f","elf",program.opath.as_str()]).output().expect("Could not build nasm!");
-                println!("   * gcc {}",[Path::new(program.opath.as_str()).with_extension("o").to_str().unwrap(),"-o",Path::new(program.opath.as_str()).with_extension("").to_str().unwrap()].join(" "));
+                println!("   * nasm -f elf64 {}",program.opath.as_str());
+                let nasm = Command::new("nasm").args(["-f","elf64",program.opath.as_str()]).output().expect("Could not build nasm!");
+                println!("   * gcc -m64 {}",[Path::new(program.opath.as_str()).with_extension("o").to_str().unwrap(),"-m64","-o",Path::new(program.opath.as_str()).with_extension("").to_str().unwrap()].join(" "));
                 let gcc  = Command::new("gcc").args([Path::new(program.opath.as_str()).with_extension("o").to_str().unwrap(),"-o",Path::new(program.opath.as_str()).with_extension("").to_str().unwrap()]).output().expect("Could not build gcc!");
-                println!("   * ld {}",Path::new(program.opath.as_str()).with_extension("").to_str().unwrap());
-                let _ld  = Command::new("ld".to_string()).arg(Path::new(program.opath.as_str()).with_extension("").to_str().unwrap()).output().expect("Could not build your program!");
+                //println!("   * ld {}",Path::new(program.opath.as_str()).with_extension("").to_str().unwrap());
+                //let _ld  = Command::new("ld".to_string()).arg(Path::new(program.opath.as_str()).with_extension("").to_str().unwrap()).output().expect("Could not build your program!");
                 if !nasm.status.success() {
                     println!("--------------");
                     println!("Nasm: \n{:?}\n-----------",nasm);

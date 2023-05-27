@@ -1,0 +1,10 @@
+extern "C" fopen(ptr, ptr : ptr);
+extern "C" fwrite(ptr,long,long,ptr : long);
+extern "C" fclose(ptr : int);
+func main() {
+    let f: ptr;
+    fopen("hello.txt"c,"w"c)
+    f = RAX
+    fwrite("Hello World!"c,12, 1, f);
+    fclose(f);
+}

@@ -1,15 +1,27 @@
-extern "C" printf
+extern "C" puts(ptr : int);
+extern "C" printf(ptr, long : int);
 func main() {
-    let a: long
-    let b: long
-
-    "Got to here\n"c printf EAX pop 
+    let a: long;
+    let b: long;
     RBX = 4
     RCX = 2
     RBX RCX /
-    a RBX =
-    b RCX =
-    "Got to here 3\n"c printf EAX pop 
-    a push "%ld"c printf EAX pop
-    b push "%ld"c printf EAX pop
+    a = RBX
+    b = RCX
+    printf("Division: %ld\n"c, a)
+    printf("Mod: %ld\n"c, b)
+
+    // let a: long
+    // let b: long
+
+    // "Got to here\n"c printf EAX pop 
+    // RBX = 4
+    // RCX = 2
+    // RBX RCX /
+    // a RBX =
+    // b RCX =
+    // "Got to here 3\n"c printf EAX pop 
+    // a push "%ld"c printf EAX pop
+    // b push "%ld"c printf EAX pop
+
 }
