@@ -14,3 +14,6 @@ debug.log
 /src/std.spl
 /editor/
 /waterfall/
+/tools/.vscode
+/tools/sopl_test.exe
+/tools/sopl_test/target/

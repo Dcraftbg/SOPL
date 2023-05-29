@@ -1,8 +1,10 @@
 **(Latest patch versions in github history)**
 
-Newest Version: [0.11.1A](#0111a)
+Newest Version: [0.11.2A](#0112a)
 # Manual:
-  - [0.11A](#011a)
+  - [0.11.2A](#0112a)
+    - [0.11.1A](#0111a)
+    - [0.11A](#011a)
   - [0.10.1A](#0101a)
     - [0.10A](#010a)
   - [0.9.2A](#092a)
@@ -23,6 +25,10 @@ Newest Version: [0.11.1A](#0111a)
   - [0.2A](#02a)
   - [0.1A](#01a)
 # Change Log
+ ## 0.11.2A
+   - Changed a lot of the main source code for easier use
+   - Added testing 
+   - Fixed examples
  ## 0.11.1A 
    - Fixed function parameters (still not done with returning)
    - Added typechecking for externals and functions

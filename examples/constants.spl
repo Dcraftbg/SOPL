@@ -1,5 +1,5 @@
 extern "C" printf(ptr, long : int);
-extern "C" puts(ptr: int);
+extern "C" puts(ptr : int);
 const A = 5l ;
 const B = 4l ;
 const C = 4l 5l + ;
@@ -13,6 +13,7 @@ func main() {
     // D "%d"c printf
     // EAX pop
     // pop
-    
-    puts(HelloWorld);
+    HelloWorld push pop
+    puts(top);
+    pop
 }
