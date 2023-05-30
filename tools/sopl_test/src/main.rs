@@ -180,7 +180,7 @@ fn main() {
         set_current_dir(sopl_home).expect("Error: could not change current working directory to sopl home!");
         println!("* cargo build");
         
-        let command = Command::new("cargo").args(["build","--release"]).output().expect("Could not run cargo build!");
+        let command = Command::new("cargo").args(["build"]).output().expect("Could not run cargo build!");
         if !command.status.success() && command.status.code().unwrap() != 101 {
             println!("{RED}SOPL exited with {} {RESET}",command.status.code().unwrap_or(0));
         }

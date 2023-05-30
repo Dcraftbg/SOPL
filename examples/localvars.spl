@@ -10,5 +10,5 @@ func main() {
     x = 4l
     y = 4l
     x y +
-    printf("Hi %ld"c, x);
+    printf("Hi %ld\n"c, x);
 }

@@ -4,16 +4,11 @@ const A = 5l ;
 const B = 4l ;
 const C = 4l 5l + ;
 const D = A B C + + ;
-const Hello = "Hello";
-const World = "World";
+const Hello = "Hello"c;
+const World = "World"c;
 const HelloWorld = Hello World + ;
 
 func main() {
     printf("%ld"c,D);
-    // D "%d"c printf
-    // EAX pop
-    // pop
-    HelloWorld push pop
-    puts(top);
-    pop
+    puts(HelloWorld);
 }

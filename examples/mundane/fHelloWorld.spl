@@ -5,6 +5,6 @@ func main() {
     let f: ptr;
     fopen("hello.txt"c,"w"c)
     f = RAX
-    fwrite("Hello World!"c,12, 1, f);
+    fwrite("Hello World!", 1, f);
     fclose(f);
 }

@@ -2,7 +2,12 @@
 
 extern "C" printf(ptr, int : int);
 func main(argc: int,argv: ptr) {
-    argc push
-    printf("Amount of arguments: %d\n"c, top);
-    EAX pop
+    let argc1: int;
+    argc1 = argc
+    // RAX = argc1
+    // RAX 1 +
+    // RAX 8 *
+    // argc1 = RAX
+    // argc1 = (argc + 1) * 8
+    printf("Amount of arguments: %d\n"c, argc1);
 }

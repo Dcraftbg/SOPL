@@ -23,8 +23,8 @@ func main() {
     memset(name, 0, NAMELEN);
     printf("What is your name? "c);
     gets(name);
-    printf("Hello ");
+    printf("Hello "c);
     printf(name);
-    printf("!\n");
+    printf("!\n"c);
     free(name)
 }
