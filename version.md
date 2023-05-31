@@ -1,8 +1,9 @@
 **(Latest patch versions in github history)**
 
-Newest Version: [0.11.2A](#0112a)
+Newest Version: [0.11.3A](#0113a)
 # Manual:
-  - [0.11.2A](#0112a)
+  - [0.11.3A](#0113a)
+    - [0.11.2A](#0112a)
     - [0.11.1A](#0111a)
     - [0.11A](#011a)
   - [0.10.1A](#0101a)
@@ -25,6 +26,8 @@ Newest Version: [0.11.2A](#0112a)
   - [0.2A](#02a)
   - [0.1A](#01a)
 # Change Log
+ ## 0.11.3A
+   - After a lot of consideration I have decided to remove the stack oriented out of sopl
  ## 0.11.2A
    - Changed a lot of the main source code for easier use
    - Added testing 
