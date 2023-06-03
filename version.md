@@ -1,4 +1,4 @@
-**(Latest patch versions in github history)**
+**(Latest patch versions in github history and at the top of Change Log)**
 
 Newest Version: [0.11.4A](#0114a)
 # Manual:
@@ -27,6 +27,11 @@ Newest Version: [0.11.4A](#0114a)
   - [0.2A](#02a)
   - [0.1A](#01a)
 # Change Log
+ ## 0.11.5A
+   - Changed flags to be less frustrating and more flexible (checkout [README](README.md#flags-and-versions))
+   - Soft disabled return stack (for the upcomming revamp of returning)
+   - removed -noRaxWarn
+   - Added build to usage (It was added before but I forgot to add it to usage, sorry :|)
  ## 0.11.4A 
    - Slowly transitioning towards the new modern syntax
    - Added a few windows 'headers'

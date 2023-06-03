@@ -256,10 +256,9 @@ impl Architecture {
 struct CmdProgram {
     path: String,
     opath: String,
-    typ: String,
+    target: String,
     should_build: bool,
     should_run: bool,
-    warn_rax_usage: bool,
     use_type_checking: bool,
     print_unused_warns  : bool,
     // Sub sets
@@ -275,7 +274,7 @@ struct CmdProgram {
 }
 impl CmdProgram {
     fn new() -> Self {
-        Self { path: String::new(), opath: String::new(), should_build: false, should_run: false, typ: String::new(), warn_rax_usage: true, call_stack_size: 64000, in_mode: OptimizationMode::DEBUG, use_type_checking: true, print_unused_warns: true,  remove_unused_functions: false, print_unused_funcs: true, print_unused_externs: true, print_unused_strings: true, architecture: Architecture::new() }
+        Self { path: String::new(), opath: String::new(), should_build: false, should_run: false, target: "nasm_x86_64".to_string(), call_stack_size: 64000, in_mode: OptimizationMode::DEBUG, use_type_checking: true, print_unused_warns: true,  remove_unused_functions: false, print_unused_funcs: true, print_unused_externs: true, print_unused_strings: true, architecture: Architecture::new() }
     }
 }
 #[repr(u32)]
@@ -2722,11 +2721,6 @@ fn parse_tokens_to_build(lexer: &mut Lexer, program: &mut CmdProgram) -> BuildPr
             TokenType::Register(reg) => {
                 let currentScope = getTopMut(&mut scopeStack).unwrap();
                 let regOp = par_expect!(lexer.currentLocation,lexer.next(),"Unexpected register operation or another register!");
-                
-                if reg == Register::RAX && program.warn_rax_usage {
-                    eprintln!("(P) [WARNING] {}:{}:{}: Usage of RAX is not recommended since RAX is used for popping and might be manipulated! Consider using registers like RBX, RCX, RDX etc.", token.location.file, token.location.linenumber,token.location.character);
-                    program.warn_rax_usage = false
-                }
                 match regOp.typ {
                     TokenType::IntrinsicType(typ) => {
                         match typ {
@@ -3822,16 +3816,16 @@ fn type_check_build(build: &mut BuildProgram, program: &CmdProgram) {
 
 fn usage(program: &String) {
     println!("--------------------------------------------");
-    println!("{} (output language) (input path) [flags]",program);
-    println!("     Output Language: ");
-    println!("         - nasm_x86_64");
+    println!("{} [flags]",program);
+    list_targets(9);
     println!("     flags: ");
+    println!("         -t (target)                         -> compiles to the given target (default is nasm_x86_64)");
     println!("         -o (output path)                    -> outputs to that file (example: hello.asm in nasm_x86_64 mode). If the output path is not specified it defaults to the modes default (for nasm_x86_64 thats a.asm)");
-    println!("         -r                                  -> builds the program for you if the option is available for that language mode (for example in nasm_x86_64 it calls nasm with gcc to link it to an executeable)");
-    println!("         -noRaxWarn                          -> removes the RAX usage warning for nasm");
+    println!("         -r                                  -> runs the program for you if the option is available for that language mode (for example in nasm_x86_64 it calls nasm with gcc to link it to an executeable)");
+    println!("         -b                                  -> builds the program for you if the option is available for that language mode");
     println!("         -release                            -> builds the program in release mode");
     println!("         -ntc                                -> (NoTypeChecking) Disable type checking");
-    println!("         -nou (all, funcs, externs, strings) -> Disable unused warns for parameter");
+    println!("         -warn (all, funcs, externs, strings)-> Enable unused warns for parameter");
     println!("         -ruf                                -> Remove unused functions");
     println!("         -callstack (size)                   -> Set callstack size.\n{}\n{}",
              "                                                The name is very deceiving but callstack is now only used for locals as of 0.0.6A (checkout versions.md)",
@@ -3880,27 +3874,35 @@ fn json_to_arc(json: &serde_json::Map<String, Value>) -> Architecture {
     };
     oarc
 }
+fn list_targets(indent: usize){
+    let indent = " ".repeat(indent);
+    println!("{}- nasm_x86_64",indent);
+}
 fn main() {
-    #[cfg(not(debug_assertions))]
+    //#[cfg(not(debug_assertions))]
     std::panic::set_hook(Box::new(|panic_info| {
+        
         if let Some(e) = panic_info.payload().downcast_ref::<String>() {
             eprintln!("{}",e);
             exit(1);
         }
+        else if let Some(e) = panic_info.payload().downcast_ref::<&str>() {
+            eprintln!("{}",e);
+            exit(1);
+        }
         else {
-            eprintln!("Error occured at! {:?}",panic_info.location());
+            eprintln!("Error occured at {:?}",panic_info.location());
             exit(1);
         }
     }));
     let mut args: Vec<_> = env::args().collect();
     let program_n = args.remove(0);
-    if args.len() < 2 {
-        usage(&program_n);
-        exit(1);
-    }
+    // if args.len() < 2 {
+    //     usage(&program_n);
+    //     exit(1);
+    // }
     let mut program = CmdProgram::new();
-    program.typ  = args.remove(0);
-    program.path = args.remove(0);
+    //program.path = args.remove(0);
     program.opath = Path::new(&program.path).with_extension(".asm").to_str().unwrap().to_string();
     let mut Architectures: HashMap<String, Architecture> = HashMap::new();
     use Register::*;
@@ -3940,26 +3942,31 @@ fn main() {
                 "-release" => {
                     program.in_mode = OptimizationMode::RELEASE
                 }
-                "-noRaxWarn" => {
-                    program.warn_rax_usage = false
-                }
                 "-ntc" => {
                     program.use_type_checking = false
                 }
-                "-nou" => {
+                "-t" => {
+                    program.target = args.get(i+1).expect("Error: Expected target but found nothing!").to_owned();
+                    if program.target == "list" {
+                        list_targets(0);
+                        exit(0);
+                    }
+                    i+=1;
+                }
+                "-warn" => {
                     let typ = args.get(i+1).expect("Error: Expected `all, funcs,externs,strings`");
                     match typ.as_str() {
                         "all" => {
-                            program.print_unused_warns = false
+                            program.print_unused_warns = true
                         }
                         "funcs" => {
-                            program.print_unused_funcs = false
+                            program.print_unused_funcs = true
                         }
                         "externs" => {
-                            program.print_unused_externs = false
+                            program.print_unused_externs = true
                         }
                         "strings" => {
-                            program.print_unused_strings = false
+                            program.print_unused_strings = true
                         }
                         _ => {
                             eprintln!("Unexpected parameter: {}, Expected: `all,funcs,externs,strings`",typ)
@@ -3974,6 +3981,10 @@ fn main() {
                     let val = args.get(i+1).expect("Unexpected flag -callstack, Please specify a size!").parse::<usize>().expect("Value not a valid usize!");
                     program.call_stack_size = val;
                     i += 1;
+                }
+                "-usage" => {
+                    usage(&program_n);
+                    exit(0);
                 }
                 "-arc" => {
                     let val = args.get(i+1).expect("Error: Unexpected built-in target or path to json");
@@ -3996,23 +4007,28 @@ fn main() {
                     }
                 }
                 flag => {
-                    eprintln!("Error: undefined flag: {flag}\nUsage: ");
-                    usage(&program_n);
-                    exit(1);
+                    if program.path.is_empty() && &flag[0..1] != "-" {
+                        program.path = flag.to_string();
+                    }
+                    else {
+                        eprintln!("Error: undefined flag: {flag}");
+                        usage(&program_n);
+                        exit(1);
+                    }
                 }
             }
             i+=1;
         }
     }
-    match program.typ.as_str() {
+    match program.target.as_str() {
         "nasm_x86_64" => {}
         _ => {
-            assert!(false, "Undefined type: {}",program.typ);          
+            eprintln!("Undefined target: {}\nSee supported targets by doing -t list",program.target);          
+            exit(1);
         }
     }
     let mut Intrinsics: HashMap<String,IntrinsicType> = HashMap::new();
     Intrinsics.insert("extern".to_string(), IntrinsicType::Extern);
-    Intrinsics.insert("rs".to_string(), IntrinsicType::RS);
     Intrinsics.insert("let".to_string(), IntrinsicType::Let);
     Intrinsics.insert("func".to_string()  , IntrinsicType::Func);
     Intrinsics.insert("include".to_string(), IntrinsicType::INCLUDE);
@@ -4027,8 +4043,6 @@ fn main() {
     Intrinsics.insert(":".to_string(),IntrinsicType::DOUBLE_COLIN);
     Intrinsics.insert(",".to_string(),IntrinsicType::COMA);
     Intrinsics.insert(";".to_string(),IntrinsicType::DOTCOMA);
-    Intrinsics.insert("push".to_string(),IntrinsicType::PUSH);
-    
     Intrinsics.insert("=".to_string(),IntrinsicType::SET);
     Intrinsics.insert("+".to_string(),IntrinsicType::ADD);
     Intrinsics.insert("-".to_string(),IntrinsicType::SUB);
@@ -4039,7 +4053,6 @@ fn main() {
     Intrinsics.insert("else".to_string(), IntrinsicType::ELSE);
     Intrinsics.insert("==".to_string(),IntrinsicType::EQ);
     Intrinsics.insert("cast".to_string(), IntrinsicType::CAST);
-    
     let mut Definitions: HashMap<String,VarType> = HashMap::new();
     Definitions.insert("int".to_string(), VarType::INT);
     Definitions.insert("char".to_string(), VarType::CHAR);
@@ -4047,14 +4060,26 @@ fn main() {
     Definitions.insert("bool".to_string(), VarType::BOOLEAN);
     Definitions.insert("ptr".to_string(), VarType::PTR(PtrTyp::VOID));
     Definitions.insert("short".to_string(), VarType::SHORT);
-    let info = fs::read_to_string(&program.path).expect("Error: could not open file!");
-    let mut lexer = Lexer::new(&info, & Intrinsics, &Definitions, HashSet::new());
+    //assert!(!program.path.is_empty(),"Error: expected program.path but found nothing!");
+    if program.path.is_empty() {
+        println!("Error: Unspecified input file!");
+        usage(&program_n);
+        exit(1); 
+    }
+    let info = fs::read_to_string(&program.path);
+    if let Err(info) = info {
+        eprintln!("Error: Could not read file \"{}\"!",program.path);
+        eprintln!("{}",info.to_string());
+        exit(1);
+    }
+    let oinfo = info.unwrap();
+    let mut lexer = Lexer::new(&oinfo, & Intrinsics, &Definitions, HashSet::new());
     lexer.currentLocation.file = Rc::new(program.path.clone());
     let mut build = parse_tokens_to_build(&mut lexer, &mut program);    
     if program.use_type_checking {
         type_check_build(&mut build, &program);
     }
-    match program.typ.as_str() {
+    match program.target.as_str() {
         "nasm_x86_64" => {
             to_nasm_x86_64(&mut build, &program).expect("Could not build to nasm_x86_64");
             if program.should_build {
@@ -4093,7 +4118,8 @@ fn main() {
             }
         }
         _ => {
-            todo!("Unimplemented type {}",program.typ);
+            // todo!("Unimplemented type {}",program.target);
+            eprintln!("Target {} is either unsupported or a target is not provided!\n",program.target)
         }
     }
     
@@ -4114,7 +4140,7 @@ fn main() {
 /*
 - [ ] TODO: No point in keeping params and localvars seperate once we set LOCALVAR onto the stack instead of the CALLSTACK
 - [ ] TODO: Add EOL (End of line) token
-- [ ] TODO: remove warn_rax_usage
+- [x] TODO: remove warn_rax_usage
 - [ ] TODO: Fix checking for UUID overloading in includes
 - [ ] TODO: implement macros for assert, expect etc. for type checking
 - [ ] TODO: Add dynamic linking with dlls with dll_import dll_export

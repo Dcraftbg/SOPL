@@ -1,28 +1,4 @@
-// #[cfg(test)]
-// mod tests {
-//     use std::fs;
-
-//     #[test]
-//     fn examples() {
-//         let folder = "examples/";
-//         let failed: Vec<String> = Vec::new();
-//         if let Ok(entries) = fs::read_dir(folder) {
-//             for entry in entries {
-//                 if let Ok(entry) = entry {
-                    
-//                     //entry.file_name()
-//                 }
-//                 else {
-//                     panic!("Entry: {} could not be found!",entry.unwrap_err());
-//                 }
-//             }
-//         }
-//         else {
-//             panic!("Examples failed! Could not find folder {}",folder);
-//         }
-//     }
-// }
-use std::{fs::{self, read_to_string, File}, process::{Command, exit}, env::{set_current_dir, self}, path::{PathBuf, Path}};
+use std::{fs::{self, read_to_string, File}, process::{Command, exit}, env::{set_current_dir, self, current_dir}, path::{PathBuf, Path}};
 use std::io::Write;
 fn unescape(stri: &str) -> String {
     let mut out = String::new();
@@ -123,9 +99,9 @@ fn record(epath: &PathBuf, failed: &mut Vec<PathBuf>) {
     let sopl_exe: &str = "target/debug/sopl";
     let fname = epath.file_name().unwrap().to_str().unwrap();
     println!("{LIGHT_BLUE}* Recording {}{RESET}",epath.to_string_lossy());  
-    let compile_sopl = Command::new(sopl_exe).args(["nasm_x86_64", fname, "-o", &format!("examples/int/{}.asm", fname), "-b"]).output().expect(&format!("Error: could not run build for {}",fname));
+    let compile_sopl = Command::new(sopl_exe).args(["-t", "nasm_x86_64", &format!("examples/{}",fname), "-o", &format!("examples/int/{}.asm", fname), "-b"]).output().expect(&format!("Error: could not run build for {}",fname));
     if !compile_sopl.status.success() && compile_sopl.status.code().unwrap() != 101 {
-        println!("{RED}Record failed for {}. Compiling exited with {}{RESET}\n",epath.to_string_lossy(),compile_sopl.status.code().unwrap_or(0));
+        println!("{RED}Record failed for {}. Compiling exited with {}{RESET}",epath.to_string_lossy(),compile_sopl.status.code().unwrap_or(0));
         failed.push(epath.clone());
         return;
     }
@@ -170,9 +146,9 @@ fn main() {
     let mut args: Vec<_> = env::args().collect();
     let sopl_exe: &str = "target/debug/sopl";
     args.remove(0);
+    let sopl_home = "../../";
     if args.len() == 0 {
         let folder = "examples";
-        let sopl_home = "../../";
         //let sopl_back = current_dir().expect("Error: could not get current working directory");
         
         let mut failed: Vec<PathBuf> = Vec::new();
@@ -202,9 +178,9 @@ fn main() {
                     if epath.is_file() && !ignored.contains(&epath.file_name().unwrap().to_str().unwrap().to_owned()){
                         let fname = epath.file_name().unwrap().to_str().unwrap();
                         println!("{LIGHT_BLUE}* Testing {}{RESET}",epath.to_string_lossy());  
-                        let compile_sopl = Command::new(sopl_exe).args(["nasm_x86_64", fname, "-o", &format!("examples/int/{}.asm", fname), "-b"]).output().expect(&format!("Error: could not run build for {}",fname));
+                        let compile_sopl = Command::new(sopl_exe).args(["-t","nasm_x86_64", &format!("examples/{}",fname), "-o", &format!("examples/int/{}.asm", fname), "-b"]).output().expect(&format!("Error: could not run build for {}",fname));
                         if !compile_sopl.status.success() && compile_sopl.status.code().unwrap_or(0) != 101{
-                            println!("{RED}Test failed for {}. Compiling exited with {}{RESET}",epath.to_string_lossy(),compile_sopl.status.code().unwrap_or(0));
+                            println!("{RED}Test failed for {}. Compiling exited with {}{RESET}\n{:?}",epath.to_string_lossy(),compile_sopl.status.code().unwrap_or(0),String::from_utf8_lossy(&compile_sopl.stderr));
                             failed.push(epath);
                             continue;
                         }
@@ -271,9 +247,18 @@ fn main() {
         let command = args.remove(0);
         match command.as_str() {
             "record" => {
-                let option = args.remove(0);
-                let sopl_home = "../../";
                 set_current_dir(sopl_home).expect("Error: could not change current working directory to sopl home!");
+                let data = read_to_string("./tests/config.cfg").expect("No config found");
+                let ignored: Vec<String> = {
+                    let mut o: Vec<String> = Vec::new();
+                    for path in data.split("\n") {
+                        o.push(remove_newlines(path));
+                    }
+                    o
+                };
+                let option = args.remove(0);
+                //let sopl_home = "../../";
+                //set_current_dir(sopl_home).expect("Error: could not change current working directory to sopl home!");
                 match option.as_str() {
                     "all" => {
                         let folder = "examples";
@@ -284,8 +269,8 @@ fn main() {
                         println!("* cargo build");
                         
                         let command = Command::new("cargo").args(["build"]).output().expect("Could not run cargo build!");
-                        if !command.status.success() {
-                            panic!("SOPL exited with {}",command.status.code().unwrap_or(0));
+                        if !command.status.success() && command.status.code().unwrap_or(0) != 101{
+                            eprintln!("SOPL exited with {}",command.status.code().unwrap_or(0));
                         }
                         println!("----------------");
                         //set_current_dir(sopl_back).expect("Error: could not change current working directory to sopl back!");
@@ -294,7 +279,7 @@ fn main() {
                             for entry in entries {
                                 if let Ok(entry) = entry {
                                     let epath = entry.path();
-                                    if epath.is_file() {
+                                    if epath.is_file() && !ignored.contains(&epath.file_name().unwrap().to_str().unwrap().to_owned()) {
                                         record(&epath,&mut failed);
                                     }
                                 }
@@ -304,7 +289,7 @@ fn main() {
                             }
                         }
                         else {
-                            panic!("Examples failed! Could not find folder {}",folder);
+                            panic!("Examples failed! Could not find folder {} at {:?}",folder,current_dir());
                         }
                         println!("-----------------------------");
                         for fail in failed {

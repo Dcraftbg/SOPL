@@ -13,12 +13,12 @@ For more info on current versions checkout [version.md](version.md)
 
 **Manual:**
 Made for easy navigation around the README.md
-- [Plans](#plans)
+- [Quickstart](#quickstart)
 - [Build platforms](#build)
 - [Requirements](#Requirements)
-- [Startup](#startup)
 - [Flags and versions](#flags-and-versions)
 - [NEWS](news.md)
+- [Plans](#plans)
 - [How-to-use](#how-to-use)
   - [Hello-World](#hello-world)
   - [Externals](#extern)
@@ -32,28 +32,20 @@ Made for easy navigation around the README.md
   - [locals](#locals)
   - [interrupts](#interrupts)
 
-## Plans
-> Source
-- [x] externals
-- [x] strings
-- [x] register access
-- [x] includes
-- [x] functions
-- [x] constants
-- [ ] control flow
-  - [x] if statements
-  - [x] else statements
-  - [ ] else if statements
-  - [ ] while statements
-  - [ ] for statements
-- [x] locals
-- [ ] type checking
-  - [x] Function type checking
-  - [ ] Branching
-- [ ] structs
-- [ ] struct methods
-- [ ] interfaces
 
+## Quickstart
+```cmd
+cargo run (File path) <-o (Output path)> <-t (PLATFORM)>
+```
+Another thing worth noting:
+[NOTE] If you are experiencing an error of the following type:
+```
+[NOTE] No architecture found for {OS}_{Arch}! Please specify the output architecture!
+```
+It is probably because the compiler can't find a proper architecture for your current operating system and Arch. To fix this you can use the -arc flag with | and the path to the architecture configuration (examples [here](examples/arcs/), This should fix the error although it could cause issues if the configuration isn't correct) Like so:
+```
+cargo run nasm_x86_64 myprogram.spl -arc | myarcconfig.json 
+```
 
 ## Build
 > Build platforms: 
@@ -79,19 +71,6 @@ interrupt 128, 1, 1, "Hello World!" // Print Hello World! on linux
 **NASM**:
 - Any nasm version that can support 64 bit or 32 bit assembly.
 - Any linker or executable builder (gcc, ld, etc.)
-## Startup
-```cmd
-cargo run (PLATFORM) (File path) -o (Output path)
-```
-Another thing worth noting:
-[NOTE] If you are experiencing an error of the following type:
-```
-[NOTE] No architecture found for {OS}_{Arch}! Please specify the output architecture!
-```
-It is probably because the compiler can't find a proper architecture for your current operating system and Arch. To fix this you can use the -arc flag with | and the path to the architecture configuration (examples [here](examples/arcs/), This should fix the error although it could cause issues if the configuration isn't correct) Like so:
-```
-cargo run nasm_x86_64 myprogram.spl -arc | myarcconfig.json 
-```
 ## Flags and Versions
 
 Whenever something gets added you will see that in 99% of the time [version.md](version.md) gets updated. Thats because it contains the necessary information about any new versions that come out.
@@ -100,26 +79,49 @@ It also gives you a timeline of the most recent changes (newest -> oldest).
 
 Flags are really important and if not updated here, you can always check out what flag support there is by just running the compiler without anything (This will display information such as the usage, the currently supported builds and any flags you might want to use).
 
-As of [0.11A](version.md#011a) flags consist of:
+As of [0.11.5A](version.md#0115a) flags consist of:
 ```
 --------------------------------------------
-(output language) (input path) [flags]
-    Output Language:
-        - nasm_x86_64
-    flags:
-        -o (output path)                    -> outputs to that file (example: hello.asm in nasm_x86_64 mode). If the output path is not specified it defaults to the modes default (for nasm_x86_64 thats a.asm)
-        -r                                  -> builds the program for you if the option is available for that language mode (for example in nasm_x86_64 it calls nasm with gcc to link it to an executeable)
-        -noRaxWarn                          -> removes the RAX usage warning for nasm
-        -release                            -> builds the program in release mode
-        -ntc                                -> (NoTypeChecking) Disable type checking
-        -nou (all, funcs, externs, strings) -> Disable unused warns for parameter
-        -callstack (size)                   -> Set callstack size.
-                                               The name is very deceiving but callstack is now only used for locals as of 0.0.6A (checkout versions.md)
-                                               [NOTE] it is planned for -callstack to be deprecated for instead using the stack as a way to store variables with the new function system
-        -arc (builtin arc)                  -> builds for a builtin architecture
-        -arc | (path to custom arc)         -> builds for a custom architecture following the syntax described in ./examples/arcs
+sopl [flags]
+         - nasm_x86_64
+     flags:
+         -t (target)                         -> compiles to the given target (default is nasm_x86_64)
+         -o (output path)                    -> outputs to that file (example: hello.asm in nasm_x86_64 mode). If the output path is not specified it defaults to the modes default (for nasm_x86_64 thats a.asm)
+         -r                                  -> runs the program for you if the option is available for that language mode (for example in nasm_x86_64 it calls nasm with gcc to link it to an executeable)
+         -b                                  -> builds the program for you if the option is available for that language mode
+         -release                            -> builds the program in release mode
+         -ntc                                -> (NoTypeChecking) Disable type checking
+         -warn (all, funcs, externs, strings)-> Enable unused warns for parameter
+         -ruf                                -> Remove unused functions
+         -callstack (size)                   -> Set callstack size.
+                                                The name is very deceiving but callstack is now only used for locals as of 0.0.6A (checkout versions.md)
+                                                [NOTE] it is planned for -callstack to be deprecated for instead using the stack as a way to store variables with the new function system
+         -arc (builtin arc)                  -> builds for a builtin architecture
+         -arc | (path to custom arc)         -> builds for a custom architecture following the syntax described in ./examples/arcs
 --------------------------------------------
 ```
+
+## Plans
+> Source
+- [x] externals
+- [x] strings
+- [x] register access
+- [x] includes
+- [x] functions
+- [x] constants
+- [ ] control flow
+  - [x] if statements
+  - [x] else statements
+  - [ ] else if statements
+  - [ ] while statements
+  - [ ] for statements
+- [x] locals
+- [ ] type checking
+  - [x] Function type checking
+  - [ ] Branching
+- [ ] structs
+- [ ] struct methods
+- [ ] interfaces
 ## How to use?
 *Note that documentation may not cover all of the latest features tho you might expect updates on them shortly after implementation*
 ### Hello World!
