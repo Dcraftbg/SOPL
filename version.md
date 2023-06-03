@@ -1,8 +1,9 @@
 **(Latest patch versions in github history)**
 
-Newest Version: [0.11.3A](#0113a)
+Newest Version: [0.11.4A](#0114a)
 # Manual:
-  - [0.11.3A](#0113a)
+  - [0.11.4A](#0114a)
+    - [0.11.3A](#0113a)
     - [0.11.2A](#0112a)
     - [0.11.1A](#0111a)
     - [0.11A](#011a)
@@ -26,6 +27,14 @@ Newest Version: [0.11.3A](#0113a)
   - [0.2A](#02a)
   - [0.1A](#01a)
 # Change Log
+ ## 0.11.4A 
+   - Slowly transitioning towards the new modern syntax
+   - Added a few windows 'headers'
+   - Added types for constant definitions
+   - Added constant overwritting
+   - Made constant overwritting be allowed only if they are the same type (its pretty unreasonable to overwrite something with a different type unless its local which is still yet to be implemented)
+   - Removed a lot of 'comment out' comments
+   - Moved a lot of the TODO comments at the end of the file for easier tracking
  ## 0.11.3A
    - After a lot of consideration I have decided to remove the stack oriented out of sopl
  ## 0.11.2A

@@ -1,0 +1,23 @@
+include "./syscalls.spl"
+func sread(fd: int, buf: ptr, count: long) {
+    RAX = SYS_read
+    RDI = fd
+    RSI = buf
+    RDX = count
+    interrupt I_SYSCALL
+}
+func swrite(fd: int, buf: ptr, count: long) {
+    RAX = SYS_write
+    RDI = fd
+    RSI = buf
+    RDX = count
+    interrupt I_SYSCALL
+}
+//example program:
+// func _start() {
+//     const stdout = 1;
+//     swrite(stdout, "Hello World!");
+// }
+// func main() {
+//     _start();
+// }
