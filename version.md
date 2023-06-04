@@ -1,8 +1,9 @@
 **(Latest patch versions in github history and at the top of Change Log)**
 
-Newest Version: [0.11.6A](#0116a)
+Newest Version: [0.11.7A](#0117a)
 # Manual:
-  - [0.11.6A](#0116a)
+  - [0.11.7A](#0117a)
+    - [0.11.6A](#0116a)
     - [0.11.5A](#0115a)
     - [0.11.4A](#0114a)
     - [0.11.3A](#0113a)
@@ -29,6 +30,11 @@ Newest Version: [0.11.6A](#0116a)
   - [0.2A](#02a)
   - [0.1A](#01a)
 # Change Log
+ ## 0.11.7A
+   - Fixed a few bugs to do with string UUID overloading
+   - Added pointers with types (*char, **int, etc.)
+   - Added macros for type checking
+
  ## 0.11.6A
    - Changed local variables to now be on the stack
    - Merged parameters and local variables

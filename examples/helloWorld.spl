@@ -1,5 +1,5 @@
-extern "C" puts(ptr : int);
-func printstr(a: ptr) {
+extern "C" puts(*char : int);
+func printstr(a: *char) {
     puts(a)
 }
 func main() {

@@ -78,14 +78,6 @@ macro_rules! par_error {
         exit(1);
     });
 }
-macro_rules! lpar_error {
-    ($location:expr, $($arg:tt)*) => ({
-        let message = format!($($arg)*);
-        eprintln!("(P) [ERROR] {}: {}", $location.loc_display(), message);
-        exit(1);
-    });
-}
-
 macro_rules! par_assert {
     ($token:expr, $condition:expr, $($arg:tt)*) => ({
         if !$condition {
@@ -95,28 +87,11 @@ macro_rules! par_assert {
         }
     });
 }
-macro_rules! lpar_assert {
-    ($location:expr, $condition:expr, $($arg:tt)*) => ({
-        if !$condition {
-            let message = format!($($arg)*);
-            eprintln!("(P) [ERROR] {}: {}", $location.loc_display(), message);
-            exit(1);
-        }
-    });
-}
 macro_rules! par_expect {
     ($location:expr, $expector:expr, $($arg:tt)*) => ({
-
+        
         let message = format!($($arg)*);
         let message = format!("(P) [ERROR] {}: {}", $location.loc_display(), message);
-        $expector.expect(&message)
-    });
-}
-macro_rules! com_expect {
-    ($location:expr, $expector:expr, $($arg:tt)*) => ({
-
-        let message = format!($($arg)*);
-        let message = format!("(C) [ERROR] {}: {}", $location.loc_display(), message);
         $expector.expect(&message)
     });
 }
@@ -133,6 +108,14 @@ macro_rules! par_warn {
     });
 }
 
+macro_rules! com_expect {
+    ($location:expr, $expector:expr, $($arg:tt)*) => ({
+
+        let message = format!($($arg)*);
+        let message = format!("(C) [ERROR] {}: {}", $location.loc_display(), message);
+        $expector.expect(&message)
+    });
+}
 macro_rules! com_error {
     ($location:expr, $($arg:tt)*) => ({
         let message = format!($($arg)*);
@@ -162,6 +145,42 @@ macro_rules! com_assert {
     });
 }
 
+macro_rules! typ_error {
+    ($token:expr, $($arg:tt)*) => ({
+        let message = format!($($arg)*);
+        eprintln!("(T) [ERROR] {}: {}", $token.loc_display(), message);
+        exit(1);
+    });
+}
+macro_rules! typ_assert {
+    ($token:expr, $condition:expr, $($arg:tt)*) => ({
+        if !$condition {
+            let message = format!($($arg)*);
+            eprintln!("(T) [ERROR] {}: {}", $token.loc_display(), message);
+            exit(1);
+        }
+    });
+}
+macro_rules! typ_expect {
+    ($location:expr, $expector:expr, $($arg:tt)*) => ({
+        
+        let message = format!($($arg)*);
+        let message = format!("(T) [ERROR] {}: {}", $location.loc_display(), message);
+        $expector.expect(&message)
+    });
+}
+macro_rules! typ_info {
+    ($token:expr, $($arg:tt)*) => ({
+        let message = format!($($arg)*);
+        println!("(T) [INFO] {}: {}", $token.loc_display(), message);
+    });
+}
+macro_rules! typ_warn {
+    ($token:expr, $($arg:tt)*) => ({
+        let message = format!($($arg)*);
+        println!("(T) [WARN] {}: {}", $token.loc_display(), message);
+    });
+}
 
 fn is_symbolic(c: char) -> bool {
     c.is_alphabetic() || c.is_alphanumeric() || c == '_' || c=='-'
@@ -331,9 +350,10 @@ impl PtrTyp {
         }
     }
 }
+#[derive(Clone, Debug, PartialEq)]
 struct Ptr {
     typ: PtrTyp,
-    data: usize,
+    inner_ref: usize,
 }
 impl PtrTyp {
     fn to_string(&self) -> String {
@@ -817,6 +837,37 @@ impl Iterator for Lexer<'_> {
                         self.currentLocation.character += 1;
                         return Some(Token {typ: TokenType::IntrinsicType(self.Intrinsics.get(&c.to_string()).expect("Unhandled intrinsic :(").clone()), location: self.currentLocation.clone()});
                     }
+                    else if c == '*' && self.cchar_offset(1).is_some(){
+                        let mut already_alphabetic = false;
+                        while self.is_not_empty() && (c == '*' && !already_alphabetic) || c.is_alphabetic() {
+                            c = self.cchar_s()?;
+                            self.cursor += 1;
+                            outstr.push(c);
+                            if c.is_alphabetic() {
+                                already_alphabetic = true
+                            }
+                        }
+                        outstr.pop();
+                        self.cursor -= 1;
+                        self.currentLocation.character += outstr.len() as i32;
+                        if outstr == "*" {
+                            return Some(Token { typ: TokenType::IntrinsicType(IntrinsicType::MUL), location: self.currentLocation.clone() });
+                        }
+                        else {
+                            let osize = outstr.chars().take_while(|&c| c == '*').count();
+                            let otyp = &outstr[osize..];
+                            if let Some(def) = self.Definitions.get(otyp) {
+                                return Some(Token { typ: TokenType::Definition(VarType::PTR(Ptr{typ: PtrTyp::TYP(Box::new(def.clone())), inner_ref: osize-1})), location: self.currentLocation.clone() });
+                            } else if otyp == "void" {
+                                return Some(Token { typ: TokenType::Definition(VarType::PTR(Ptr{typ: PtrTyp::VOID, inner_ref: osize-1})), location: self.currentLocation.clone() });
+                            }
+                            else {
+                                //TODO: Maybe a*b could be an issue V Fix this
+                                todo!("Handle situation of unknown pointer! Make it return a Mul and reset back the cursor!");
+                                return None;
+                            }
+                        }
+                    }
                     else {
                         while self.is_not_empty() && !c.is_alphabetic() && !c.is_numeric() && !c.is_whitespace() && c != ';' && c!=')' && c!='(' && c!='{' && c!='}' && c!='[' && c!=']' && c!='<' && c!='>' {
                             c = self.cchar_s()?;
@@ -1257,13 +1308,13 @@ impl Register {
                 VarType::LONG
             },
             Register::RSP | Register::RBP => {
-                VarType::PTR(PtrTyp::VOID)
+                VarType::PTR(Ptr { typ: PtrTyp::VOID, inner_ref: 0 })
             },
             Register::EAX | Register::EBX | Register::ECX | Register::EDX | Register::ESI | Register::EDI => {
                 VarType::INT
             },
             Register::ESP | Register::EBP => {
-                VarType::PTR(PtrTyp::VOID)
+                VarType::PTR(Ptr { typ: PtrTyp::VOID, inner_ref: 0})
             }
             Register::AX |Register::BX |Register::CX |Register::DX |Register::SP |Register::BP | Register::SI | Register::DI => {
                 VarType::SHORT
@@ -1531,7 +1582,7 @@ enum ConstValueType {
     INT(i32),
     LONG(i64),
     STR(String, ProgramStringType),
-    PTR(PtrTyp, i64),
+    PTR(Ptr, i64),
 }
 
 #[derive(Debug,PartialEq,Clone)]
@@ -1579,7 +1630,7 @@ impl ConstValueType {
         match self {
             ConstValueType::INT(_) => Some(VarType::INT),
             ConstValueType::LONG(_) => Some(VarType::LONG),
-            ConstValueType::STR(_, typ) => if *typ == ProgramStringType::CSTR { Some(VarType::PTR(PtrTyp::TYP(Box::new(VarType::CHAR)))) } else { None },
+            ConstValueType::STR(_, typ) => if *typ == ProgramStringType::CSTR { Some(VarType::PTR(Ptr{ typ: PtrTyp::TYP(Box::new(VarType::CHAR)), inner_ref: 0})) } else { None },
             ConstValueType::PTR(typ, _) => Some(VarType::PTR(typ.clone())),
         }
     }
@@ -1587,7 +1638,7 @@ impl ConstValueType {
         match self {
             ConstValueType::INT(_) => vartyp.weak_eq(&VarType::INT),
             ConstValueType::LONG(_) => vartyp.weak_eq(&VarType::LONG),
-            ConstValueType::STR(_, typ) => if *typ == ProgramStringType::CSTR { vartyp.weak_eq(&VarType::PTR(PtrTyp::TYP(Box::new(VarType::CHAR)))) } else {false},
+            ConstValueType::STR(_, typ) => if *typ == ProgramStringType::CSTR { vartyp.weak_eq(&VarType::PTR(Ptr {typ: PtrTyp::TYP(Box::new(VarType::CHAR)), inner_ref: 0})) } else {false},
             ConstValueType::PTR(typ, _) => vartyp.weak_eq(&VarType::PTR(typ.clone())),
         }
     }
@@ -1734,7 +1785,7 @@ enum RawConstValueType{
     INT(i32),
     LONG(i64),
     STR(Uuid),
-    PTR(PtrTyp, i64)
+    PTR(Ptr, i64)
 }
 impl RawConstValueType {
     fn to_type(&self, build: &BuildProgram) -> Vec<VarType> {
@@ -1748,8 +1799,8 @@ impl RawConstValueType {
             RawConstValueType::STR(UUID) => {
                 let val = build.stringdefs.get(UUID).unwrap();
                 match val.Typ {
-                    ProgramStringType::STR =>  vec![VarType::PTR(PtrTyp::TYP(Box::new(VarType::CHAR))), VarType::LONG],
-                    ProgramStringType::CSTR => vec![VarType::PTR(PtrTyp::TYP(Box::new(VarType::CHAR)))],
+                    ProgramStringType::STR =>  vec![VarType::PTR(Ptr { typ: PtrTyp::TYP(Box::new(VarType::CHAR)), inner_ref: 0}), VarType::LONG],
+                    ProgramStringType::CSTR => vec![VarType::PTR(Ptr { typ: PtrTyp::TYP(Box::new(VarType::CHAR)), inner_ref: 0})],
                 }
             },
             RawConstValueType::PTR(typ, _) => {
@@ -1797,7 +1848,7 @@ enum VarType {
     BOOLEAN,
     INT,
     LONG,
-    PTR(PtrTyp),
+    PTR(Ptr),
     CUSTOM(Uuid)   
 }
 impl VarType {
@@ -1819,8 +1870,7 @@ impl VarType {
                 if isplural {"longs".to_string()} else {"long".to_string()}
             }
             VarType::PTR(typ) => {
-                
-                if isplural {"pointers".to_string()} else {format!("pointer<{}>",typ.to_string()).to_string()}
+                if isplural {"pointers".to_string()} else {format!("pointer<{}{}>","*".repeat(typ.inner_ref+1),typ.typ.to_string()).to_string()}
             }
             VarType::CUSTOM(_) => {
                 todo!("Implement custom")
@@ -1845,12 +1895,13 @@ impl VarType {
         }
     }
     fn weak_eq(&self, other: &Self) -> bool {
+        //println!("Comparing: {} and {}",self.to_string(false),other.to_string(false));
         match self {
             Self::PTR(typ) => {
                 match other {
                     VarType::PTR(otyp) => {
-                        if *typ == PtrTyp::VOID || *otyp == PtrTyp::VOID { true }
-                        else {typ==otyp} 
+                        if (typ.typ == PtrTyp::VOID) && typ.inner_ref == otyp.inner_ref { true }
+                        else {typ==otyp && typ.inner_ref == otyp.inner_ref} 
                     },
                     _ => false
                 }
@@ -2112,7 +2163,7 @@ fn eval_const_def(lexer: &mut Lexer, build: &mut BuildProgram, until: TokenType)
         }
     }
     
-    lpar_assert!(lexer.currentLocation,varStack.len() == 1,"Error: Lazy constant stack handling! You need to correctly handle your constants");
+    par_assert!(lexer.currentLocation,varStack.len() == 1,"Error: Lazy constant stack handling! You need to correctly handle your constants");
     let top = varStack.pop().unwrap();
     
     ConstValue {typ: top, loc: orgLoc}
@@ -2501,7 +2552,6 @@ fn parse_tokens_to_build(lexer: &mut Lexer, program: &mut CmdProgram) -> BuildPr
                                 let mut lf = Lexer::new(&info,lexer.Intrinsics,lexer.Definitions,HashSet::new());
                                 lf.currentLocation.file = Rc::new(String::from(p.join(&include_p).to_str().unwrap().replace("\\", "/")));
                                 let mut nprogram = program.clone();
-                                
                                 nprogram.path = String::from(p.join(&include_p).to_str().unwrap().replace("\\", "/"));
                                 let mut build2 = parse_tokens_to_build(&mut lf, &mut nprogram);
                                 build.externals.extend(build2.externals);
@@ -2509,7 +2559,7 @@ fn parse_tokens_to_build(lexer: &mut Lexer, program: &mut CmdProgram) -> BuildPr
                                     let orgstrdefId  = strdefId.clone();
                                     let mut strdefId = strdefId.clone();
                                     let isContaining = build.stringdefs.contains_key(&strdefId);
-                                    while build.stringdefs.contains_key(&strdefId) {
+                                    while build.stringdefs.contains_key(&strdefId) || build2.stringdefs.contains_key(&strdefId) {
                                         strdefId = Uuid::new_v4();
                                     }
                                     if isContaining {
@@ -2531,7 +2581,7 @@ fn parse_tokens_to_build(lexer: &mut Lexer, program: &mut CmdProgram) -> BuildPr
                                     let _loc = fn_fn.location.clone();
                                     match build.functions.insert(fn_name.clone(), fn_fn) {
                                         Some(_Other) => {
-                                            lpar_error!(_loc, "Error: mulitply defined symbols {}",fn_name);
+                                            par_error!(_loc, "Error: mulitply defined symbols {}",fn_name);
                                         },
                                         None => {},
                                     }
@@ -3766,16 +3816,16 @@ fn type_check_scope(build: &BuildProgram, program: &CmdProgram, scope: TCScopeTy
                 for arg in contract {
                     match &arg.typ {
                         CallArgType::LOCALVAR(name) => {
-                            let etyp = par_expect!(loc, externContract.InputPool.pop(), "Error: Additional arguments provided for external that doesn't take in any more arguments!");
+                            let etyp = typ_expect!(loc, externContract.InputPool.pop(), "Error: Additional arguments provided for external that doesn't take in any more arguments!");
                             let local = scope.get_locals(build).unwrap().get(name).unwrap();
-                            par_assert!(loc,local.weak_eq(&etyp),"Error: Incompatible types for contract\nExpected: {}\nFound: ({}) {}",etyp.to_string(false),name,local.to_string(false));
+                            typ_assert!(loc,etyp.weak_eq(&local),"Error: Incompatible types for contract\nExpected: {}\nFound: ({}) {}",etyp.to_string(false),name,local.to_string(false));
                         },
                         CallArgType::REGISTER(_) => todo!("Registers are still yet unhandled!"),
                         CallArgType::CONSTANT(Const) => {
                             let typs = Const.to_type(build);
                             for typ in typs {
-                                let etyp = par_expect!(loc, externContract.InputPool.pop(), "Error: Additional arguments provided for external that doesn't take in any more arguments!\nExpected: Nothing\nFound: {}\n",typ.to_string(false));
-                                par_assert!(loc,typ.weak_eq(&etyp),"Error: Incompatible types for contract\nExpected: {}\nFound: {}",etyp.to_string(false),typ.to_string(false));
+                                let etyp = typ_expect!(loc, externContract.InputPool.pop(), "Error: Additional arguments provided for external that doesn't take in any more arguments!\nExpected: Nothing\nFound: {}\n",typ.to_string(false));
+                                typ_assert!(loc,etyp.weak_eq(&typ),"Error: Incompatible types for contract\nExpected: {}\nFound: {}",etyp.to_string(false),typ.to_string(false));
                             }
                         },
                     }
@@ -3787,23 +3837,23 @@ fn type_check_scope(build: &BuildProgram, program: &CmdProgram, scope: TCScopeTy
             Instruction::DIV(_, _)           => {},
             Instruction::EQUALS(_, _)        => {},
             Instruction::CALL(funcn, args)             => {
-                let function = par_expect!(loc, build.functions.get(funcn), "Error: unknown function call to {}, Function may not exist!",funcn);
+                let function = typ_expect!(loc, build.functions.get(funcn), "Error: unknown function call to {}, Function may not exist!",funcn);
                 let mut functionIP = function.contract.Inputs.clone();
                 
                 for arg in args {
                     match &arg.typ {
                         CallArgType::LOCALVAR(name) => {
-                            let (_,etyp) = par_expect!(loc, functionIP.pop_back(), "Error: Additional arguments provided for external that doesn't take in any more arguments!");
+                            let (_,etyp) = typ_expect!(loc, functionIP.pop_back(), "Error: Additional arguments provided for external that doesn't take in any more arguments!");
                             
                             let local = scope.get_locals(build).unwrap().get(name).unwrap();
-                            par_assert!(loc,local.weak_eq(&etyp),"Error: Incompatible types for contract\nExpected: {}\nFound: ({}) {}",etyp.to_string(false),name,local.to_string(false));
+                            typ_assert!(loc,etyp.weak_eq(&local),"Error: Incompatible types for contract\nExpected: {}\nFound: ({}) {}",etyp.to_string(false),name,local.to_string(false));
                         },
                         CallArgType::REGISTER(_) => todo!("Registers are still yet unhandled!"),
                         CallArgType::CONSTANT(Const) => {
                             let typs = Const.to_type(build);
                             for typ in typs {
-                                let (_,etyp) = par_expect!(loc, functionIP.pop_back(), "Error: Additional arguments provided for external that doesn't take in any more arguments!\nExpected: Nothing\nFound: {}\n",typ.to_string(false));
-                                par_assert!(loc,typ.weak_eq(&etyp),"Error: Incompatible types for contract\nExpected: {}\nFound: {}",etyp.to_string(false),typ.to_string(false));
+                                let (_,etyp) = typ_expect!(loc, functionIP.pop_back(), "Error: Additional arguments provided for external that doesn't take in any more arguments!\nExpected: Nothing\nFound: {}\n",typ.to_string(false));
+                                typ_assert!(loc,etyp.weak_eq(&typ),"Error: Incompatible types for contract\nExpected: {}\nFound: {}",etyp.to_string(false),typ.to_string(false));
                             }
                         },
                     }
@@ -3832,7 +3882,7 @@ fn type_check_scope(build: &BuildProgram, program: &CmdProgram, scope: TCScopeTy
     }
     if scope.is_func() {
         if rs_stack != scope.get_contract(build).unwrap().Outputs {
-            com_warn!(scope.get_location(build).unwrap(),"Error: Mismatched types for output");
+            typ_warn!(scope.get_location(build).unwrap(),"Error: Mismatched types for output");
             for typ in rs_stack.iter() {
                 eprintln!("   {}",typ.to_string(false).to_uppercase());
             }
@@ -4098,7 +4148,7 @@ fn main() {
     Definitions.insert("char".to_string(), VarType::CHAR);
     Definitions.insert("long".to_string(), VarType::LONG);
     Definitions.insert("bool".to_string(), VarType::BOOLEAN);
-    Definitions.insert("ptr".to_string(), VarType::PTR(PtrTyp::VOID));
+    Definitions.insert("ptr".to_string(), VarType::PTR(Ptr{ typ: PtrTyp::VOID, inner_ref: 0}));
     Definitions.insert("short".to_string(), VarType::SHORT);
     //assert!(!program.path.is_empty(),"Error: expected program.path but found nothing!");
     if program.path.is_empty() {
@@ -4179,20 +4229,21 @@ fn main() {
 
 /*
 - [x] TODO: No point in keeping params and localvars seperate once we set LOCALVAR onto the stack instead of the CALLSTACK
-- [ ] TODO: Add EOL (End of line) token
 - [x] TODO: remove warn_rax_usage
-- [ ] TODO: Fix checking for UUID overloading in includes
-- [ ] TODO: implement macros for assert, expect etc. for type checking
+- [x] TODO: Fix checking for UUID overloading in includes
+- [x] TODO: implement macros for assert, expect etc. for type checking
+- [x] TODO: implement pointers for the lexer (like *char *int **void etc.)
 - [ ] TODO: Add dynamic linking with dlls with dll_import dll_export
-- [ ] TODO: implement pointers for the lexer (like *char *int **void etc.)
 - [ ] TODO: implement booleans
 - [ ] TODO: Implement the rest of the floating point arithmetic registers
 - [ ] TODO: Implement local variables for normal scopes
 - [ ] TODO: Fix returning from functions
 - [ ] TODO: Add 'result' as a part of OfP for calling the function and getting its result
-- [ ] TODO: Add expressions like a+b*c etc. 
 - [ ] TODO: Implement if statements as well as else statements
 - [ ] TODO: Add more examples like OpenGL examples, native Windows examples with linking to kernel.dll etc.
+- [ ] TODO: Add some quality of life things such as __FILE__ __LINE__
+- [ ] TODO: Add expressions like a+b*c etc. 
+- [ ] TODO: Add EOL (End of line) token
 
 
 - [/] TODO: Make callraw use reference to UUID and name instead of raw when typechecking

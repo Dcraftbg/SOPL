@@ -6,7 +6,7 @@ const C = 4l 5l + ;
 const D = A B C + + ;
 const Hello = "Hello"c;
 const World = "World"c;
-const HelloWorld = Hello World + ;
+const HelloWorld: *char = Hello World + ;
 
 func main() {
     printf("%ld"c,D);
