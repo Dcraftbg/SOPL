@@ -6,7 +6,7 @@
 #![allow(unreachable_patterns)]
 
 use core::{num, panic};
-use std::{env, process::{exit, Command, Stdio}, path::{Path, PathBuf}, ffi::OsStr, str::{FromStr, Chars}, collections::{HashMap, HashSet}, hash::Hash, fs::{File, self}, io::{Read, Write, self}, fmt::format, borrow::{BorrowMut, Borrow}, clone, time::{SystemTime, Instant}, rc::Rc, iter::Peekable, cell::{RefCell, Ref, RefMut}, ops::{Deref, DerefMut}, vec, sync::Arc, os, f32::consts::E};
+use std::{env, process::{exit, Command, Stdio}, path::{Path, PathBuf}, ffi::OsStr, str::{FromStr, Chars}, collections::{HashMap, HashSet}, hash::Hash, fs::{File, self}, io::{Read, Write, self}, fmt::format, borrow::{BorrowMut, Borrow}, clone, time::{SystemTime, Instant}, rc::Rc, iter::Peekable, cell::{RefCell, Ref, RefMut}, ops::{Deref, DerefMut}, vec, sync::Arc, os, f32::consts::E, any::Any};
 use linked_hash_map::LinkedHashMap;
 use serde_json::Value;
 use uuid::Uuid; 
@@ -261,16 +261,27 @@ impl ArcOps {
     
 }
 #[derive(Debug,Clone)]
+struct ArcFlags {
+    nasm: Vec<String>
+}
+impl ArcFlags {
+    fn new() -> Self {
+        Self { nasm: Vec::new() }
+    }
+}
+#[derive(Debug,Clone)]
 struct Architecture {
     bits: u32,
     platform: String,
     options: ArcOps,
     func_prefix: String,
     cextern_prefix: String,
+    obj_extension: String,
+    flags: ArcFlags
 }
 impl Architecture {
     fn new() -> Self {
-        Self { bits: 32, platform: String::new(),options: ArcOps::new(), func_prefix: String::new(), cextern_prefix: String::new() }
+        Self { bits: 32, platform: String::new(),options: ArcOps::new(), func_prefix: String::new(), cextern_prefix: String::new(), obj_extension: "o".to_owned(), flags: ArcFlags::new() }
     }
 }
 #[derive(Debug, Clone)]
@@ -303,6 +314,8 @@ impl CmdProgram {
 
 enum IntrinsicType {
     Extern = 0,
+    DLL_IMPORT,
+    DLL_EXPORT,
     Func,
     RS,
     Let,
@@ -456,6 +469,12 @@ impl IntrinsicType {
             IntrinsicType::CLOSEANGLE => {
                 if isplural {"Close angle brackets".to_string()} else {"Close angle bracket".to_string().to_string()}
             },
+            IntrinsicType::DLL_IMPORT => {
+                if isplural {"Dll Imports".to_string()} else {"Dll Import".to_string().to_string()}
+            },
+            IntrinsicType::DLL_EXPORT => {
+                if isplural {"Dll Exports".to_string()} else {"Dll Export".to_string().to_string()}
+            },
         }
     }
 }
@@ -530,6 +549,24 @@ struct Token {
 impl Token {
     fn loc_display(&self) -> String {
         self.location.loc_display()
+    }
+    fn is_word(&self) -> bool {
+        match self.typ {
+            TokenType::WordType(_) => true,
+            _ => false
+        }
+    }
+    fn unwrap_word(&self) -> Option<&String> {
+        match &self.typ {
+            TokenType::WordType(data) => Some(data),
+            _ => None
+        }
+    }
+    fn unwrap_string(&self) -> Option<&String> {
+        match &self.typ {
+            TokenType::StringType(data) => Some(data),
+            _ => None
+        }
     }
 }
 struct Lexer<'a> {
@@ -929,7 +966,6 @@ impl ExternalType {
         }
     }
 }
-
 #[repr(u32)]
 #[derive(Clone, Copy,Debug, PartialEq)]
 enum Register {
@@ -1824,11 +1860,22 @@ struct RawConstValue {
 }
 type RawConstants = HashMap<String, RawConstValue>;
 #[derive(Debug)]
+struct DLL_import {
+    from: String,
+    contract: AnyContract
+}
+#[derive(Debug)]
+struct DLL_export {
+    contract: AnyContract
+}
+#[derive(Debug)]
 struct BuildProgram {
     externals:    HashMap<String,External>,
     functions:    HashMap<String, Function>,
     stringdefs:   HashMap<Uuid,ProgramString>,
-    constdefs:    HashMap<String, RawConstValue>
+    constdefs:    HashMap<String, RawConstValue>,
+    dll_imports:  HashMap<String, DLL_import>,
+    dll_exports:  HashMap<String, DLL_export>
 }
 impl BuildProgram {
     fn insert_unique_str(&mut self, str: ProgramString) -> Uuid {
@@ -1838,6 +1885,18 @@ impl BuildProgram {
         }
         self.stringdefs.insert(UUID.clone(), str);
         UUID
+    }
+    fn contains_symbol(&self, str: &String) -> bool {
+        self.constdefs.contains_key(str) || self.dll_imports.contains_key(str) || self.externals.contains_key(str) || self.functions.contains_key(str)
+    }
+    fn get_contract_of_symbol(&self, str: &String) -> Option<&AnyContract> {
+        if let Some(ext) = self.externals.get(str) {
+            return ext.contract.as_ref()
+        }
+        else if let Some(dll_import) = self.dll_imports.get(str) {
+            return Some(&dll_import.contract)
+        }
+        None
     }
 }
 
@@ -1934,25 +1993,6 @@ impl FunctionContract {
             o
         }, Outputs: self.Outputs.clone() }
     }
-    // fn get_offset_of_param(&self, name: &String, stack_size: i64, Contract: &FunctionContract, program: &CmdProgram) -> (usize,usize) {
-    //     let i = Contract.Inputs.get(name).unwrap().clone();
-    //     let osize = (&Contract.InputPool[i].get_size(program)).clone();
-    //     let result = stack_size as usize+{
-    //         let mut o: usize = 0;
-    //         for typ in &Contract.InputPool[i..] {
-    //             o+=typ.get_size(program)
-    //         }
-    //         o
-    //     }+{
-    //          let mut o: usize = 0;
-    //          for i in Contract.Outputs.iter() {
-    //              o += i.get_size(program)
-    //          }
-    //          o
-    //     }-osize;
- 
-    //     (result,osize)
-    // }
 }
 #[derive(Debug, Clone)]
 struct AnyContract {    
@@ -2324,7 +2364,7 @@ fn contains_local<'a>(currentLocals: &'a Vec<Locals>, name: &String) -> bool {
     false
 }
 fn parse_tokens_to_build(lexer: &mut Lexer, program: &mut CmdProgram) -> BuildProgram {
-    let mut build: BuildProgram = BuildProgram { externals: HashMap::new(), functions: HashMap::new(),stringdefs: HashMap::new(), constdefs: HashMap::new()};
+    let mut build: BuildProgram = BuildProgram { externals: HashMap::new(), functions: HashMap::new(),stringdefs: HashMap::new(), constdefs: HashMap::new(), dll_imports: HashMap::new(), dll_exports: HashMap::new() };
     let mut scopeStack: ScopeStack = vec![];
     let mut currentLocals: Vec<Locals> = Vec::new();
     while let Some(token) = lexer.next() {
@@ -2334,6 +2374,11 @@ fn parse_tokens_to_build(lexer: &mut Lexer, program: &mut CmdProgram) -> BuildPr
                 let currentScope = getTopMut(&mut scopeStack).unwrap();
                 par_assert!(token,currentScope.body_is_some(), "Error: can not insert word operation at the top level of a {} as it does not support instructions",currentScope.typ.to_string(false));
                 if build.externals.contains_key(word) {
+                    let contract = parse_argument_contract(lexer, &mut build, &currentLocals);
+                    let body = currentScope.body_unwrap_mut().unwrap();
+                    body.push((token.location.clone(),Instruction::CALLRAW(word.clone(), contract)));
+                    continue;
+                } else if build.dll_imports.contains_key(word) {
                     let contract = parse_argument_contract(lexer, &mut build, &currentLocals);
                     let body = currentScope.body_unwrap_mut().unwrap();
                     body.push((token.location.clone(),Instruction::CALLRAW(word.clone(), contract)));
@@ -2385,8 +2430,9 @@ fn parse_tokens_to_build(lexer: &mut Lexer, program: &mut CmdProgram) -> BuildPr
                         let externType = par_expect!(lexer.currentLocation,externType,"Error: Unexpected abtrupt end of tokens in extern");
                         match externType.typ {
                             TokenType::WordType(Word) => {
+                                par_assert!(lexer.currentLocation, !build.contains_symbol(&Word), "Error: Redifinition of existing symbol {}",Word);
                                 let mut contract: Option<AnyContract> = None;
-                       
+                                
                                 if let Some(tok) = lexer.peekable().peek() {
                                     if tok.typ == TokenType::IntrinsicType(IntrinsicType::OPENPAREN) {
                                         let tok = tok.clone();
@@ -2399,7 +2445,6 @@ fn parse_tokens_to_build(lexer: &mut Lexer, program: &mut CmdProgram) -> BuildPr
                                 }
                                 build.externals.insert(Word,External { typ: ExternalType::RawExternal, loc: externType.location.clone(), contract});
                             }
-                            TokenType::IntrinsicType(_) => assert!(false,"Unexpected behaviour! expected type Word or String but found Intrinsic"),
                             TokenType::StringType(Type) => {
                                 match Type.as_str() {
                                     "C" => {
@@ -2407,6 +2452,7 @@ fn parse_tokens_to_build(lexer: &mut Lexer, program: &mut CmdProgram) -> BuildPr
                                         let externWord = externWord.expect("Error: C type extern defined but stream of tokens abruptly ended!");
                                         match externWord.typ {
                                             TokenType::WordType(Word) => {
+                                                par_assert!(lexer.currentLocation, !build.contains_symbol(&Word), "Error: Redifinition of existing symbol {}",Word);
                                                 let mut contract: Option<AnyContract> = None;
                                                 if let Some(tok) = lexer.peekable().peek() {
                                                     if tok.typ == TokenType::IntrinsicType(IntrinsicType::OPENPAREN) {
@@ -2446,7 +2492,7 @@ fn parse_tokens_to_build(lexer: &mut Lexer, program: &mut CmdProgram) -> BuildPr
                         let funcName: Token = par_expect!(lexer.currentLocation,funcName,"Unexpected abtrupt end of tokens in func");
                         match funcName.typ {
                             TokenType::WordType(Word) => {
-                                
+                                par_assert!(lexer.currentLocation, !build.contains_symbol(&Word), "Error: Redifinition of existing symbol {}",Word);
                                 par_assert!(token,build.functions.get(&Word).is_none(),"Multiply defined symbols {}!",Word);
                                 let contract = parse_function_contract(lexer);
                                 lexer.CurrentFuncs.insert(Word.clone());
@@ -2617,6 +2663,7 @@ fn parse_tokens_to_build(lexer: &mut Lexer, program: &mut CmdProgram) -> BuildPr
                                 par_error!(first, "Unexpected token type! Expected word but found {}",first.typ.to_string(false));
                             }
                         };
+                        par_assert!(first, !build.contains_symbol(&name) || build.constdefs.contains_key(&name), "Error: Cannot define constant {} as that would redefine a symbol of a different type!",name);
                         let first = lexer.next();
                         let first = par_expect!(lexer.currentLocation,first,"abruptly ran out of tokens in constant name definition");
                         let mut expect_type: Option<VarType> = None;
@@ -2687,7 +2734,7 @@ fn parse_tokens_to_build(lexer: &mut Lexer, program: &mut CmdProgram) -> BuildPr
                         let loc = nametok.location.clone();
                         match nametok.typ {
                             TokenType::WordType(name) => {
-                                par_assert!(loc, !build.constdefs.contains_key(&name) && !lexer.CurrentFuncs.contains(&name), "Error: multiply defined symbols");
+                                par_assert!(loc, !build.contains_symbol(&name), "Error: Redifinition of existing symbol {}",name);
                                 par_assert!(token, scopeStack.len() > 0 && getTopMut(&mut scopeStack).unwrap().body_is_some(), "Error: Unexpected multiply intrinsic outside of scope! Scopes of type {} do not support instructions!",getTopMut(&mut scopeStack).unwrap().typ.to_string(false));
                                 let currentScope = getTopMut(&mut scopeStack).unwrap();
                                 let typ = par_expect!(lexer.currentLocation, lexer.next(), "Error: abruptly ran out of tokens for let type");                                
@@ -2770,6 +2817,25 @@ fn parse_tokens_to_build(lexer: &mut Lexer, program: &mut CmdProgram) -> BuildPr
                     IntrinsicType::CAST => todo!(),
                     IntrinsicType::OPENANGLE => todo!(),
                     IntrinsicType::CLOSEANGLE => todo!(),
+                    IntrinsicType::DLL_IMPORT => {
+                        let ntok = par_expect!(lexer.currentLocation, lexer.next(), "Error: Abruptly ran out of tokens for DLL_IMPORT");
+                        let file_from = par_expect!(ntok, ntok.unwrap_string(), "Error: Expected token string but found {}",ntok.typ.to_string(false));
+                        let ntok = par_expect!(lexer.currentLocation, lexer.next(), "Error: Abruptly ran out of tokens for DLL_IMPORT");
+                        let symbol_name = par_expect!(ntok,ntok.unwrap_word(), "Error: Expected token word but found {}",ntok.typ.to_string(false));
+                        par_assert!(ntok, !build.contains_symbol(symbol_name), "Error: Trying to overwrite already existing symbol! {}",symbol_name);
+                        let ntok = par_expect!(lexer.currentLocation, lexer.next(), "Error: Abruptly ran out of tokens for DLL_IMPORT");
+                        par_assert!(ntok, ntok.typ == TokenType::IntrinsicType(IntrinsicType::OPENPAREN), "Error: Unexpected symbol {} in DLL_IMPORT! {}",ntok.typ.to_string(false),symbol_name);
+                        let symbol_contract = parse_any_contract(lexer);
+                        build.dll_imports.insert(symbol_name.clone(), DLL_import { from: file_from.clone(), contract: symbol_contract });
+                    },
+                    IntrinsicType::DLL_EXPORT => {
+                        let ntok = par_expect!(lexer.currentLocation, lexer.next(), "Error: Abruptly ran out of tokens for DLL_EXPORT");
+                        let symbol_name = par_expect!(ntok,ntok.unwrap_word(), "Error: Expected token word but found {}",ntok.typ.to_string(false));
+                        let ntok = par_expect!(lexer.currentLocation, lexer.next(), "Error: Abruptly ran out of tokens for DLL_EXPORT");
+                        par_assert!(ntok, ntok.typ == TokenType::IntrinsicType(IntrinsicType::OPENPAREN), "Error: Unexpected symbol {} in DLL_EXPORT! {}",ntok.typ.to_string(false),symbol_name);
+                        let symbol_contract = parse_any_contract(lexer);
+                        build.dll_exports.insert(symbol_name.clone(), DLL_export { contract: symbol_contract });
+                    },
                 }
             }
             TokenType::StringType(_) => {
@@ -2893,22 +2959,18 @@ fn parse_tokens_to_build(lexer: &mut Lexer, program: &mut CmdProgram) -> BuildPr
 }
 
 struct optim_ops {
-    should_use_callstack: bool,
     usedStrings: HashMap<Uuid, String>,
     usedExterns: HashSet<String>,
     usedFuncs: HashSet<String>,
 }
 impl optim_ops {
     fn new() -> Self{
-        Self { should_use_callstack: false, usedStrings: HashMap::new(), usedExterns: HashSet::new(), usedFuncs: HashSet::new() }
+        Self { usedStrings: HashMap::new(), usedExterns: HashSet::new(), usedFuncs: HashSet::new() }
     }
 }
 fn optimization_ops_scope(build: &BuildProgram, program: &CmdProgram, scope: TCScopeType, out: &mut optim_ops,fn_name: String) {
     for (_,op) in scope.get_body(build).iter() {
         match op {
-            Instruction::DEFVAR(_) => {
-                out.should_use_callstack = true;
-            }
             Instruction::CALLRAW(r, args) => {
                 
                 for arg in args {
@@ -2962,7 +3024,7 @@ fn optimization_ops(build: &mut BuildProgram, program: &CmdProgram) -> optim_ops
             }
             out
         },
-        OptimizationMode::DEBUG => optim_ops { should_use_callstack: true, usedStrings: HashMap::new(), usedExterns: HashSet::new(), usedFuncs: HashSet::new() },
+        OptimizationMode::DEBUG => optim_ops { usedStrings: HashMap::new(), usedExterns: HashSet::new(), usedFuncs: HashSet::new() },
     }
 }
 fn nasm_x86_64_prep_args(program: &CmdProgram, build: &BuildProgram, f: &mut File,mut _econtract: AnyContract,contract: &Vec<CallArg>, stack_size: &mut usize, _: ProgramLocation, local_vars: &HashMap<String, LocalVariable>) -> io::Result<()>{
@@ -3408,10 +3470,14 @@ fn nasm_x86_64_handle_scope(f: &mut File, build: &BuildProgram, program: &CmdPro
                 
             }
             Instruction::CALLRAW(Word, contract) => {
-                nasm_x86_64_prep_args(program, build, f, build.externals.get(Word).unwrap().contract.as_ref().expect("TODO: implement rawcall without contract").clone(), contract, &mut stack_size, loc.clone(), &local_vars)?;
+                nasm_x86_64_prep_args(program, build, f, build.get_contract_of_symbol(Word).expect("TODO: implement rawcall without contract").clone(), contract, &mut stack_size, loc.clone(), &local_vars)?;
                 writeln!(f, "   xor rax, rax")?;
-                let external = build.externals.get(Word).unwrap();
-                writeln!(f, "   call {}{}{}",external.typ.prefix(program),Word,external.typ.suffix())?;
+                if let Some(external) = build.externals.get(Word) {
+                    writeln!(f, "   call {}{}{}",external.typ.prefix(program),Word,external.typ.suffix())?;
+                }
+                else {
+                    writeln!(f, "   call {}",Word)?;
+                }
                 if let Some(ops) = program.architecture.options.argumentPassing.custom_get() {
                     if ops.shadow_space > 0 {
                         writeln!(f, "   add rsp, {}",ops.shadow_space)?;
@@ -3656,21 +3722,22 @@ fn to_nasm_x86_64(build: &mut BuildProgram, program: &CmdProgram) -> io::Result<
             }
         }
     }
-    if optimization.should_use_callstack {
-        // writeln!(&mut f, "section .bss")?;
-        // writeln!(&mut f, "   _CALLSTACK: resb {}",program.call_stack_size)?;
-        // writeln!(&mut f, "   _CALLSTACK_TOP: ")?;
-        // writeln!(&mut f, "   _CALLSTACK_BUF_PTR: resd 1")?;
+    for (dll_import_name,_) in build.dll_imports.iter() {
+        writeln!(&mut f, "extern {}",dll_import_name)?;
+        //writeln!(&mut f, "import {} {}",dll_import_name,dll_import.from)?;
+    }
+    for (dll_export_name,_dll_export) in build.dll_exports.iter() {
+        writeln!(&mut f, "global {}",dll_export_name)?;
     }
     for function_name in build.functions.keys() {
         if function_name == "main" {    
             writeln!(&mut f,"global {}{}",program.architecture.func_prefix,function_name)?;
         }
         else {
-            if program.in_mode == OptimizationMode::DEBUG || !program.remove_unused_functions || optimization.usedFuncs.contains(function_name){
-                writeln!(&mut f,"global {}{}",program.architecture.func_prefix,function_name)?;
-            }
-            else if program.print_unused_warns && program.print_unused_funcs {
+            // if program.in_mode == OptimizationMode::DEBUG || !program.remove_unused_functions || optimization.usedFuncs.contains(function_name){
+            //     writeln!(&mut f,"global {}{}",program.architecture.func_prefix,function_name)?;
+            // }
+            if program.in_mode != OptimizationMode::DEBUG && program.remove_unused_functions && !optimization.usedFuncs.contains(function_name) && program.print_unused_warns && program.print_unused_funcs {
                 println!("[NOTE] {}: Unused function: \"{}\"", build.functions.get(function_name).unwrap().location.loc_display(),function_name);
             }
         }
@@ -3811,7 +3878,7 @@ fn type_check_scope(build: &BuildProgram, program: &CmdProgram, scope: TCScopeTy
             Instruction::DEFVAR(_)           => {},
             Instruction::MOV(_, _)           => {},
             Instruction::CALLRAW(name,contract)        => {
-                let mut externContract = build.externals.get(name).unwrap().contract.as_ref().unwrap_or(&AnyContract { InputPool: vec![], Outputs: vec![] }).clone();
+                let mut externContract = build.get_contract_of_symbol(name).unwrap_or(&AnyContract { InputPool: vec![], Outputs: vec![] }).clone();//build.externals.get(name).unwrap().contract.as_ref().unwrap_or(&AnyContract { InputPool: vec![], Outputs: vec![] }).clone();
                 externContract.InputPool.reverse();
                 for arg in contract {
                     match &arg.typ {
@@ -3921,7 +3988,7 @@ fn usage(program: &String) {
              "                                                The name is very deceiving but callstack is now only used for locals as of 0.0.6A (checkout versions.md)",
              "                                                [NOTE] it is planned for -callstack to be deprecated for instead using the stack as a way to store variables with the new function system");
     println!("         -arc (builtin arc)                  -> builds for a builtin architecture");
-    println!("         -arc | (path to custom arc)         -> builds for a custom architecture following the syntax described in ./examples/arcs");
+    println!("         -arc - (path to custom arc)         -> builds for a custom architecture following the syntax described in ./examples/arcs");
     println!("--------------------------------------------");
 }
 fn dump_tokens(lexer: &mut Lexer) {
@@ -3961,6 +4028,20 @@ fn json_to_arc(json: &serde_json::Map<String, Value>) -> Architecture {
         },
         func_prefix: json.get("func_prefix").expect("Error: expected func_prefix but found nothing!").as_str().expect("Value of func_prefix must be string").to_string(),
         cextern_prefix: json.get("cextern_prefix").expect("Error: expected cextern_prefix but found nothing!").as_str().expect("Value of cextern_prefix must be string").to_string(),
+        obj_extension: json.get("obj-extension").expect("Error: expected obj_extension but found nothing!").as_str().expect("Value of obj_extension must be string").to_string(),
+        flags: {
+            let mut o: ArcFlags = ArcFlags { nasm: vec![] };
+            let flagsObj = json.get("flags").expect("Error: expected flags but found nothing!").as_object().expect("Error: Value of flags must be an object!");
+            o.nasm = {
+                let mut o: Vec<String> = Vec::new();
+                let nasm_flags = flagsObj.get("nasm").expect("Error: expected nasm flags but found nothing!").as_array().expect("Error: Value of nasm flags must be an array");
+                for val in nasm_flags {
+                    o.push(val.as_str().expect("Value of flag in nasm must be a string!").to_owned());
+                }
+                o
+            };
+            o
+        },
     };
     oarc
 }
@@ -3969,7 +4050,7 @@ fn list_targets(indent: usize){
     println!("{}- nasm_x86_64",indent);
 }
 fn main() {
-    //#[cfg(not(debug_assertions))]
+    #[cfg(not(debug_assertions))]
     std::panic::set_hook(Box::new(|panic_info| {
         
         if let Some(e) = panic_info.payload().downcast_ref::<String>() {
@@ -3996,10 +4077,10 @@ fn main() {
     program.opath = Path::new(&program.path).with_extension(".asm").to_str().unwrap().to_string();
     let mut Architectures: HashMap<String, Architecture> = HashMap::new();
     use Register::*;
-    Architectures.insert("windows_x86_64".to_owned(), Architecture { bits: 64, platform: "windows".to_string(), cextern_prefix: "".to_owned(), func_prefix:"".to_owned(), options: ArcOps { argumentPassing: ArcPassType::CUSTOM(ArcCustomOps { nums_ptrs: Some(vec![RCX, RDX,R8,R9]), floats: Some(vec![XMM0,XMM1,XMM2,XMM3]), returns: Some(vec![RAX]), on_overflow_stack: true, shadow_space: 32}) } });
-    Architectures.insert("windows_x86".to_owned(),    Architecture { bits: 32, platform: "windows".to_string(), cextern_prefix: "_".to_owned(), func_prefix:"_".to_owned(), options: ArcOps { argumentPassing: ArcPassType::PUSHALL }});
-    Architectures.insert("linux_x86_64".to_owned(),   Architecture { bits: 64, platform: "linux".to_string()  , cextern_prefix: "".to_owned(), func_prefix:"".to_owned(), options: ArcOps { argumentPassing: ArcPassType::CUSTOM(ArcCustomOps { nums_ptrs: Some(vec![RDI, RSI,RDX,RCX,R8,R9]), floats: Some(vec![XMM0,XMM1,XMM2,XMM3]), returns: Some(vec![RAX]), on_overflow_stack: true, shadow_space: 0 }) } });
-    Architectures.insert("linux_x86".to_owned(),      Architecture { bits: 32, platform: "linux".to_string()  , cextern_prefix: "_".to_owned(), func_prefix:"_".to_owned(), options: ArcOps { argumentPassing: ArcPassType::PUSHALL }});
+    Architectures.insert("windows_x86_64".to_owned(), Architecture { bits: 64, platform: "windows".to_string(), cextern_prefix: "".to_owned(),  func_prefix:"".to_owned(),  options: ArcOps { argumentPassing: ArcPassType::CUSTOM(ArcCustomOps { nums_ptrs: Some(vec![RCX, RDX,R8,R9]), floats: Some(vec![XMM0,XMM1,XMM2,XMM3]), returns: Some(vec![RAX]), on_overflow_stack: true, shadow_space: 32}) }        , obj_extension: "obj".to_owned(), flags: ArcFlags { nasm: vec!["-f".to_string(),"win64".to_string()] }});
+    Architectures.insert("windows_x86".to_owned(),    Architecture { bits: 32, platform: "windows".to_string(), cextern_prefix: "_".to_owned(), func_prefix:"_".to_owned(), options: ArcOps { argumentPassing: ArcPassType::PUSHALL }                                                                                                                                                                            , obj_extension: "obj".to_owned(), flags: ArcFlags { nasm: vec!["-f".to_string(),"win32".to_string()] }});
+    Architectures.insert("linux_x86_64".to_owned(),   Architecture { bits: 64, platform: "linux".to_string()  , cextern_prefix: "".to_owned(),  func_prefix:"".to_owned(),  options: ArcOps { argumentPassing: ArcPassType::CUSTOM(ArcCustomOps { nums_ptrs: Some(vec![RDI, RSI,RDX,RCX,R8,R9]), floats: Some(vec![XMM0,XMM1,XMM2,XMM3]), returns: Some(vec![RAX]), on_overflow_stack: true, shadow_space: 0 }) }, obj_extension: "o".to_owned()  , flags: ArcFlags { nasm: vec!["-f".to_string(),"elf64".to_string()] }});
+    Architectures.insert("linux_x86".to_owned(),      Architecture { bits: 32, platform: "linux".to_string()  , cextern_prefix: "_".to_owned(), func_prefix:"_".to_owned(), options: ArcOps { argumentPassing: ArcPassType::PUSHALL }                                                                                                                                                                            , obj_extension: "o".to_owned()  , flags: ArcFlags { nasm: vec!["-f".to_string(),"elf64".to_string()] }});
     //short calls
     Architectures.insert("win_x86_64".to_owned(), Architectures.get("windows_x86_64").unwrap().clone());
     Architectures.insert("win_x86".to_owned(), Architectures.get("windows_x86").unwrap().clone());
@@ -4078,9 +4159,9 @@ fn main() {
                 }
                 "-arc" => {
                     let val = args.get(i+1).expect("Error: Unexpected built-in target or path to json");
-                    if val == "|" {
-                        let path = Path::new(args.get(i+1).expect("Error: Path not specified for -arc"));
-                        let ext = path.extension().expect("Error: Path provided doesn't have an extension!");
+                    if val == "-" {
+                        let path = Path::new(args.get(i+2).expect("Error: Path not specified for -arc"));
+                        let ext = path.extension().expect(&format!("Error: Path provided doesn't have an extension! Path: '{:?}'",path));
                         let ext = ext.to_str().unwrap();
                         assert!(ext=="json","Error: only accepting arc files with the json format!");
                         assert!(path.is_file() && path.exists(), "Error: path provided '{:?}' is not a file or does not exist!",path);
@@ -4119,6 +4200,8 @@ fn main() {
     }
     let mut Intrinsics: HashMap<String,IntrinsicType> = HashMap::new();
     Intrinsics.insert("extern".to_string(), IntrinsicType::Extern);
+    Intrinsics.insert("dll_import".to_string(), IntrinsicType::DLL_IMPORT);
+    Intrinsics.insert("dll_export".to_string(), IntrinsicType::DLL_EXPORT);
     Intrinsics.insert("let".to_string(), IntrinsicType::Let);
     Intrinsics.insert("func".to_string()  , IntrinsicType::Func);
     Intrinsics.insert("include".to_string(), IntrinsicType::INCLUDE);
@@ -4174,10 +4257,15 @@ fn main() {
             to_nasm_x86_64(&mut build, &program).expect("Could not build to nasm_x86_64");
             if program.should_build {
                 println!("-------------");
-                println!("   * nasm -f elf64 {}",program.opath.as_str());
-                let nasm = Command::new("nasm").args(["-f","elf64",program.opath.as_str()]).output().expect("Could not build nasm!");
-                println!("   * gcc -m64 {}",[Path::new(program.opath.as_str()).with_extension("o").to_str().unwrap(),"-m64","-o",Path::new(program.opath.as_str()).with_extension("").to_str().unwrap()].join(" "));
-                let gcc  = Command::new("gcc").args([Path::new(program.opath.as_str()).with_extension("o").to_str().unwrap(),"-o",Path::new(program.opath.as_str()).with_extension("").to_str().unwrap()]).output().expect("Could not build gcc!");
+                let mut args = program.architecture.flags.nasm.clone();
+                args.append(&mut vec![program.opath.as_str().to_owned()]);
+                println!("   * nasm {}",args.join(" "));
+                let nasm = Command::new("nasm").args(args).output().expect("Could not build nasm!");
+                let v = Path::new(program.opath.as_str()).with_extension(&program.architecture.obj_extension);
+                let v2 = Path::new(program.opath.as_str()).with_extension("");
+                let args = [v.to_str().unwrap(),"-o",v2.to_str().unwrap(), if program.architecture.bits==64 { "-m64"} else {"-m32"}];
+                println!("   * gcc -m64 {}",args.join(" "));
+                let gcc  = Command::new("gcc").args(args).output().expect("Could not build gcc!");
                 if !nasm.status.success() {
                     println!("--------------");
                     println!("Nasm: \n{:?}\n-----------",nasm);

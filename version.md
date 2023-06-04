@@ -1,8 +1,9 @@
 **(Latest patch versions in github history and at the top of Change Log)**
 
-Newest Version: [0.11.7A](#0117a)
+Newest Version: [0.11.8A](#0118a)
 # Manual:
-  - [0.11.7A](#0117a)
+  - [0.11.8A](#0118a)
+    - [0.11.7A](#0117a)
     - [0.11.6A](#0116a)
     - [0.11.5A](#0115a)
     - [0.11.4A](#0114a)
@@ -30,6 +31,13 @@ Newest Version: [0.11.7A](#0117a)
   - [0.2A](#02a)
   - [0.1A](#01a)
 # Change Log
+ ## 0.11.8A
+   - Fixed architecture examples
+   - Added obj-extension for architectures
+   - Added flags for architectures
+   - Added DLL importing (currently only works as extern)
+   - Added DLL exporting (currently only works as global)
+   - Removed auto-exporting of functions (you need to do dll_export to make them global now)
  ## 0.11.7A
    - Fixed a few bugs to do with string UUID overloading
    - Added pointers with types (*char, **int, etc.)
