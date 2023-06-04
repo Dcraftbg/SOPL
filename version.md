@@ -1,8 +1,10 @@
 **(Latest patch versions in github history and at the top of Change Log)**
 
-Newest Version: [0.11.4A](#0114a)
+Newest Version: [0.11.6A](#0116a)
 # Manual:
-  - [0.11.4A](#0114a)
+  - [0.11.6A](#0116a)
+    - [0.11.5A](#0115a)
+    - [0.11.4A](#0114a)
     - [0.11.3A](#0113a)
     - [0.11.2A](#0112a)
     - [0.11.1A](#0111a)
@@ -27,6 +29,12 @@ Newest Version: [0.11.4A](#0114a)
   - [0.2A](#02a)
   - [0.1A](#01a)
 # Change Log
+ ## 0.11.6A
+   - Changed local variables to now be on the stack
+   - Merged parameters and local variables
+   - Made big changes in terms of how things are handled
+   - Preparing for the introduction of if else elif scopes
+   - Removed OfP::PARAM and replaced it with Localvariable
  ## 0.11.5A
    - Changed flags to be less frustrating and more flexible (checkout [README](README.md#flags-and-versions))
    - Soft disabled return stack (for the upcomming revamp of returning)
