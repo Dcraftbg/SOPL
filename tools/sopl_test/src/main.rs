@@ -97,17 +97,17 @@ const LIGHT_BLUE: &str= "\x1b[96;1m";
 const RESET: &str = "\x1b[0m";
 fn record(epath: &PathBuf, failed: &mut Vec<PathBuf>) {
     let sopl_exe: &str = "target/debug/sopl";
-    let fname = epath.file_name().unwrap().to_str().unwrap();
+    
+    let pname = Path::new(epath.file_name().unwrap()).with_extension("");
+    let fname = pname.to_str().unwrap();
     println!("{LIGHT_BLUE}* Recording {}{RESET}",epath.to_string_lossy());  
-    let compile_sopl = Command::new(sopl_exe).args(["-t", "nasm_x86_64", &format!("examples/{}",fname), "-o", &format!("examples/int/{}.asm", fname), "-b"]).output().expect(&format!("Error: could not run build for {}",fname));
+    let compile_sopl = Command::new(sopl_exe).args(["-t", "nasm_x86_64", &format!("examples/{}.spl",fname), "-o", &format!("examples/int/{}.asm", fname), "-b"]).output().expect(&format!("Error: could not run build for {}",fname));
     if !compile_sopl.status.success() && compile_sopl.status.code().unwrap() != 101 {
         println!("{RED}Record failed for {}. Compiling exited with {}{RESET}",epath.to_string_lossy(),compile_sopl.status.code().unwrap_or(0));
         failed.push(epath.clone());
         return;
     }
     else {
-        let pname = Path::new(epath.file_name().unwrap()).with_extension("");
-        let fname = pname.to_str().unwrap();
         let outpath = format!("./tests/expected/{}.test",fname);
         //println!("Hello {}",outpath);
         let program_run = Command::new(format!("examples/int/{}",fname)).output();
@@ -177,16 +177,17 @@ fn main() {
                     let epath = entry.path();
                     if epath.is_file() && !ignored.contains(&epath.file_name().unwrap().to_str().unwrap().to_owned()){
                         let fname = epath.file_name().unwrap().to_str().unwrap();
-                        println!("{LIGHT_BLUE}* Testing {}{RESET}",epath.to_string_lossy());  
-                        let compile_sopl = Command::new(sopl_exe).args(["-t","nasm_x86_64", &format!("examples/{}",fname), "-o", &format!("examples/int/{}.asm", fname), "-b"]).output().expect(&format!("Error: could not run build for {}",fname));
+                        let pname = Path::new(epath.file_name().unwrap()).with_extension("");
+                        let fname = pname.to_str().unwrap();
+                        println!("{LIGHT_BLUE}* Testing {} ({}){RESET}",epath.to_string_lossy(),fname);  
+                        let compile_sopl = Command::new(sopl_exe).args(["-t","nasm_x86_64", &format!("examples/{}.spl",fname), "-o", &format!("examples/int/{}.asm", fname), "-b"]).output().expect(&format!("Error: could not run build for {}",fname));
                         if !compile_sopl.status.success() && compile_sopl.status.code().unwrap_or(0) != 101{
                             println!("{RED}Test failed for {}. Compiling exited with {}{RESET}\n{:?}",epath.to_string_lossy(),compile_sopl.status.code().unwrap_or(0),String::from_utf8_lossy(&compile_sopl.stderr));
                             failed.push(epath);
                             continue;
                         }
                         else {
-                            let pname = Path::new(epath.file_name().unwrap()).with_extension("");
-                            let fname = pname.to_str().unwrap();
+                            
                             let exp_str = read_to_string(format!("./tests/expected/{}.test",fname));
                             if exp_str.is_err() {
                                 println!("{RED}Test failed for {}. No expected case found at {}{RESET}",epath.to_string_lossy(),format!("./tests/expected/{}.test",fname));

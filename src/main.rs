@@ -340,15 +340,20 @@ enum IntrinsicType {
     SUB,
     MUL,
     DIV,
-    // BOOLEAN OPERATIONS
-    EQ,
     RET,
     INCLUDE,
     IF,
     ELSE,
     
     TOP,
-    CAST
+    CAST,
+    // BOOLEAN OPERATIONS
+    EQUALS,
+    MORETHAN,
+    LESSTHAN,
+    MORETHANEQ,
+    LESSTHANEQ,
+    NOTEQUALS,
 }
 #[derive(Debug,Clone,PartialEq)]
 enum PtrTyp {
@@ -413,7 +418,7 @@ impl IntrinsicType {
                 if isplural {"Push".to_string()} else {"Push".to_string()}
             }
             IntrinsicType::SET => {
-                if isplural {"Move registers".to_string()} else {"Move register".to_string()}
+                if isplural {"Move".to_string()} else {"Move".to_string()}
             }
             IntrinsicType::ADD => {
                 if isplural {"Add".to_string()} else {"Add".to_string()}
@@ -433,9 +438,7 @@ impl IntrinsicType {
             IntrinsicType::IF => {
                 if isplural {"Ifs".to_string()} else {"If".to_string()}
             }
-            IntrinsicType::EQ => {
-                if isplural {"Equals".to_string()} else {"Equal".to_string()}
-            },
+            
             IntrinsicType::CONSTANT => {
                 if isplural {"Constants".to_string()} else {"Constant".to_string()}
             },
@@ -475,6 +478,12 @@ impl IntrinsicType {
             IntrinsicType::DLL_EXPORT => {
                 if isplural {"Dll Exports".to_string()} else {"Dll Export".to_string().to_string()}
             },
+            IntrinsicType::MORETHAN   => if isplural {"Morethan   ".to_string()} else {"Morethan".to_string()},
+            IntrinsicType::LESSTHAN   => if isplural {"Lessthan   ".to_string()} else {"Lessthan".to_string()},
+            IntrinsicType::MORETHANEQ => if isplural {"Morethaneq ".to_string()} else {"Morethaneq".to_string()},
+            IntrinsicType::LESSTHANEQ => if isplural {"Lessthaneq ".to_string()} else {"Lessthaneq".to_string()},
+            IntrinsicType::NOTEQUALS  => if isplural {"Notequals  ".to_string()} else {"Notequals".to_string()},
+            IntrinsicType::EQUALS     => if isplural {"Equals".to_string()     } else {"Equal".to_string()},
         }
     }
 }
@@ -869,7 +878,7 @@ impl Iterator for Lexer<'_> {
                             }
                         }
                     }
-                    else if c == ';' || c==')' || c=='(' || c=='{' || c=='}' || c=='[' || c==']' || c == ',' || c == '>' || c == '<'{
+                    else if c == ';' || c==')' || c=='(' || c=='{' || c=='}' || c=='[' || c==']' || c == ',' {
                         self.cursor += 1;
                         self.currentLocation.character += 1;
                         return Some(Token {typ: TokenType::IntrinsicType(self.Intrinsics.get(&c.to_string()).expect("Unhandled intrinsic :(").clone()), location: self.currentLocation.clone()});
@@ -901,12 +910,12 @@ impl Iterator for Lexer<'_> {
                             else {
                                 //TODO: Maybe a*b could be an issue V Fix this
                                 todo!("Handle situation of unknown pointer! Make it return a Mul and reset back the cursor!");
-                                return None;
+                                
                             }
                         }
                     }
                     else {
-                        while self.is_not_empty() && !c.is_alphabetic() && !c.is_numeric() && !c.is_whitespace() && c != ';' && c!=')' && c!='(' && c!='{' && c!='}' && c!='[' && c!=']' && c!='<' && c!='>' {
+                        while self.is_not_empty() && !c.is_alphabetic() && !c.is_numeric() && !c.is_whitespace() && c != ';' && c!=')' && c!='(' && c!='{' && c!='}' && c!='[' && c!=']'{
                             c = self.cchar_s()?;
                             self.cursor += 1;
                             outstr.push(c);
@@ -1486,7 +1495,7 @@ enum OfP {
     // etc.
 }
 impl OfP { 
-    fn LOIRGNasm(&self, regs: Vec<Register>, f: &mut File, program: &CmdProgram,build: &BuildProgram, local_vars: &HashMap<String, LocalVariable>, stack_size: usize) -> std::io::Result<Vec<Register>>{
+    fn LOIRGNasm(&self, regs: Vec<Register>, f: &mut File, program: &CmdProgram,build: &BuildProgram, local_vars: &HashMap<String, LocalVariable>, stack_size: usize, loc: &ProgramLocation) -> std::io::Result<Vec<Register>>{
         let mut out: Vec<Register> = Vec::with_capacity(regs.len());
         match self {
             OfP::REGISTER(reg2) => {
@@ -1512,10 +1521,10 @@ impl OfP {
                 let osize = lvar.typ.get_size(program);
                 let reg = &regs[0].to_byte_size(osize);
                 if stack_size-lvar.operand == 0 {
-                    writeln!(f, "   mov {}, [rsp]",reg.to_string())?;
+                    writeln!(f, "   mov {}, {} [rsp]",reg.to_string(),size_to_nasm_type(osize))?;
                 }
                 else {
-                    writeln!(f, "   mov {}, [rsp+{}]",reg.to_string(),stack_size-lvar.operand)?;
+                    writeln!(f, "   mov {}, {} [rsp+{}]",reg.to_string(),size_to_nasm_type(osize),stack_size-lvar.operand)?;
                 }
                 out.push(reg.clone());
             },
@@ -1535,7 +1544,7 @@ impl OfP {
                         let str = build.stringdefs.get(val).unwrap();
                         match str.Typ {
                             ProgramStringType::STR => {
-                            
+                                com_assert!(loc,regs.len() > 1, "Error: Cannot load Ofp into register!");
                                 let reg = &regs[0];
                                 let reg1 = &regs[1];
                                 writeln!(f, "   lea {}, [rel _STRING_{}_]",reg.to_string(),val.to_string().replace("-", ""))?;
@@ -1593,20 +1602,26 @@ enum Instruction {
     SUB     (OfP, OfP),
     MUL     (OfP, OfP),
     DIV     (OfP, OfP),
-    EQUALS  (OfP, OfP),
     CALL    (String, CallArgs),
     FNBEGIN (),
     RET     (),
     SCOPEBEGIN,
     SCOPEEND,
-
+    
     // CONDITIONAL_JUMP(usize),
     // JUMP(usize),
     INTERRUPT(i64),
-
+    
     EXPAND_SCOPE(NormalScope),
     EXPAND_IF_SCOPE(NormalScope),
     EXPAND_ELSE_SCOPE(NormalScope),
+
+    EQUALS  (OfP, OfP),
+    MORETHAN  (OfP, OfP),
+    LESSTHAN  (OfP, OfP),
+    MORETHANEQUALS  (OfP, OfP),
+    LESSTHANEQUALS  (OfP, OfP),
+    NOTEQUALS  (OfP, OfP),
 }
 
 #[derive(Debug,Clone,PartialEq)]
@@ -1967,11 +1982,11 @@ impl VarType {
     }
     fn get_size(&self, program: &CmdProgram) -> usize{
         match self {
-            VarType::CHAR => 1,
-            VarType::SHORT => 2,
+            VarType::CHAR    => 1,
+            VarType::SHORT   => 2,
             VarType::BOOLEAN => 1,
-            VarType::INT => 4,
-            VarType::LONG => 8,
+            VarType::INT     => 4,
+            VarType::LONG    => 8,
             VarType::PTR(_) => {
                 match program.architecture.bits{
                     32 => 4,
@@ -2425,6 +2440,39 @@ fn parse_tokens_to_build(lexer: &mut Lexer, program: &mut CmdProgram) -> BuildPr
                                 let ofp2 = par_expect!(token, OfP::from_token(&ofp2_t, &mut build, program,&currentLocals), "Unknown word type: {}!",ofp2_t.typ.to_string(false));
                                 currentScope.body_unwrap_mut().unwrap().push((Op.location.clone(), Instruction::MOV(ofp1, ofp2)))
                             },
+                            IntrinsicType::EQUALS => {
+                                let ofp2_t = par_expect!(lexer.currentLocation,lexer.next(),"Unexpected variable operation or another variable!");
+                                let ofp2 = par_expect!(token, OfP::from_token(&ofp2_t, &mut build, program,&currentLocals), "Unknown word type: {}!",ofp2_t.typ.to_string(false));
+                                currentScope.body_unwrap_mut().unwrap().push((Op.location.clone(), Instruction::EQUALS(ofp1, ofp2)))
+                            }
+                            IntrinsicType::NOTEQUALS => {
+                                let ofp2_t = par_expect!(lexer.currentLocation,lexer.next(),"Unexpected variable operation or another variable!");
+                                let ofp2 = par_expect!(token, OfP::from_token(&ofp2_t, &mut build, program,&currentLocals), "Unknown word type: {}!",ofp2_t.typ.to_string(false));
+                                currentScope.body_unwrap_mut().unwrap().push((Op.location.clone(), Instruction::NOTEQUALS(ofp1, ofp2)))
+                            }
+                            
+                            IntrinsicType::LESSTHAN => {
+                                let ofp2_t = par_expect!(lexer.currentLocation,lexer.next(),"Unexpected variable operation or another variable!");
+                                let ofp2 = par_expect!(token, OfP::from_token(&ofp2_t, &mut build, program,&currentLocals), "Unknown word type: {}!",ofp2_t.typ.to_string(false));
+                                currentScope.body_unwrap_mut().unwrap().push((Op.location.clone(), Instruction::LESSTHAN(ofp1, ofp2)))
+                            }
+                            IntrinsicType::MORETHAN => {
+                                let ofp2_t = par_expect!(lexer.currentLocation,lexer.next(),"Unexpected variable operation or another variable!");
+                                let ofp2 = par_expect!(token, OfP::from_token(&ofp2_t, &mut build, program,&currentLocals), "Unknown word type: {}!",ofp2_t.typ.to_string(false));
+                                currentScope.body_unwrap_mut().unwrap().push((Op.location.clone(), Instruction::MORETHAN(ofp1, ofp2)))
+                            }
+                            IntrinsicType::LESSTHANEQ => {
+                                let ofp2_t = par_expect!(lexer.currentLocation,lexer.next(),"Unexpected variable operation or another variable!");
+                                let ofp2 = par_expect!(token, OfP::from_token(&ofp2_t, &mut build, program,&currentLocals), "Unknown word type: {}!",ofp2_t.typ.to_string(false));
+                                currentScope.body_unwrap_mut().unwrap().push((Op.location.clone(), Instruction::LESSTHANEQUALS(ofp1, ofp2)))
+                            }
+                            IntrinsicType::MORETHANEQ => {
+                                let ofp2_t = par_expect!(lexer.currentLocation,lexer.next(),"Unexpected variable operation or another variable!");
+                                let ofp2 = par_expect!(token, OfP::from_token(&ofp2_t, &mut build, program,&currentLocals), "Unknown word type: {}!",ofp2_t.typ.to_string(false));
+                                currentScope.body_unwrap_mut().unwrap().push((Op.location.clone(), Instruction::MORETHANEQUALS(ofp1, ofp2)))
+                            }
+                            
+                            
                             _ => {
                                 par_error!(Op, "Unexpected intrinsic {} after ofp",typ.to_string(false))
                             }
@@ -2440,7 +2488,7 @@ fn parse_tokens_to_build(lexer: &mut Lexer, program: &mut CmdProgram) -> BuildPr
                                     IntrinsicType::SUB => currentScope.body_unwrap_mut().unwrap().push((Op.location.clone(), Instruction::SUB(ofp1,ofp2))),
                                     IntrinsicType::MUL => currentScope.body_unwrap_mut().unwrap().push((Op.location.clone(), Instruction::MUL(ofp1,ofp2))),
                                     IntrinsicType::DIV => currentScope.body_unwrap_mut().unwrap().push((Op.location.clone(), Instruction::DIV(ofp1,ofp2))),
-                                    IntrinsicType::EQ  => currentScope.body_unwrap_mut().unwrap().push((Op.location.clone(), Instruction::EQUALS(ofp1,ofp2))),
+                                    IntrinsicType::EQUALS  => currentScope.body_unwrap_mut().unwrap().push((Op.location.clone(), Instruction::EQUALS(ofp1,ofp2))),
                                     _ => {
                                         par_error!(Op, "Unexpected intrinsic {} after ofp",Op.typ.to_string(false))
                                     }
@@ -2616,7 +2664,7 @@ fn parse_tokens_to_build(lexer: &mut Lexer, program: &mut CmdProgram) -> BuildPr
                             par_error!(token, "Scope closed but never opened!!!");
                         }
                     }
-                    IntrinsicType::ADD | IntrinsicType::SET  | IntrinsicType::PUSH | IntrinsicType::SUB | IntrinsicType::MUL | IntrinsicType::EQ | IntrinsicType::POP => {
+                    IntrinsicType::ADD | IntrinsicType::SET  | IntrinsicType::PUSH | IntrinsicType::SUB | IntrinsicType::MUL | IntrinsicType::POP => {
                         par_error!(token,"Unexpected token {}",Type.to_string(false));   
                     }
                     IntrinsicType::RET => {
@@ -2873,6 +2921,12 @@ fn parse_tokens_to_build(lexer: &mut Lexer, program: &mut CmdProgram) -> BuildPr
                         let symbol_contract = parse_any_contract(lexer);
                         build.dll_exports.insert(symbol_name.clone(), DLL_export { contract: symbol_contract });
                     },
+                    IntrinsicType::MORETHAN => todo!(),
+                    IntrinsicType::LESSTHAN => todo!(),
+                    IntrinsicType::MORETHANEQ => todo!(),
+                    IntrinsicType::LESSTHANEQ => todo!(),
+                    IntrinsicType::NOTEQUALS => todo!(),
+                    IntrinsicType::EQUALS => todo!(),
                 }
             }
             TokenType::StringType(_) => {
@@ -2963,7 +3017,7 @@ fn parse_tokens_to_build(lexer: &mut Lexer, program: &mut CmdProgram) -> BuildPr
                                     IntrinsicType::MUL => {
                                         body.push((token.location.clone(),Instruction::MUL(OfP::REGISTER(reg), OfP::REGISTER(reg2))))
                                     }
-                                    IntrinsicType::EQ => {
+                                    IntrinsicType::EQUALS => {
                                         body.push((token.location.clone(),Instruction::EQUALS(OfP::REGISTER(reg), OfP::REGISTER(reg2))))
                                     }
                                     IntrinsicType::DIV => {
@@ -3093,11 +3147,12 @@ fn nasm_x86_64_prep_args(program: &CmdProgram, build: &BuildProgram, f: &mut Fil
         match arg.typ {
             CallArgType::LOCALVAR(name) => {
                 let var1 = local_vars.get(&name).expect("Unknown local variable parameter");
+                let oreg = Register::RAX.to_byte_size(var1.typ.get_size(program));
                 if *stack_size-var1.operand == 0 {
-                    writeln!(f, "   mov rax, [rsp+{}]",shadow_space)?;
+                    writeln!(f, "   mov {}, [rsp+{}]",oreg.to_string(),shadow_space)?;
                 }
                 else {
-                    writeln!(f, "   mov rax, [rsp+{}]",*stack_size-var1.operand+shadow_space)?;
+                    writeln!(f, "   mov {}, [rsp+{}]",oreg.to_string(),*stack_size-var1.operand+shadow_space)?;
                 }
                 let osize = var1.typ.get_size(program);
                 if program.architecture.options.argumentPassing == ArcPassType::PUSHALL {
@@ -3377,9 +3432,12 @@ fn nasm_x86_64_handle_scope(f: &mut File, build: &BuildProgram, program: &CmdPro
     
         local_vars.insert(name.clone(), LocalVariable { typ: val.clone(), operand: stack_size });
     }
-    
-    if stack_size > 0 {
-        writeln!(f, "   sub rsp, {}",stack_size-stack_size_org)?;
+    let dif = stack_size-stack_size_org;
+    let additional = dif%8;
+    let dif = dif + additional;
+    stack_size+=additional;
+    if dif > 0 {
+        writeln!(f, "   sub rsp, {}",dif)?;
     }
     for (loc,inst) in scope.get_body(build) {
         match inst {
@@ -3682,36 +3740,12 @@ fn nasm_x86_64_handle_scope(f: &mut File, build: &BuildProgram, program: &CmdPro
                 
             }
             Instruction::RET() => {
-                let mut functionSize: usize = 0;
-                for val in scope.get_locals(build).unwrap().values() {
-                    functionSize += val.get_size(program);
-                };
-                if functionSize > 0 {
-                    writeln!(f, "   add rsp, {}",functionSize)?;
-                }
-                
+                let dif = stack_size-stack_size_org;
+                writeln!(f, "   add rsp, {}",dif)?;
                 writeln!(f, "   ret")?;
             }
             //TOOD: Potentially remove these
             Instruction::SCOPEBEGIN | Instruction::SCOPEEND => {}
-            Instruction::EQUALS(op1, op2) => {
-                match op1 {
-                    OfP::REGISTER(Reg1) => {
-                        match op2 {
-                            OfP::REGISTER(Reg2) => {
-                                writeln!(f, "   cmp  {}, {}",Reg1.to_string(),Reg2.to_string())?;
-                                writeln!(f, "   sete  {}",Reg1.to_byte_size(1).to_string())?;
-                            }
-                            OfP::LOCALVAR(_) => todo!(),
-                            
-                            OfP::CONST(_) => todo!(),
-                        }
-                    }
-                    OfP::LOCALVAR(_) => todo!(),
-                    OfP::CONST(_) => todo!(),
-                }
-                
-            },
             Instruction::DEFVAR(_) => {
                 // let var = local_vars.get_mut(name).expect("Error: unknown defvar definition in function! This is most likely due to a bug inside the compiler! Make sure to contact the developer if you encounter this!");
                 // var.operand     = callstack_size as usize;
@@ -3740,16 +3774,55 @@ fn nasm_x86_64_handle_scope(f: &mut File, build: &BuildProgram, program: &CmdPro
             Instruction::EXPAND_SCOPE(s) => nasm_x86_64_handle_scope(f, build, program, TCScopeType::NORMAL(s),local_vars.clone(),stack_size)?,
             Instruction::EXPAND_IF_SCOPE(_) => todo!("EXPAND_IF_SCOPE"),
             Instruction::EXPAND_ELSE_SCOPE(_) => todo!("EXPAND_ELSE_SCOPE"),
+
+            Instruction::MORETHAN(ofp1, ofp2) => {
+                let regs = ofp1.LOIRGNasm(vec![Register::RAX], f, program, build, &local_vars, stack_size,loc)?[0];
+                let regs2 = ofp2.LOIRGNasm(vec![Register::RBX], f, program, build, &local_vars, stack_size,loc)?[0];
+                writeln!(f,"   cmp {}, {}",regs.to_string(),regs2.to_string())?;
+                writeln!(f,"   setg al")?;
+            },
+            Instruction::LESSTHAN(ofp1, ofp2) => {
+                let regs = ofp1.LOIRGNasm(vec![Register::RAX], f, program, build, &local_vars, stack_size,loc)?[0];
+                let regs2 = ofp2.LOIRGNasm(vec![Register::RBX], f, program, build, &local_vars, stack_size,loc)?[0];
+                writeln!(f,"   cmp {}, {}",regs.to_string(),regs2.to_string())?;
+                writeln!(f,"   setl al")?;
+            },
+            Instruction::MORETHANEQUALS(ofp1, ofp2) => {
+                let regs = ofp1.LOIRGNasm(vec![Register::RAX], f, program, build, &local_vars, stack_size,loc)?[0];
+                let regs2 = ofp2.LOIRGNasm(vec![Register::RBX], f, program, build, &local_vars, stack_size,loc)?[0];
+                writeln!(f,"   cmp {}, {}",regs.to_string(),regs2.to_string())?;
+                writeln!(f,"   setge al")?;
+            },
+            Instruction::LESSTHANEQUALS(ofp1, ofp2) => {
+                let regs = ofp1.LOIRGNasm(vec![Register::RAX], f, program, build, &local_vars, stack_size,loc)?[0];
+                let regs2 = ofp2.LOIRGNasm(vec![Register::RBX], f, program, build, &local_vars, stack_size,loc)?[0];
+                writeln!(f,"   cmp {}, {}",regs.to_string(),regs2.to_string())?;
+                writeln!(f,"   setle al")?;
+            },
+            Instruction::NOTEQUALS(ofp1, ofp2) => {
+                let regs = ofp1.LOIRGNasm(vec![Register::RAX], f, program, build, &local_vars, stack_size,loc)?[0];
+                let regs2 = ofp2.LOIRGNasm(vec![Register::RBX], f, program, build, &local_vars, stack_size,loc)?[0];
+                writeln!(f,"   cmp {}, {}",regs.to_string(),regs2.to_string())?;
+                writeln!(f,"   setne al")?;
+            },
+            Instruction::EQUALS(ofp1, ofp2) => {
+                let regs = ofp1.LOIRGNasm(vec![Register::RAX], f, program, build, &local_vars, stack_size,loc)?[0];
+                let regs2 = ofp2.LOIRGNasm(vec![Register::RBX], f, program, build, &local_vars, stack_size,loc)?[0];
+                writeln!(f,"   cmp {}, {}",regs.to_string(),regs2.to_string())?;
+                writeln!(f,"   sete al")?;
+            },
         }
     }
     if !scope.is_func() {
-        let mut varSize: usize = 0;
-        for val in scope.get_locals(build).unwrap().values() {
-            varSize += val.get_size(program);
-        };
-        if varSize > 0 {
-            writeln!(f, "   add rsp, {}",varSize)?;
-        }
+        // let mut varSize: usize = 0;
+        // for val in scope.get_locals(build).unwrap().values() {
+        //     varSize += val.get_size(program);
+        // };
+        // if varSize > 0 {
+        //     writeln!(f, "   add rsp, {}",varSize)?;
+        // }
+        let dif = stack_size-stack_size_org;
+        writeln!(f, "   add rsp, {}",dif)?;
     }
     Ok(())
 }
@@ -3845,6 +3918,7 @@ fn to_nasm_x86_64(build: &mut BuildProgram, program: &CmdProgram) -> io::Result<
             for (_,local) in function.locals.iter() {
                 argsize += local.get_size(program);
             }
+            argsize += argsize%8;
             writeln!(&mut f, "   add rsp, {}",8+argsize)?;
             writeln!(&mut f, "   xor rax,rax")?;
             writeln!(&mut f, "   ret")?;
@@ -3952,11 +4026,13 @@ fn type_check_scope(build: &BuildProgram, program: &CmdProgram, scope: TCScopeTy
             Instruction::CALLRAW(name,contract)        => {
                 let mut externContract = build.get_contract_of_symbol(name).unwrap_or(&AnyContract { InputPool: vec![], Outputs: vec![] }).clone();//build.externals.get(name).unwrap().contract.as_ref().unwrap_or(&AnyContract { InputPool: vec![], Outputs: vec![] }).clone();
                 externContract.InputPool.reverse();
+                
+                typ_assert!(loc, externContract.InputPool.len() == contract.len(), "Error: Expected: {} amount of arguments but found {}",externContract.InputPool.len(), contract.len());
                 for arg in contract {
                     match &arg.typ {
                         CallArgType::LOCALVAR(name) => {
                             let etyp = typ_expect!(loc, externContract.InputPool.pop(), "Error: Additional arguments provided for external that doesn't take in any more arguments!");
-                            let local =get_local(currentLocals, name).unwrap();
+                            let local = get_local(currentLocals, name).unwrap();
                             typ_assert!(loc,etyp.weak_eq(&local),"Error: Incompatible types for contract\nExpected: {}\nFound: ({}) {}",etyp.to_string(false),name,local.to_string(false));
                         },
                         CallArgType::REGISTER(_) => todo!("Registers are still yet unhandled!"),
@@ -3974,7 +4050,7 @@ fn type_check_scope(build: &BuildProgram, program: &CmdProgram, scope: TCScopeTy
             Instruction::SUB(_, _)           => {},
             Instruction::MUL(_, _)           => {},
             Instruction::DIV(_, _)           => {},
-            Instruction::EQUALS(_, _)        => {},
+            
             Instruction::CALL(funcn, args)             => {
                 let function = typ_expect!(loc, build.functions.get(funcn), "Error: unknown function call to {}, Function may not exist!",funcn);
                 let mut functionIP = function.contract.Inputs.clone();
@@ -4017,6 +4093,13 @@ fn type_check_scope(build: &BuildProgram, program: &CmdProgram, scope: TCScopeTy
             Instruction::EXPAND_SCOPE(s)      => type_check_scope(build, program, TCScopeType::NORMAL(s), currentLocals),
             Instruction::EXPAND_IF_SCOPE(s)   => type_check_scope(build, program, TCScopeType::NORMAL(s), currentLocals),
             Instruction::EXPAND_ELSE_SCOPE(s) => type_check_scope(build, program, TCScopeType::NORMAL(s), currentLocals),
+            //TODO: add typechecking for this:
+            Instruction::MORETHAN(_, _)       => {},
+            Instruction::LESSTHAN(_, _)       => {},
+            Instruction::MORETHANEQUALS(_, _) => {},
+            Instruction::LESSTHANEQUALS(_, _) => {},
+            Instruction::NOTEQUALS(_, _)      => {},
+            Instruction::EQUALS(_, _)         => {},
         }
     }
     if scope.is_func() {
@@ -4297,8 +4380,14 @@ fn main() {
     Intrinsics.insert("return".to_string(),IntrinsicType::RET);
     Intrinsics.insert("if".to_string(), IntrinsicType::IF);
     Intrinsics.insert("else".to_string(), IntrinsicType::ELSE);
-    Intrinsics.insert("==".to_string(),IntrinsicType::EQ);
     Intrinsics.insert("cast".to_string(), IntrinsicType::CAST);
+
+    Intrinsics.insert("==".to_string(),IntrinsicType::EQUALS);
+    Intrinsics.insert("!=".to_string(),IntrinsicType::NOTEQUALS);
+    Intrinsics.insert(">".to_string(),IntrinsicType::MORETHAN);
+    Intrinsics.insert("<".to_string(),IntrinsicType::LESSTHAN);
+    Intrinsics.insert("<=".to_string(),IntrinsicType::LESSTHANEQ);
+    Intrinsics.insert(">=".to_string(),IntrinsicType::MORETHANEQ);
     let mut Definitions: HashMap<String,VarType> = HashMap::new();
     Definitions.insert("int".to_string(), VarType::INT);
     Definitions.insert("char".to_string(), VarType::CHAR);
@@ -4398,9 +4487,9 @@ fn main() {
 - [x] TODO: Implement the rest of the floating point arithmetic registers
 - [x] TODO: Implement local variables for normal scopes
 - [ ] TODO: implement booleans
+- [ ] TODO: Implement if statements as well as else statements
 - [ ] TODO: Fix returning from functions
 - [ ] TODO: Add 'result' as a part of OfP for calling the function and getting its result
-- [ ] TODO: Implement if statements as well as else statements
 - [ ] TODO: Add more examples like OpenGL examples, native Windows examples with linking to kernel.dll etc.
 - [ ] TODO: Add some quality of life things such as __FILE__ __LINE__
 

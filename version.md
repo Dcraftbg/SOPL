@@ -1,8 +1,9 @@
 **(Latest patch versions in github history and at the top of Change Log)**
 
-Newest Version: [0.11.9A](#0119a)
+Newest Version: [0.11.10A](#01110a)
 # Manual:
-  - [0.11.9A](#0119a)
+  - [0.11.10A](#01110a)
+    - [0.11.9A](#0119a)
     - [0.11.8A](#0118a)
     - [0.11.7A](#0117a)
     - [0.11.6A](#0116a)
@@ -32,6 +33,9 @@ Newest Version: [0.11.9A](#0119a)
   - [0.2A](#02a)
   - [0.1A](#01a)
 # Change Log
+ ## 0.11.10A
+   - Added boolean operations
+   - Fixed testing
  ## 0.11.9A
    - Added local variables to scopes
    - Implemented the rest of the float32 registers
