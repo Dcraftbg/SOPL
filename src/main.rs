@@ -1021,12 +1021,15 @@ enum Register {
     R14,
     R15,
     
-    //Floating point arithmetics
+    //Floating point 32 arithmetics
     XMM0,
     XMM1,
     XMM2,
     XMM3,
-    
+    XMM4,
+    XMM5,
+    XMM6,
+    XMM7,
     R8D,
     
 }
@@ -1074,6 +1077,10 @@ impl Register {
             Register::XMM1 => "xmm1".to_string(),
             Register::XMM2 => "xmm2".to_string(),
             Register::XMM3 => "xmm3".to_string(),
+            Register::XMM4 => "xmm4".to_string(),
+            Register::XMM5 => "xmm5".to_string(),
+            Register::XMM6 => "xmm6".to_string(),
+            Register::XMM7 => "xmm7".to_string(),
             Register::ESI => "esi".to_string(),
             Register::EDI => "edi".to_string(),
             Register::SI  => "si".to_string(),
@@ -1176,10 +1183,14 @@ impl Register {
             Register::R13 => 8,
             Register::R14 => 8,
             Register::R15 => 8,
-            Register::XMM0 => 8,
-            Register::XMM1 => 8,
-            Register::XMM2 => 8,
-            Register::XMM3 => 8,
+            Register::XMM0 => 4,
+            Register::XMM1 => 4,
+            Register::XMM2 => 4,
+            Register::XMM3 => 4,
+            Register::XMM4 => 4,
+            Register::XMM5 => 4,
+            Register::XMM6 => 4,
+            Register::XMM7 => 4,
         }
     }
     fn to_byte_size(&self, size: usize) -> Self {
@@ -1215,6 +1226,10 @@ impl Register {
                 Register::XMM1 => todo!(),
                 Register::XMM2 => todo!(),
                 Register::XMM3 => todo!(),
+                Register::XMM4 => todo!(),
+                Register::XMM5 => todo!(),
+                Register::XMM6 => todo!(),
+                Register::XMM7 => todo!(),
               }  
             },
             4 => {
@@ -1254,6 +1269,10 @@ impl Register {
                     Register::XMM1 => todo!(),
                     Register::XMM2 => todo!(),
                     Register::XMM3 => todo!(),
+                    Register::XMM4 => todo!(),
+                    Register::XMM5 => todo!(),
+                    Register::XMM6 => todo!(),
+                    Register::XMM7 => todo!(),
                   }  
             },
             2 => {
@@ -1293,6 +1312,10 @@ impl Register {
                     Register::XMM1 => todo!(),
                     Register::XMM2 => todo!(),
                     Register::XMM3 => todo!(),
+                    Register::XMM4 => todo!(),
+                    Register::XMM5 => todo!(),
+                    Register::XMM6 => todo!(),
+                    Register::XMM7 => todo!(),
                   }  
             },
             1 => {
@@ -1331,6 +1354,10 @@ impl Register {
                     Register::XMM1 => todo!(),
                     Register::XMM2 => todo!(),
                     Register::XMM3 => todo!(),
+                    Register::XMM4 => todo!(),
+                    Register::XMM5 => todo!(),
+                    Register::XMM6 => todo!(),
+                    Register::XMM7 => todo!(),
                   }  
             },
             _ => {
@@ -1368,6 +1395,10 @@ impl Register {
             Register::XMM1 => todo!("floats"),
             Register::XMM2 => todo!("floats"),
             Register::XMM3 => todo!("floats"),
+            Register::XMM4 => todo!("floats"),
+            Register::XMM5 => todo!("floats"),
+            Register::XMM6 => todo!("floats"),
+            Register::XMM7 => todo!("floats"),
         }
     }
 }
@@ -1454,9 +1485,7 @@ enum OfP {
     // STR      (Uuid, ProgramStringType)
     // etc.
 }
-impl OfP {
-    
-    
+impl OfP { 
     fn LOIRGNasm(&self, regs: Vec<Register>, f: &mut File, program: &CmdProgram,build: &BuildProgram, local_vars: &HashMap<String, LocalVariable>, stack_size: usize) -> std::io::Result<Vec<Register>>{
         let mut out: Vec<Register> = Vec::with_capacity(regs.len());
         match self {
@@ -2010,6 +2039,7 @@ enum NormalScopeType {
 struct NormalScope {
     typ: NormalScopeType,
     body: ScopeBody,
+    locals: Locals
 }
 
 #[derive(Debug)]
@@ -2517,7 +2547,10 @@ fn parse_tokens_to_build(lexer: &mut Lexer, program: &mut CmdProgram) -> BuildPr
                         if ln != 0 {
                             let s = scopeStack.last_mut().unwrap();
                             if s.hasBeenOpened {
-                                scopeStack.push(Scope { typ: ScopeType::NORMAL(NormalScope { typ: NormalScopeType::EMPTY, body: vec![] }), hasBeenOpened: true });
+                                //println!("CurrentLocals: {:#?}",currentLocals);
+                                currentLocals.push(Locals::new());
+                                //println!("CurrentLocals: {:#?}",currentLocals);
+                                scopeStack.push(Scope { typ: ScopeType::NORMAL(NormalScope { typ: NormalScopeType::EMPTY, body: vec![], locals: Locals::new()}), hasBeenOpened: true });
                                 continue;
                             }
                             par_assert!(token,!s.hasBeenOpened, "Scope already opened! {:?}",scopeStack);
@@ -2526,6 +2559,8 @@ fn parse_tokens_to_build(lexer: &mut Lexer, program: &mut CmdProgram) -> BuildPr
                             match &s.typ {
                                 ScopeType::FUNCTION(_, _) => {}
                                 ScopeType::NORMAL(normal) => {
+                                    //println!("CurrentLocals: {:#?}",currentLocals);
+                                    currentLocals.push(Locals::new());
                                     match normal.typ {
                                         NormalScopeType::IF => {
                                            par_assert!(token, ln > 1, "Error: Alone if outside of any scope is not allowed!");
@@ -2539,7 +2574,7 @@ fn parse_tokens_to_build(lexer: &mut Lexer, program: &mut CmdProgram) -> BuildPr
                         }
                         else {
                             
-                            scopeStack.push(Scope { typ: ScopeType::NORMAL(NormalScope { typ: NormalScopeType::EMPTY, body: vec![] }), hasBeenOpened: true});
+                            scopeStack.push(Scope { typ: ScopeType::NORMAL(NormalScope { typ: NormalScopeType::EMPTY, body: vec![], locals: Locals::new()}), hasBeenOpened: true});
                         }
                     }
                     IntrinsicType::CLOSECURLY => {
@@ -2547,15 +2582,17 @@ fn parse_tokens_to_build(lexer: &mut Lexer, program: &mut CmdProgram) -> BuildPr
                             par_assert!(token,sc.hasBeenOpened, "Error: scope closed but never opened!");
                             match sc.typ {
                                 ScopeType::FUNCTION(mut func, name) => {
+                                    //println!("CurrentLocals function: {:#?}",currentLocals);
                                     func.body.push((token.location.clone(),Instruction::SCOPEEND));
                                     func.locals = currentLocals.pop().unwrap();
                                     build.functions.insert(name, func);
                                 },
-                                ScopeType::NORMAL(normal) => {
+                                ScopeType::NORMAL(mut normal) => {
+                                    //println!("CurrentLocals at Normal: {:#?}",currentLocals);
+                                    normal.locals = currentLocals.pop().unwrap();
                                     match normal.typ {
                                         NormalScopeType::IF => {
                                             let currentScope = getTopMut(&mut scopeStack).unwrap();
-
                                             let body = par_expect!(token,currentScope.body_unwrap_mut(), "Error: Can not close if, because it is inside a {} which doesn't support instructions!",currentScope.typ.to_string(false));
                                             body.push((token.location.clone(),Instruction::EXPAND_IF_SCOPE(normal)))
                                         },
@@ -2649,7 +2686,7 @@ fn parse_tokens_to_build(lexer: &mut Lexer, program: &mut CmdProgram) -> BuildPr
                         }
                     },
                     IntrinsicType::IF => {
-                        scopeStack.push(Scope { typ: ScopeType::NORMAL(NormalScope { typ: NormalScopeType::IF, body: vec![] }), hasBeenOpened: false })
+                        scopeStack.push(Scope { typ: ScopeType::NORMAL(NormalScope { typ: NormalScopeType::IF, body: vec![], locals: Locals::new()}), hasBeenOpened: false })
                     },
                     IntrinsicType::CONSTANT => {
                         let first = lexer.next();
@@ -2971,8 +3008,7 @@ impl optim_ops {
 fn optimization_ops_scope(build: &BuildProgram, program: &CmdProgram, scope: TCScopeType, out: &mut optim_ops,fn_name: String) {
     for (_,op) in scope.get_body(build).iter() {
         match op {
-            Instruction::CALLRAW(r, args) => {
-                
+            Instruction::CALLRAW(r, args) => {   
                 for arg in args {
                     match &arg.typ {
                         CallArgType::CONSTANT(val) => {
@@ -2988,6 +3024,19 @@ fn optimization_ops_scope(build: &BuildProgram, program: &CmdProgram, scope: TCS
                     }
                 }
                 out.usedExterns.insert(r.clone());
+            }
+            Instruction::MOV(_, v2) => {
+                match v2 {
+                    OfP::CONST(val) => {
+                        match val {
+                            RawConstValueType::STR(uuid) => {
+                                out.usedStrings.insert(uuid.clone(), fn_name.clone());
+                            }
+                            _ => {}
+                        }
+                    }
+                    _ => {}
+                }   
             }
             Instruction::CALL(r,args) => {
                 for arg in args {
@@ -3313,12 +3362,12 @@ fn nasm_x86_64_load_args(f: &mut File, scope: &TCScopeType, build: &BuildProgram
     }
     Ok(offset)
 }
-fn nasm_x86_64_handle_scope(f: &mut File, build: &BuildProgram, program: &CmdProgram, scope: TCScopeType, mut local_vars: HashMap<String, LocalVariable>) -> io::Result<()> {
+fn nasm_x86_64_handle_scope(f: &mut File, build: &BuildProgram, program: &CmdProgram, scope: TCScopeType, mut local_vars: HashMap<String, LocalVariable>, mut stack_size: usize) -> io::Result<()> {
     let expect_loc_t = LinkedHashMap::new();
     let contract_loc_t = FunctionContract { Inputs: LinkedHashMap::new(), Outputs: Vec::new()};
     let expect_locals = scope.get_locals(build).unwrap_or(&expect_loc_t);
     let contract = scope.get_contract(build).unwrap_or(&contract_loc_t);
-    let mut stack_size: usize = 0;
+    let stack_size_org: usize = stack_size;
     local_vars.reserve(contract.Inputs.len()+expect_locals.len());
     if scope.has_contract() {
         nasm_x86_64_load_args(f, &scope, build, program)?;
@@ -3330,7 +3379,7 @@ fn nasm_x86_64_handle_scope(f: &mut File, build: &BuildProgram, program: &CmdPro
     }
     
     if stack_size > 0 {
-        writeln!(f, "   sub rsp, {}",stack_size)?;
+        writeln!(f, "   sub rsp, {}",stack_size-stack_size_org)?;
     }
     for (loc,inst) in scope.get_body(build) {
         match inst {
@@ -3444,7 +3493,19 @@ fn nasm_x86_64_handle_scope(f: &mut File, build: &BuildProgram, program: &CmdPro
                                             todo!()
                                         }
                                     },
-                                    RawConstValueType::STR(_) => todo!(),
+                                    RawConstValueType::STR(UUID) => {
+                                        let strdef = build.stringdefs.get(UUID).unwrap();
+                                        com_assert!(loc,strdef.Typ == ProgramStringType::CSTR,"TODO: Cannot assign types of string different from cstr yet!");
+                                        writeln!(f, "   lea rax, [_STRING_{}_]",UUID.to_string().replace("-", ""))?;
+                                        let var = com_expect!(loc,local_vars.get(varOrg),"Error: Unknown variable found during compilation {}",varOrg);
+                                        //TODO: there are a lot of problems with these hardcoded rax stuff
+                                        if stack_size-var.operand == 0 {
+                                            writeln!(f, "   mov {} [rsp], rax",size_to_nasm_type(var.typ.get_size(program)))?;
+                                        }
+                                        else {
+                                            writeln!(f, "   mov {} [rsp+{}], rax",size_to_nasm_type(var.typ.get_size(program)),stack_size -var.operand)?;
+                                        }
+                                    },
                                     RawConstValueType::PTR(_,_) => todo!(),
                                 }
                             }
@@ -3676,9 +3737,18 @@ fn nasm_x86_64_handle_scope(f: &mut File, build: &BuildProgram, program: &CmdPro
                     OfP::CONST(_) => todo!(),
                 }
             },
-            Instruction::EXPAND_SCOPE(s) => nasm_x86_64_handle_scope(f, build, program, TCScopeType::NORMAL(s),local_vars.clone())?,
+            Instruction::EXPAND_SCOPE(s) => nasm_x86_64_handle_scope(f, build, program, TCScopeType::NORMAL(s),local_vars.clone(),stack_size)?,
             Instruction::EXPAND_IF_SCOPE(_) => todo!("EXPAND_IF_SCOPE"),
             Instruction::EXPAND_ELSE_SCOPE(_) => todo!("EXPAND_ELSE_SCOPE"),
+        }
+    }
+    if !scope.is_func() {
+        let mut varSize: usize = 0;
+        for val in scope.get_locals(build).unwrap().values() {
+            varSize += val.get_size(program);
+        };
+        if varSize > 0 {
+            writeln!(f, "   add rsp, {}",varSize)?;
         }
     }
     Ok(())
@@ -3769,7 +3839,7 @@ fn to_nasm_x86_64(build: &mut BuildProgram, program: &CmdProgram) -> io::Result<
         else {
             writeln!(&mut f, "{}{}:",program.architecture.func_prefix,function_name)?;
         }
-        nasm_x86_64_handle_scope(&mut f, build, program, TCScopeType::FUNCTION(function_name.clone()),HashMap::new())?;
+        nasm_x86_64_handle_scope(&mut f, build, program, TCScopeType::FUNCTION(function_name.clone()),HashMap::new(),0)?;
         if function_name == "main" {
             let mut argsize: usize = 0;
             for (_,local) in function.locals.iter() {
@@ -3823,8 +3893,8 @@ impl TCScopeType<'_> {
             Self::FUNCTION(name) => {
                 Some(&build.functions.get(name).unwrap().locals)
             }
-            Self::NORMAL(_) => {
-                None
+            Self::NORMAL(s) => {
+                Some(&s.locals)
             }
         }
     }
@@ -3869,9 +3939,11 @@ impl TCScopeType<'_> {
         }
     }
 }
-fn type_check_scope(build: &BuildProgram, program: &CmdProgram, scope: TCScopeType) {
+fn type_check_scope(build: &BuildProgram, program: &CmdProgram, scope: TCScopeType, currentLocals: &mut Vec<Locals>) {
     let mut rs_stack: Vec<VarType> = Vec::new();
-    
+    if let Some(locals) = scope.get_locals(build) {
+        currentLocals.push(locals.clone());
+    }
     // TODO: Add current locals (&Vec<Locals>)
     for (loc, instruction) in scope.get_body(build).iter() {
         match instruction {
@@ -3884,7 +3956,7 @@ fn type_check_scope(build: &BuildProgram, program: &CmdProgram, scope: TCScopeTy
                     match &arg.typ {
                         CallArgType::LOCALVAR(name) => {
                             let etyp = typ_expect!(loc, externContract.InputPool.pop(), "Error: Additional arguments provided for external that doesn't take in any more arguments!");
-                            let local = scope.get_locals(build).unwrap().get(name).unwrap();
+                            let local =get_local(currentLocals, name).unwrap();
                             typ_assert!(loc,etyp.weak_eq(&local),"Error: Incompatible types for contract\nExpected: {}\nFound: ({}) {}",etyp.to_string(false),name,local.to_string(false));
                         },
                         CallArgType::REGISTER(_) => todo!("Registers are still yet unhandled!"),
@@ -3912,7 +3984,7 @@ fn type_check_scope(build: &BuildProgram, program: &CmdProgram, scope: TCScopeTy
                         CallArgType::LOCALVAR(name) => {
                             let (_,etyp) = typ_expect!(loc, functionIP.pop_back(), "Error: Additional arguments provided for external that doesn't take in any more arguments!");
                             
-                            let local = scope.get_locals(build).unwrap().get(name).unwrap();
+                            let local =get_local(currentLocals, name).unwrap();
                             typ_assert!(loc,etyp.weak_eq(&local),"Error: Incompatible types for contract\nExpected: {}\nFound: ({}) {}",etyp.to_string(false),name,local.to_string(false));
                         },
                         CallArgType::REGISTER(_) => todo!("Registers are still yet unhandled!"),
@@ -3942,9 +4014,9 @@ fn type_check_scope(build: &BuildProgram, program: &CmdProgram, scope: TCScopeTy
                     }
                 }
             },
-            Instruction::EXPAND_SCOPE(s)      => type_check_scope(build, program, TCScopeType::NORMAL(s)),
-            Instruction::EXPAND_IF_SCOPE(s)   => type_check_scope(build, program, TCScopeType::NORMAL(s)),
-            Instruction::EXPAND_ELSE_SCOPE(s) => type_check_scope(build, program, TCScopeType::NORMAL(s)),
+            Instruction::EXPAND_SCOPE(s)      => type_check_scope(build, program, TCScopeType::NORMAL(s), currentLocals),
+            Instruction::EXPAND_IF_SCOPE(s)   => type_check_scope(build, program, TCScopeType::NORMAL(s), currentLocals),
+            Instruction::EXPAND_ELSE_SCOPE(s) => type_check_scope(build, program, TCScopeType::NORMAL(s), currentLocals),
         }
     }
     if scope.is_func() {
@@ -3965,7 +4037,8 @@ fn type_check_scope(build: &BuildProgram, program: &CmdProgram, scope: TCScopeTy
 fn type_check_build(build: &mut BuildProgram, program: &CmdProgram) {
     
     for name in build.functions.keys() {
-        type_check_scope(build, program,TCScopeType::FUNCTION(name.clone()));
+        let mut currentLocals:Vec<Locals>  = Vec::new();
+        type_check_scope(build, program,TCScopeType::FUNCTION(name.clone()),&mut currentLocals);
     }
 }
 
@@ -4321,15 +4394,16 @@ fn main() {
 - [x] TODO: Fix checking for UUID overloading in includes
 - [x] TODO: implement macros for assert, expect etc. for type checking
 - [x] TODO: implement pointers for the lexer (like *char *int **void etc.)
-- [ ] TODO: Add dynamic linking with dlls with dll_import dll_export
+- [x] TODO: Add dynamic linking with dlls with dll_import dll_export
+- [x] TODO: Implement the rest of the floating point arithmetic registers
+- [x] TODO: Implement local variables for normal scopes
 - [ ] TODO: implement booleans
-- [ ] TODO: Implement the rest of the floating point arithmetic registers
-- [ ] TODO: Implement local variables for normal scopes
 - [ ] TODO: Fix returning from functions
 - [ ] TODO: Add 'result' as a part of OfP for calling the function and getting its result
 - [ ] TODO: Implement if statements as well as else statements
 - [ ] TODO: Add more examples like OpenGL examples, native Windows examples with linking to kernel.dll etc.
 - [ ] TODO: Add some quality of life things such as __FILE__ __LINE__
+
 - [ ] TODO: Add expressions like a+b*c etc. 
 - [ ] TODO: Add EOL (End of line) token
 

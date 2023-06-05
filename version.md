@@ -1,8 +1,9 @@
 **(Latest patch versions in github history and at the top of Change Log)**
 
-Newest Version: [0.11.8A](#0118a)
+Newest Version: [0.11.9A](#0119a)
 # Manual:
-  - [0.11.8A](#0118a)
+  - [0.11.9A](#0119a)
+    - [0.11.8A](#0118a)
     - [0.11.7A](#0117a)
     - [0.11.6A](#0116a)
     - [0.11.5A](#0115a)
@@ -31,6 +32,11 @@ Newest Version: [0.11.8A](#0118a)
   - [0.2A](#02a)
   - [0.1A](#01a)
 # Change Log
+ ## 0.11.9A
+   - Added local variables to scopes
+   - Implemented the rest of the float32 registers
+   - Added ability to assign strings (only cstrings currently), to variables
+   - Also fixed bug related to ^ where strings wouldn't be counted as 'used' if assigned to variable
  ## 0.11.8A
    - Fixed architecture examples
    - Added obj-extension for architectures
