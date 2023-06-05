@@ -4486,7 +4486,7 @@ fn main() {
 - [x] TODO: Add dynamic linking with dlls with dll_import dll_export
 - [x] TODO: Implement the rest of the floating point arithmetic registers
 - [x] TODO: Implement local variables for normal scopes
-- [ ] TODO: implement booleans
+- [x] TODO: implement booleans
 - [ ] TODO: Implement if statements as well as else statements
 - [ ] TODO: Fix returning from functions
 - [ ] TODO: Add 'result' as a part of OfP for calling the function and getting its result
