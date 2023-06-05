@@ -95,13 +95,14 @@ const RED: &str = "\x1b[31;1m";
 const GREEN: &str = "\x1b[32;1m";
 const LIGHT_BLUE: &str= "\x1b[96;1m";
 const RESET: &str = "\x1b[0m";
-fn record(epath: &PathBuf, failed: &mut Vec<PathBuf>) {
+fn record(epath: &PathBuf, failed: &mut Vec<PathBuf>,is_loud: bool) {
     let sopl_exe: &str = "target/debug/sopl";
     
     let pname = Path::new(epath.file_name().unwrap()).with_extension("");
     let fname = pname.to_str().unwrap();
     println!("{LIGHT_BLUE}* Recording {}{RESET}",epath.to_string_lossy());  
-    let compile_sopl = Command::new(sopl_exe).args(["-t", "nasm_x86_64", &format!("examples/{}.spl",fname), "-o", &format!("examples/int/{}.asm", fname), "-b"]).output().expect(&format!("Error: could not run build for {}",fname));
+    let ov = if is_loud { format!("examples/int/{}.asm", fname) } else {format!("examples/int/test.asm")};
+    let compile_sopl = Command::new(sopl_exe).args(["-t", "nasm_x86_64", &format!("examples/{}.spl",fname), "-o", ov.as_str(), "-b"]).output().expect(&format!("Error: could not run build for {}",fname));
     if !compile_sopl.status.success() && compile_sopl.status.code().unwrap() != 101 {
         println!("{RED}Record failed for {}. Compiling exited with {}{RESET}",epath.to_string_lossy(),compile_sopl.status.code().unwrap_or(0));
         failed.push(epath.clone());
@@ -110,7 +111,7 @@ fn record(epath: &PathBuf, failed: &mut Vec<PathBuf>) {
     else {
         let outpath = format!("./tests/expected/{}.test",fname);
         //println!("Hello {}",outpath);
-        let program_run = Command::new(format!("examples/int/{}",fname)).output();
+        let program_run = Command::new(if is_loud { format!("examples/int/{}",fname) } else {format!("examples/int/test")}).output();
         let mut out = ExpectedBehave::new();
         if program_run.is_err(){
             out.should_build_error = true;
@@ -180,7 +181,7 @@ fn main() {
                         let pname = Path::new(epath.file_name().unwrap()).with_extension("");
                         let fname = pname.to_str().unwrap();
                         println!("{LIGHT_BLUE}* Testing {} ({}){RESET}",epath.to_string_lossy(),fname);  
-                        let compile_sopl = Command::new(sopl_exe).args(["-t","nasm_x86_64", &format!("examples/{}.spl",fname), "-o", &format!("examples/int/{}.asm", fname), "-b"]).output().expect(&format!("Error: could not run build for {}",fname));
+                        let compile_sopl = Command::new(sopl_exe).args(["-t","nasm_x86_64", &format!("examples/{}.spl",fname), "-o", &format!("examples/int/test.asm"), "-b"]).output().expect(&format!("Error: could not run build for {}",fname));
                         if !compile_sopl.status.success() && compile_sopl.status.code().unwrap_or(0) != 101{
                             println!("{RED}Test failed for {}. Compiling exited with {}{RESET}\n{:?}",epath.to_string_lossy(),compile_sopl.status.code().unwrap_or(0),String::from_utf8_lossy(&compile_sopl.stderr));
                             failed.push(epath);
@@ -197,7 +198,7 @@ fn main() {
                             let exp_str = exp_str.unwrap();
                             let expected = ExpectedBehave::from_str(&exp_str);
                             if let Some(expected) = expected {
-                                let program_run = Command::new(format!("examples/int/{}",fname)).args(&expected.args).output();
+                                let program_run = Command::new(format!("examples/int/test")).args(&expected.args).output();
                                 if program_run.is_err() && !expected.should_build_error {
                                     println!("{RED}Test failed for {} with args {:?}. Could not run test{RESET}",epath.to_string_lossy(),expected.args);
                                     failed.push(epath);
@@ -262,6 +263,7 @@ fn main() {
                 //set_current_dir(sopl_home).expect("Error: could not change current working directory to sopl home!");
                 match option.as_str() {
                     "all" => {
+                        let is_loud = args.get(0).is_some() && &args[0] == "loud";
                         let folder = "examples";
                         //let sopl_back = current_dir().expect("Error: could not get current working directory");
                         //let sopl_exe = "target/debug/sopl";
@@ -281,7 +283,7 @@ fn main() {
                                 if let Ok(entry) = entry {
                                     let epath = entry.path();
                                     if epath.is_file() && !ignored.contains(&epath.file_name().unwrap().to_str().unwrap().to_owned()) {
-                                        record(&epath,&mut failed);
+                                        record(&epath,&mut failed,is_loud);
                                     }
                                 }
                                 else {
@@ -303,7 +305,7 @@ fn main() {
                         let epath = Path::new(&p);
                         let mut failed: Vec<PathBuf> = Vec::new();
                         if epath.exists() && epath.is_file() {
-                            record(&epath.to_path_buf(), &mut failed);
+                            record(&epath.to_path_buf(), &mut failed,false);
                         }
                         else {
                             println!("{RED}Unknown parameter {}{RESET}",option);
