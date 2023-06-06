@@ -2408,638 +2408,670 @@ fn contains_local<'a>(currentLocals: &'a Vec<Locals>, name: &String) -> bool {
     }
     false
 }
+fn parse_token_to_build_inst(token: Token,lexer: &mut Lexer, program: &mut CmdProgram, build: &mut BuildProgram, scopeStack: &mut ScopeStack, currentLocals: &mut Vec<Locals>){
+    match token.typ {
+        TokenType::WordType(ref word) => {
+            par_assert!(token,scopeStack.len() > 0, "Undefined Word Call outside of entry point! '{}'",word);
+            let currentScope = getTopMut(scopeStack).unwrap();
+            par_assert!(token,currentScope.body_is_some(), "Error: can not insert word operation at the top level of a {} as it does not support instructions",currentScope.typ.to_string(false));
+            if build.externals.contains_key(word) {
+                let contract = parse_argument_contract(lexer, build, currentLocals);
+                let body = currentScope.body_unwrap_mut().unwrap();
+                body.push((token.location.clone(),Instruction::CALLRAW(word.clone(), contract)));
+                return;
+            } else if build.dll_imports.contains_key(word) {
+                let contract = parse_argument_contract(lexer, build, currentLocals);
+                let body = currentScope.body_unwrap_mut().unwrap();
+                body.push((token.location.clone(),Instruction::CALLRAW(word.clone(), contract)));
+                return;
+            }
+            let ofp1 = par_expect!(token, OfP::from_token(&token, build, program,currentLocals), "Unknown word type: {}!",word);
+            let Op = par_expect!(lexer.currentLocation,lexer.next(),"Unexpected variable operation or another variable!");
+            match &Op.typ {
+                
+                TokenType::IntrinsicType(typ) => {
+                    match typ {
+                        IntrinsicType::SET => {
+                            let ofp2_t = par_expect!(lexer.currentLocation,lexer.next(),"Unexpected variable operation or another variable!");
+                            let ofp2 = par_expect!(token, OfP::from_token(&ofp2_t, build, program,currentLocals), "Unknown word type: {}!",ofp2_t.typ.to_string(false));
+                            currentScope.body_unwrap_mut().unwrap().push((Op.location.clone(), Instruction::MOV(ofp1, ofp2)))
+                        },
+                        IntrinsicType::EQUALS => {
+                            let ofp2_t = par_expect!(lexer.currentLocation,lexer.next(),"Unexpected variable operation or another variable!");
+                            let ofp2 = par_expect!(token, OfP::from_token(&ofp2_t, build, program,currentLocals), "Unknown word type: {}!",ofp2_t.typ.to_string(false));
+                            currentScope.body_unwrap_mut().unwrap().push((Op.location.clone(), Instruction::EQUALS(ofp1, ofp2)))
+                        }
+                        IntrinsicType::NOTEQUALS => {
+                            let ofp2_t = par_expect!(lexer.currentLocation,lexer.next(),"Unexpected variable operation or another variable!");
+                            let ofp2 = par_expect!(token, OfP::from_token(&ofp2_t, build, program,currentLocals), "Unknown word type: {}!",ofp2_t.typ.to_string(false));
+                            currentScope.body_unwrap_mut().unwrap().push((Op.location.clone(), Instruction::NOTEQUALS(ofp1, ofp2)))
+                        }
+                        
+                        IntrinsicType::LESSTHAN => {
+                            let ofp2_t = par_expect!(lexer.currentLocation,lexer.next(),"Unexpected variable operation or another variable!");
+                            let ofp2 = par_expect!(token, OfP::from_token(&ofp2_t, build, program,currentLocals), "Unknown word type: {}!",ofp2_t.typ.to_string(false));
+                            currentScope.body_unwrap_mut().unwrap().push((Op.location.clone(), Instruction::LESSTHAN(ofp1, ofp2)))
+                        }
+                        IntrinsicType::MORETHAN => {
+                            let ofp2_t = par_expect!(lexer.currentLocation,lexer.next(),"Unexpected variable operation or another variable!");
+                            let ofp2 = par_expect!(token, OfP::from_token(&ofp2_t, build, program,currentLocals), "Unknown word type: {}!",ofp2_t.typ.to_string(false));
+                            currentScope.body_unwrap_mut().unwrap().push((Op.location.clone(), Instruction::MORETHAN(ofp1, ofp2)))
+                        }
+                        IntrinsicType::LESSTHANEQ => {
+                            let ofp2_t = par_expect!(lexer.currentLocation,lexer.next(),"Unexpected variable operation or another variable!");
+                            let ofp2 = par_expect!(token, OfP::from_token(&ofp2_t, build, program,currentLocals), "Unknown word type: {}!",ofp2_t.typ.to_string(false));
+                            currentScope.body_unwrap_mut().unwrap().push((Op.location.clone(), Instruction::LESSTHANEQUALS(ofp1, ofp2)))
+                        }
+                        IntrinsicType::MORETHANEQ => {
+                            let ofp2_t = par_expect!(lexer.currentLocation,lexer.next(),"Unexpected variable operation or another variable!");
+                            let ofp2 = par_expect!(token, OfP::from_token(&ofp2_t, build, program,currentLocals), "Unknown word type: {}!",ofp2_t.typ.to_string(false));
+                            currentScope.body_unwrap_mut().unwrap().push((Op.location.clone(), Instruction::MORETHANEQUALS(ofp1, ofp2)))
+                        }
+                        
+                        
+                        _ => {
+                            par_error!(Op, "Unexpected intrinsic {} after ofp",typ.to_string(false))
+                        }
+                    }
+                },
+                _ => {
+                    let ofp2 = par_expect!(token, OfP::from_token(&Op, build, program,currentLocals), "Unexpected token type: {} after ofp!",Op.typ.to_string(false));
+                    let Op = par_expect!(lexer.currentLocation,lexer.next(),"Unexpected variable operation or another variable!");
+                    match &Op.typ {
+                        TokenType::IntrinsicType(op) => {
+                            match op {
+                                IntrinsicType::ADD => currentScope.body_unwrap_mut().unwrap().push((Op.location.clone(), Instruction::ADD(ofp1,ofp2))),
+                                IntrinsicType::SUB => currentScope.body_unwrap_mut().unwrap().push((Op.location.clone(), Instruction::SUB(ofp1,ofp2))),
+                                IntrinsicType::MUL => currentScope.body_unwrap_mut().unwrap().push((Op.location.clone(), Instruction::MUL(ofp1,ofp2))),
+                                IntrinsicType::DIV => currentScope.body_unwrap_mut().unwrap().push((Op.location.clone(), Instruction::DIV(ofp1,ofp2))),
+                                IntrinsicType::EQUALS  => currentScope.body_unwrap_mut().unwrap().push((Op.location.clone(), Instruction::EQUALS(ofp1,ofp2))),
+                                _ => {
+                                    par_error!(Op, "Unexpected intrinsic {} after ofp",Op.typ.to_string(false))
+                                }
+                            }
+                        },
+                        _ => {
+                            par_error!(Op, "Unexpected token type {} after ofp",Op.typ.to_string(false))
+                        }
+                    }
+                }
+            }
+        }
+        TokenType::IntrinsicType(Type) => {
+            match Type {
+                IntrinsicType::Extern => {
+                    let externType = lexer.next();
+                    let externType = par_expect!(lexer.currentLocation,externType,"Error: Unexpected abtrupt end of tokens in extern");
+                    match externType.typ {
+                        TokenType::WordType(Word) => {
+                            par_assert!(lexer.currentLocation, !build.contains_symbol(&Word), "Error: Redifinition of existing symbol {}",Word);
+                            let mut contract: Option<AnyContract> = None;
+                            
+                            if let Some(tok) = lexer.peekable().peek() {
+                                if tok.typ == TokenType::IntrinsicType(IntrinsicType::OPENPAREN) {
+                                    let tok = tok.clone();
+                                    contract = Some(parse_any_contract(lexer));
+                                    par_assert!(tok, tok.typ==TokenType::IntrinsicType(IntrinsicType::DOTCOMA),"Error: Expected dotcoma at the end of extern definition!");
+                                }
+                                else{
+                                    par_assert!(tok, tok.typ==TokenType::IntrinsicType(IntrinsicType::DOTCOMA),"Error: Expected dotcoma at the end of extern definition!");
+                                }
+                            }
+                            build.externals.insert(Word,External { typ: ExternalType::RawExternal, loc: externType.location.clone(), contract});
+                        }
+                        TokenType::StringType(Type) => {
+                            match Type.as_str() {
+                                "C" => {
+                                    let externWord = lexer.next();
+                                    let externWord = externWord.expect("Error: C type extern defined but stream of tokens abruptly ended!");
+                                    match externWord.typ {
+                                        TokenType::WordType(Word) => {
+                                            par_assert!(lexer.currentLocation, !build.contains_symbol(&Word), "Error: Redifinition of existing symbol {}",Word);
+                                            let mut contract: Option<AnyContract> = None;
+                                            if let Some(tok) = lexer.peekable().peek() {
+                                                if tok.typ == TokenType::IntrinsicType(IntrinsicType::OPENPAREN) {
+                                                    contract = Some(parse_any_contract(lexer));
+                                                    let ntc = par_expect!(lexer.currentLocation,lexer.next(),"Error: stream of tokens abruptly ended in extern definition");
+                                                    par_assert!(ntc, ntc.typ==TokenType::IntrinsicType(IntrinsicType::DOTCOMA),"Error: Expected dotcoma at the end of extern definition! But found {}",ntc.typ.to_string(false));
+                                                }
+                                                else {
+                                                    par_assert!(tok, tok.typ==TokenType::IntrinsicType(IntrinsicType::DOTCOMA),"Error: Expected dotcoma at the end of extern definition!");
+                                                }
+                                            }
+                                            build.externals.insert(Word,External { typ: ExternalType::CExternal, loc: externWord.location.clone(), contract});
+
+                                        }
+                                        TokenType::StringType(Word) => {
+                                            par_error!(token, "Error: Expected type Word but found String \"{}\"",Word)
+                                        }
+                                        Other => {
+                                            par_error!(token, "Unexpected token type \"{}\", (Expected Word)",Other.to_string(false));
+                                        }
+                                    }
+                                }
+                                typ => {
+                                    par_error!(token, "Unexpected behaviour! Unexpected type: {}",typ)
+                                }
+                            }
+                        },
+                        other => {
+                            par_error!(token,"Unexpected behaviour! expected type Word or String but found {}",other.to_string(false));
+                        }
+
+                    }
+                }
+                IntrinsicType::Func => {
+                    
+                    let funcName: Option<Token> = lexer.next();
+                    let funcName: Token = par_expect!(lexer.currentLocation,funcName,"Unexpected abtrupt end of tokens in func");
+                    match funcName.typ {
+                        TokenType::WordType(Word) => {
+                            par_assert!(lexer.currentLocation, !build.contains_symbol(&Word), "Error: Redifinition of existing symbol {}",Word);
+                            par_assert!(token,build.functions.get(&Word).is_none(),"Multiply defined symbols {}!",Word);
+                            let contract = parse_function_contract(lexer);
+                            lexer.CurrentFuncs.insert(Word.clone());
+                            let mut locals: Locals = LinkedHashMap::with_capacity(contract.Inputs.len());
+                            for (inn,inp) in contract.Inputs.iter() {
+                                locals.insert(inn.clone(), inp.clone());
+                            }                                
+                            scopeStack.push(Scope { typ: ScopeType::FUNCTION(Function { contract, body:  vec![(token.location.clone(),Instruction::FNBEGIN())], location: token.location.clone(), locals: Locals::new() }, Word), hasBeenOpened: false });
+                            currentLocals.push(locals);
+                            build.functions.reserve(1);
+                        }
+                        Other => par_error!(token,"Unexpected behaviour! Expected type Word but found {}",Other.to_string(false))
+                    }
+
+                }
+                IntrinsicType::OPENPAREN => todo!("loc: {}",token.location.loc_display()),
+                IntrinsicType::CLOSEPAREN => todo!(),
+                IntrinsicType::DOUBLE_COLIN => todo!("Context {:#?}",build),
+                IntrinsicType::COMA => todo!(),
+                IntrinsicType::OPENCURLY => {
+                    let ln = scopeStack.len();
+                    if ln != 0 {
+                        let s = scopeStack.last_mut().unwrap();
+                        if s.hasBeenOpened {
+                            //println!("CurrentLocals: {:#?}",currentLocals);
+                            currentLocals.push(Locals::new());
+                            //println!("CurrentLocals: {:#?}",currentLocals);
+                            scopeStack.push(Scope { typ: ScopeType::NORMAL(NormalScope { typ: NormalScopeType::EMPTY, body: vec![], locals: Locals::new()}), hasBeenOpened: true });
+                            return;
+                        }
+                        par_assert!(token,!s.hasBeenOpened, "Scope already opened! {:?}",scopeStack);
+                        s.hasBeenOpened = true;
+                        
+                        match &s.typ {
+                            ScopeType::FUNCTION(_, _) => {}
+                            ScopeType::NORMAL(normal) => {
+                                //println!("CurrentLocals: {:#?}",currentLocals);
+                                currentLocals.push(Locals::new());
+                                match normal.typ {
+                                    NormalScopeType::IF => {
+                                       par_assert!(token, ln > 1, "Error: Alone if outside of any scope is not allowed!");
+                                       let prev = scopeStack.get_mut(ln-2).unwrap();
+                                       par_assert!(token, prev.body_is_some(), "Error: if can not be declared inside of scope of {} as they do not allow instructions!",prev.typ.to_string(true));
+                                    }
+                                    NormalScopeType::ELSE | NormalScopeType::EMPTY => {}
+                                }
+                            }
+                        }
+                    }
+                    else {
+                        
+                        scopeStack.push(Scope { typ: ScopeType::NORMAL(NormalScope { typ: NormalScopeType::EMPTY, body: vec![], locals: Locals::new()}), hasBeenOpened: true});
+                    }
+                }
+                IntrinsicType::CLOSECURLY => {
+                    if let Some(sc) = scopeStack.pop() {
+                        par_assert!(token,sc.hasBeenOpened, "Error: scope closed but never opened!");
+                        match sc.typ {
+                            ScopeType::FUNCTION(mut func, name) => {
+                                //println!("CurrentLocals function: {:#?}",currentLocals);
+                                func.body.push((token.location.clone(),Instruction::SCOPEEND));
+                                func.locals = currentLocals.pop().unwrap();
+                                build.functions.insert(name, func);
+                            },
+                            ScopeType::NORMAL(mut normal) => {
+                                //println!("CurrentLocals at Normal: {:#?}",currentLocals);
+                                normal.locals = currentLocals.pop().unwrap();
+                                match normal.typ {
+                                    NormalScopeType::IF => {
+                                        let currentScope = getTopMut(scopeStack).unwrap();
+                                        let body = par_expect!(token,currentScope.body_unwrap_mut(), "Error: Can not close if, because it is inside a {} which doesn't support instructions!",currentScope.typ.to_string(false));
+                                        body.push((token.location.clone(),Instruction::EXPAND_IF_SCOPE(normal)))
+                                    },
+                                    NormalScopeType::EMPTY => {
+                                        let currentScope = getTopMut(scopeStack).unwrap();
+                                        let body = par_expect!(token,currentScope.body_unwrap_mut(), "Error: Can not close if, because it is inside a {} which doesn't support instructions!",currentScope.typ.to_string(false));
+                                        body.push((token.location.clone(),Instruction::EXPAND_SCOPE(normal)));
+                                    }
+                                    NormalScopeType::ELSE => {
+                                        let currentScope = getTopMut(scopeStack).unwrap();
+
+                                        let body = par_expect!(token,currentScope.body_unwrap_mut(), "Error: Can not close if, because it is inside a {} which doesn't support instructions!",currentScope.typ.to_string(false));
+                                        body.push((token.location.clone(),Instruction::EXPAND_ELSE_SCOPE(normal)));
+                                    },
+                                }
+                            }
+                        }
+                        
+                    }
+                    else {
+                        par_error!(token, "Scope closed but never opened!!!");
+                    }
+                }
+                IntrinsicType::ADD | IntrinsicType::SET  | IntrinsicType::PUSH | IntrinsicType::SUB | IntrinsicType::MUL | IntrinsicType::POP => {
+                    par_error!(token,"Unexpected token {}",Type.to_string(false));   
+                }
+                IntrinsicType::RET => {
+                    par_assert!(token, scopeStack.len()> 0 && getTopMut(scopeStack).unwrap().body_is_some(), "Error: Unexpected return intrinsic outside of scope! Scopes of type {} do not support instructions!",getTopMut(scopeStack).unwrap().typ.to_string(false));
+                    let body = getTopMut(scopeStack).unwrap().body_unwrap_mut().unwrap();
+                    body.push((token.location.clone(),Instruction::RET()));
+                },
+                IntrinsicType::INCLUDE => {
+                    let includeName = par_expect!(lexer.currentLocation,lexer.next(),"Error: abruptly ran out of tokens");
+                    match includeName.typ {
+                        TokenType::StringType(path) => {
+                            let p = PathBuf::from(&program.path);
+                            let p = p.parent().unwrap();
+                            let include_p  = PathBuf::from(path);
+                            let info = fs::read_to_string(String::from(p.join(&include_p).to_str().unwrap().replace("\\", "/"))).expect(&format!("Error: could not open file: {}",String::from(p.join(&include_p).to_str().unwrap()).replace("\\", "/")));
+                            let mut lf = Lexer::new(&info,lexer.Intrinsics,lexer.Definitions,HashSet::new());
+                            lf.currentLocation.file = Rc::new(String::from(p.join(&include_p).to_str().unwrap().replace("\\", "/")));
+                            let mut nprogram = program.clone();
+                            nprogram.path = String::from(p.join(&include_p).to_str().unwrap().replace("\\", "/"));
+                            let mut build2 = parse_tokens_to_build(&mut lf, &mut nprogram);
+                            build.externals.extend(build2.externals);
+                            for (strdefId,_strdef) in build2.stringdefs.iter() {
+                                let orgstrdefId  = strdefId.clone();
+                                let mut strdefId = strdefId.clone();
+                                let isContaining = build.stringdefs.contains_key(&strdefId);
+                                while build.stringdefs.contains_key(&strdefId) || build2.stringdefs.contains_key(&strdefId) {
+                                    strdefId = Uuid::new_v4();
+                                }
+                                if isContaining {
+                                    for (_, cn_cn) in build2.constdefs.iter_mut() {
+                                        match cn_cn.typ {
+                                            _ => {}
+                                            _ => {}
+                                            RawConstValueType::STR(ref mut val) => {
+                                                if &orgstrdefId == val {
+                                                    *val = strdefId
+                                                }
+                                            },
+                                        }
+                                    }
+                                }
+                            }
+                            build.stringdefs.extend(build2.stringdefs);
+                            for (fn_name,fn_fn) in build2.functions {
+                                let _loc = fn_fn.location.clone();
+                                match build.functions.insert(fn_name.clone(), fn_fn) {
+                                    Some(_Other) => {
+                                        par_error!(_loc, "Error: mulitply defined symbols {}",fn_name);
+                                    },
+                                    None => {},
+                                }
+                            }
+                            build.constdefs.reserve(build2.constdefs.len());
+                            for (cn_name,cn_val) in build2.constdefs{
+                                let loc = cn_val.loc.clone();
+                                match build.constdefs.insert(cn_name.clone(),cn_val) {
+                                    Some(_Other) => {
+                                        par_error!(loc,"Error: mulitply defined symbols {}",cn_name);
+                                    },
+                                    None => {},
+                                }
+                            }
+                        }
+                        _ => {
+                            par_error!(includeName, "Expected token type String but found {}",includeName.typ.to_string(false));
+                        }
+                    }
+                },
+                IntrinsicType::IF => {
+                    //let inbody = scopeStack.last_mut().unwrap();
+                    //let org_i = scopeStack.len();
+                    scopeStack.push(Scope { typ: ScopeType::NORMAL(NormalScope { typ: NormalScopeType::IF, body: vec![], locals: Locals::new()}), hasBeenOpened: false });
+                    // scopeStack.push(Scope { typ: ScopeType::NORMAL(NormalScope { typ: NormalScopeType::EMPTY, body: vec![], locals: Locals::new()}), hasBeenOpened: true });
+                    // currentLocals.push(Locals::new());
+                    // let prev_len = scopeStack.len();
+                    // while let Some(tok) = lexer.next() {
+                    //     if tok.typ == TokenType::IntrinsicType(IntrinsicType::OPENCURLY) {
+                    //         break;
+                    //     }
+                    //     parse_token_to_build_inst(tok, lexer, program, build, scopeStack, currentLocals);
+                    // }
+                    // let now_len = scopeStack.len();
+                    // par_assert!(token,prev_len == now_len,"Error: Expected to find the same exact amount of scopes as before!");
+                    // let t = scopeStack.pop().unwrap();
+                    // match t.typ {
+                    //     ScopeType::NORMAL(t) => {
+                    //         match t.typ {
+                    //             NormalScopeType::EMPTY => {},
+                    //             _ => par_error!(token, "Error: Expected EMPTY scope but found another!")
+                    //         }
+                    //         scopeStack[org_i].body_unwrap_mut().unwrap().extend(t.body);
+                    //     }
+                    //     _ => {
+                    //         par_error!(token,"Unexpected scope type in IF condition!");
+                    //     }
+                    // }
+                },
+                IntrinsicType::CONSTANT => {
+                    let first = lexer.next();
+                    let first = par_expect!(lexer.currentLocation,first,"abruptly ran out of tokens in constant name definition");
+                    let name: String = match first.typ {
+                        TokenType::WordType(ref word) => {
+                            par_assert!(first, !lexer.CurrentFuncs.contains(word), "Error: multiple constant symbol definitions! Cannot define a constant that already exists as a function!\nFunction defined at: {}",build.functions.get(word).unwrap().location.loc_display());
+                            word.to_string()
+                        }
+                        _ => {
+                            par_error!(first, "Unexpected token type! Expected word but found {}",first.typ.to_string(false));
+                        }
+                    };
+                    par_assert!(first, !build.contains_symbol(&name) || build.constdefs.contains_key(&name), "Error: Cannot define constant {} as that would redefine a symbol of a different type!",name);
+                    let first = lexer.next();
+                    let first = par_expect!(lexer.currentLocation,first,"abruptly ran out of tokens in constant name definition");
+                    let mut expect_type: Option<VarType> = None;
+                    match first.typ {
+                        TokenType::IntrinsicType(typ) => {
+                            match typ {
+                                IntrinsicType::SET => {}
+                                IntrinsicType::DOUBLE_COLIN => {
+                                    let typ = par_expect!(lexer.currentLocation,lexer.next(), "Error: abruptly ran out of tokens in constant type definition");
+                                    if let TokenType::Definition(d) = typ.typ {
+                                        expect_type = Some(d);
+                                        let typ = par_expect!(lexer.currentLocation,lexer.next(), "Error: abruptly ran out of tokens in constant type definition");
+                                        par_assert!(typ, typ.typ == TokenType::IntrinsicType(IntrinsicType::SET), "Error: unexpected token type {} after constant definition! Expected =",typ.typ.to_string(false));
+                                    }
+                                    else {
+                                        par_error!(typ, "Error: Expected definition but found {}!",typ.typ.to_string(false));
+                                    }
+                                }
+                                _ => {
+                                    par_error!(first, "Error: expected = but found {}",typ.to_string(false));
+                                }
+                            }
+                        }
+                        _ => {
+                            par_error!(first, "Unexpected token type! Expected intrinsic but found {}",first.typ.to_string(false));
+                        }
+                    }
+                    
+                    let val = eval_const_def(lexer,build,TokenType::IntrinsicType(IntrinsicType::DOTCOMA));
+                    if let Some(expect_type) = expect_type {
+                        let tvt = val.typ.to_var_type();
+                        par_assert!(lexer.currentLocation, val.typ.is_eq_vartype(&expect_type), "Error: Non matching variable types!\nExpected: {}\nFound: {}",expect_type.to_string(false),if let Some(tvt) = tvt {tvt.to_string(false)} else {"None".to_string()});
+                    }
+                    let result = match val.typ {
+                        ConstValueType::INT(rval) => {
+                           RawConstValue {typ: RawConstValueType::INT(rval), loc: val.loc}
+                        }
+                        ConstValueType::LONG(rval) => {
+                            RawConstValue {typ: RawConstValueType::LONG(rval), loc: val.loc}
+                        }
+                        ConstValueType::STR(rval, typ) => {
+                            let mut UUID = Uuid::new_v4();
+                            while build.stringdefs.contains_key(&UUID) {
+                                UUID = Uuid::new_v4();
+                            }
+                            build.stringdefs.insert(UUID,ProgramString {Data: rval, Typ: typ});
+                            RawConstValue {typ: RawConstValueType::STR(UUID), loc: val.loc}
+                        }
+                        ConstValueType::PTR(typ,v) => { 
+                            RawConstValue {typ: RawConstValueType::PTR(typ, v), loc: val.loc}
+                        }
+
+                    };
+                    if let Some(constdef) = build.constdefs.get(&name) {
+                        let i1 = constdef.typ.to_type(&build);
+                        let i2 = result.typ.to_type(&build);
+                        par_assert!(result.loc, i1 == i2,"Error: Constant value defined at {}, Redined with a different type at {}!\nOriginal = {:?}\nRedefinition = {:?}",constdef.loc.loc_display(),result.loc.loc_display(),i1,i2);
+                    }
+                    build.constdefs.insert(name, result);
+                    
+                },
+                IntrinsicType::DOTCOMA => {},
+                IntrinsicType::ELSE => {
+                    scopeStack.push(Scope { typ: ScopeType::NORMAL(NormalScope { typ: NormalScopeType::ELSE, body: vec![], locals: Locals::new()}), hasBeenOpened: false })
+                },
+                IntrinsicType::DIV => todo!("{:#?} at {}",build,lexer.currentLocation.loc_display()),
+                IntrinsicType::Let => {
+                    
+                    let nametok = par_expect!(lexer.currentLocation, lexer.next(), "Error: abruptly ran out of tokens for Let");
+                    let loc = nametok.location.clone();
+                    match nametok.typ {
+                        TokenType::WordType(name) => {
+                            par_assert!(loc, !build.contains_symbol(&name), "Error: Redifinition of existing symbol {}",name);
+                            par_assert!(token, scopeStack.len() > 0 && getTopMut(scopeStack).unwrap().body_is_some(), "Error: Unexpected multiply intrinsic outside of scope! Scopes of type {} do not support instructions!",getTopMut(scopeStack).unwrap().typ.to_string(false));
+                            let currentScope = getTopMut(scopeStack).unwrap();
+                            let typ = par_expect!(lexer.currentLocation, lexer.next(), "Error: abruptly ran out of tokens for let type");                                
+                            par_assert!(typ,typ.typ==TokenType::IntrinsicType(IntrinsicType::DOUBLE_COLIN), "Error: You probably forgot to put a : after the name!");
+                            let typ = par_expect!(lexer.currentLocation, lexer.next(), "Error: abruptly ran out of tokens for let type");
+                            match typ.typ {
+                                TokenType::Definition(def) => {
+                                    currentLocals.last_mut().unwrap().insert(name.clone(), def);
+                                    currentScope.body_unwrap_mut().unwrap().push((lexer.currentLocation.clone(),Instruction::DEFVAR(name)))
+                                }
+                                _ => {
+                                    par_error!(typ, "Error: unexpected token type in let definition. Expected VarType but found {}",typ.typ.to_string(false))
+                                }
+                            }
+                        },
+                        _ => {
+                            par_error!(nametok, "Unexpected name type, Expected Word but found {}", nametok.typ.to_string(false))
+                        }
+                    }
+                },
+                IntrinsicType::INTERRUPT => {
+                    
+                    par_assert!(token, scopeStack.len() > 0 && getTopMut(scopeStack).unwrap().body_is_some(), "Error: Unexpected interrupt intrinsic outside of scope! Scopes of type {} do not support instructions!",getTopMut(scopeStack).unwrap().typ.to_string(false));
+                    let body = getTopMut(scopeStack).unwrap().body_unwrap_mut().unwrap();
+                    let lexerNext = par_expect!(lexer.currentLocation,lexer.next(),"Stream of tokens ended abruptly at INTERRUPT call");
+                    match lexerNext.typ {
+                        TokenType::Number32(val) => {
+                            body.push((lexer.currentLocation.clone(),Instruction::INTERRUPT(val as i64)));
+                        }
+                        TokenType::Number64(val) => {
+                            body.push((lexer.currentLocation.clone(),Instruction::INTERRUPT(val)));
+                        }
+                        TokenType::WordType(ref data) => {
+                            if let Some(cons) = build.constdefs.get(data) {
+                                body.push((lexer.currentLocation.clone(),Instruction::INTERRUPT(cons.typ.get_num_data())));
+                            }
+                            else {
+                                par_error!(lexerNext, "Unexpected word type for INTERRUPT, {}",lexerNext.typ.to_string(false))
+                            }
+                        }
+                        _ => {
+                            par_error!(lexerNext, "Unexpected token type for INTERRUPT, {}",lexerNext.typ.to_string(false))
+                        }
+                    }
+                    
+                },
+                IntrinsicType::RS => {
+                    par_assert!(token, scopeStack.len() > 0 && getTopMut(scopeStack).unwrap().body_is_some(), "Error: Unexpected rs intrinsic outside of scope! Scopes of type {} do not support instructions!",getTopMut(scopeStack).unwrap().typ.to_string(false));
+                    let body = getTopMut(scopeStack).unwrap().body_unwrap_mut().unwrap();
+                    
+                    let lexerNext = par_expect!(lexer.currentLocation,lexer.next(),"Stream of tokens ended abruptly at RS call");
+                    match lexerNext.typ {
+                        TokenType::Register(reg) => {
+                            let optyp = par_expect!(lexer.currentLocation,lexer.next(),"Stream of tokens ended abruptly at RS push call");
+                            match optyp.typ {
+                                TokenType::IntrinsicType(typ) => {
+                                match typ {
+                                    IntrinsicType::PUSH => {
+                                        
+                                        body.push((lexer.currentLocation.clone(), Instruction::RSPUSH(OfP::REGISTER(reg))))            
+                                    }
+                                    _ => {
+                                        par_error!(lexerNext.location, "Error: Unexpected Intrinsic Type: {}",typ.to_string(false))
+                                    }
+                                }
+                                }
+                                _ => {
+                                    par_error!(lexerNext.location, "Error: Expected Intrinsic but found {}",lexerNext.typ.to_string(false))
+                                }
+                            }
+                            
+                        }
+                        _ => {
+                            par_error!(lexerNext.location, "Error: Expected Register but found {}",lexerNext.typ.to_string(false))                
+                        }
+                        
+                    }
+                },
+                IntrinsicType::TOP => todo!(),
+                IntrinsicType::CAST => todo!(),
+                IntrinsicType::OPENANGLE => todo!(),
+                IntrinsicType::CLOSEANGLE => todo!(),
+                IntrinsicType::DLL_IMPORT => {
+                    let ntok = par_expect!(lexer.currentLocation, lexer.next(), "Error: Abruptly ran out of tokens for DLL_IMPORT");
+                    let file_from = par_expect!(ntok, ntok.unwrap_string(), "Error: Expected token string but found {}",ntok.typ.to_string(false));
+                    let ntok = par_expect!(lexer.currentLocation, lexer.next(), "Error: Abruptly ran out of tokens for DLL_IMPORT");
+                    let symbol_name = par_expect!(ntok,ntok.unwrap_word(), "Error: Expected token word but found {}",ntok.typ.to_string(false));
+                    par_assert!(ntok, !build.contains_symbol(symbol_name), "Error: Trying to overwrite already existing symbol! {}",symbol_name);
+                    let ntok = par_expect!(lexer.currentLocation, lexer.next(), "Error: Abruptly ran out of tokens for DLL_IMPORT");
+                    par_assert!(ntok, ntok.typ == TokenType::IntrinsicType(IntrinsicType::OPENPAREN), "Error: Unexpected symbol {} in DLL_IMPORT! {}",ntok.typ.to_string(false),symbol_name);
+                    let symbol_contract = parse_any_contract(lexer);
+                    build.dll_imports.insert(symbol_name.clone(), DLL_import { from: file_from.clone(), contract: symbol_contract });
+                },
+                IntrinsicType::DLL_EXPORT => {
+                    let ntok = par_expect!(lexer.currentLocation, lexer.next(), "Error: Abruptly ran out of tokens for DLL_EXPORT");
+                    let symbol_name = par_expect!(ntok,ntok.unwrap_word(), "Error: Expected token word but found {}",ntok.typ.to_string(false));
+                    let ntok = par_expect!(lexer.currentLocation, lexer.next(), "Error: Abruptly ran out of tokens for DLL_EXPORT");
+                    par_assert!(ntok, ntok.typ == TokenType::IntrinsicType(IntrinsicType::OPENPAREN), "Error: Unexpected symbol {} in DLL_EXPORT! {}",ntok.typ.to_string(false),symbol_name);
+                    let symbol_contract = parse_any_contract(lexer);
+                    build.dll_exports.insert(symbol_name.clone(), DLL_export { contract: symbol_contract });
+                },
+                IntrinsicType::MORETHAN => todo!(),
+                IntrinsicType::LESSTHAN => todo!(),
+                IntrinsicType::MORETHANEQ => todo!(),
+                IntrinsicType::LESSTHANEQ => todo!(),
+                IntrinsicType::NOTEQUALS => todo!(),
+                IntrinsicType::EQUALS => todo!(),
+            }
+        }
+        TokenType::StringType(_) => {
+            par_error!(lexer.currentLocation, "Error: Unexpected Token type String!");
+        }
+        TokenType::CStringType(_) => {
+            par_error!(lexer.currentLocation, "Error: Unexpected Token type CString!");
+        }
+        
+        TokenType::CharType(_) => {
+            todo!("{}: Unexpected char! Chars",token.loc_display())
+            
+        }
+        TokenType::Number32(_) => {
+            par_error!(lexer.currentLocation, "Error: Unexpected Token type Integer!");
+        }
+        TokenType::Number64(_) => {
+            par_error!(lexer.currentLocation, "Error: Unexpected Token type Long!");
+        }
+        TokenType::Definition(_) => todo!(),
+        TokenType::CStringType(_) => todo!(),
+        TokenType::Function(name) => {
+            let args = parse_argument_contract(lexer, build, currentLocals);
+            let body = getTopMut(scopeStack).unwrap().body_unwrap_mut().unwrap();
+            body.push((token.location.clone(),Instruction::CALL(name, args)));
+            
+        },
+        TokenType::Register(reg) => {
+            let currentScope = getTopMut(scopeStack).unwrap();
+            let regOp = par_expect!(lexer.currentLocation,lexer.next(),"Unexpected register operation or another register!");
+            match regOp.typ {
+                TokenType::IntrinsicType(typ) => {
+                    match typ {
+                        IntrinsicType::SET => {
+                            let token = par_expect!(lexer.currentLocation,lexer.next(),"abruptly ran out of tokens");
+                            match token.typ {
+                                TokenType::Number32(data) => {
+                                    if reg.size() >= 4 {
+                                        let body = currentScope.body_unwrap_mut().unwrap();
+                                        body.push((token.location,Instruction::MOV(OfP::REGISTER(reg), OfP::CONST(RawConstValueType::INT(data)))))
+                                    }
+                                }
+                                TokenType::Number64(data) => {
+                                    if reg.size() >= 8 {
+                                        let body = currentScope.body_unwrap_mut().unwrap();
+                                        body.push((token.location,Instruction::MOV(OfP::REGISTER(reg), OfP::CONST(RawConstValueType::LONG(data)))));
+                                    }
+                                }
+                                TokenType::Register(reg2) => {
+                                    currentScope.body_unwrap_mut().unwrap().push((token.location.clone(),Instruction::MOV(OfP::REGISTER(reg), OfP::REGISTER(reg2))));
+
+                                }
+                                TokenType::WordType(ref data) => {
+                                    if currentScope.contract_is_some() && currentScope.contract_unwrap().unwrap().Inputs.contains_key(data) {
+                                        let contract = currentScope.contract_unwrap().unwrap();
+                                        par_assert!(token, contract.Inputs.contains_key(data), "Error: Unexpected word for register: '{}'",data);
+                                        currentScope.body_unwrap_mut().unwrap().push((token.location.clone(), Instruction::MOV(OfP::REGISTER(reg), OfP::LOCALVAR(data.to_owned()))))
+                                    }
+                                    else if let Some(cons) = build.constdefs.get(data) {
+                                        currentScope.body_unwrap_mut().unwrap().push((token.location.clone(), Instruction::MOV(OfP::REGISTER(reg), OfP::CONST(cons.typ.clone()))))
+                                    }
+                                    else {
+                                        par_error!(token,"Unexpected Type for Mov Intrinsic. Expected Number32/Number64 but found {}",token.typ.to_string(false))
+                                    }
+                                }
+                                _ => par_error!(token,"Unexpected Type for Mov Intrinsic. Expected Number32/Number64 but found {}",token.typ.to_string(false))
+                            }
+                        }
+                        Other => {
+                            par_error!(token,"Unexpected Intrinsic Type: {}, Registers can only perform register operations \"pop\" \"push\" \"mov\" ",Other.to_string(false))
+                        }
+                    }
+                },
+                TokenType::Register(reg2) => {
+                    par_assert!(token,reg.size()==reg2.size(),"Gotten two differently sized registers to one op!");
+                    let regOp = lexer.next().expect(&format!("(P) [ERROR] {}:{}:{}: Unexpected register operation!",token.location.clone().file,&token.location.clone().linenumber,&token.location.clone().character));
+                    let body = currentScope.body_unwrap_mut().unwrap();
+                    match regOp.typ {
+                        TokenType::IntrinsicType(typ) => {
+                            
+                            match typ {
+                                IntrinsicType::ADD => {
+                                    body.push((token.location.clone(),Instruction::ADD(OfP::REGISTER(reg), OfP::REGISTER(reg2))))
+                                }
+                                IntrinsicType::SUB => {
+                                    body.push((token.location.clone(),Instruction::SUB(OfP::REGISTER(reg), OfP::REGISTER(reg2))))
+                                }
+                                IntrinsicType::MUL => {
+                                    body.push((token.location.clone(),Instruction::MUL(OfP::REGISTER(reg), OfP::REGISTER(reg2))))
+                                }
+                                IntrinsicType::EQUALS => {
+                                    body.push((token.location.clone(),Instruction::EQUALS(OfP::REGISTER(reg), OfP::REGISTER(reg2))))
+                                }
+                                IntrinsicType::DIV => {
+                                    body.push((token.location.clone(),Instruction::DIV(OfP::REGISTER(reg), OfP::REGISTER(reg2))))
+                                }
+                                IntrinsicType::SET => {
+                                    body.push((token.location.clone(),Instruction::MOV(OfP::REGISTER(reg), OfP::REGISTER(reg2))))
+                                }
+                                other => par_error!(token,"Unexpected Intrinsic! Expected Register Intrinsic but found {}",other.to_string(false))
+                            }
+                        }
+                        other => {
+                            par_error!(token, "Unexpected token type: Expected Intrinsic but found {}",other.to_string(false));
+                        }
+                    }
+                }
+                typ => {
+                    par_error!(token,"Unexpected register operation! Expected Intrinsic or another Register but found {}",typ.to_string(false));
+                }
+            }
+        },
+    }
+
+}
 fn parse_tokens_to_build(lexer: &mut Lexer, program: &mut CmdProgram) -> BuildProgram {
     let mut build: BuildProgram = BuildProgram { externals: HashMap::new(), functions: HashMap::new(),stringdefs: HashMap::new(), constdefs: HashMap::new(), dll_imports: HashMap::new(), dll_exports: HashMap::new() };
     let mut scopeStack: ScopeStack = vec![];
     let mut currentLocals: Vec<Locals> = Vec::new();
     while let Some(token) = lexer.next() {
-        match token.typ {
-            TokenType::WordType(ref word) => {
-                par_assert!(token,scopeStack.len() > 0, "Undefined Word Call outside of entry point! '{}'",word);
-                let currentScope = getTopMut(&mut scopeStack).unwrap();
-                par_assert!(token,currentScope.body_is_some(), "Error: can not insert word operation at the top level of a {} as it does not support instructions",currentScope.typ.to_string(false));
-                if build.externals.contains_key(word) {
-                    let contract = parse_argument_contract(lexer, &mut build, &currentLocals);
-                    let body = currentScope.body_unwrap_mut().unwrap();
-                    body.push((token.location.clone(),Instruction::CALLRAW(word.clone(), contract)));
-                    continue;
-                } else if build.dll_imports.contains_key(word) {
-                    let contract = parse_argument_contract(lexer, &mut build, &currentLocals);
-                    let body = currentScope.body_unwrap_mut().unwrap();
-                    body.push((token.location.clone(),Instruction::CALLRAW(word.clone(), contract)));
-                    continue;
-                }
-                let ofp1 = par_expect!(token, OfP::from_token(&token, &mut build, program,&currentLocals), "Unknown word type: {}!",word);
-                let Op = par_expect!(lexer.currentLocation,lexer.next(),"Unexpected variable operation or another variable!");
-                match &Op.typ {
-                    
-                    TokenType::IntrinsicType(typ) => {
-                        match typ {
-                            IntrinsicType::SET => {
-                                let ofp2_t = par_expect!(lexer.currentLocation,lexer.next(),"Unexpected variable operation or another variable!");
-                                let ofp2 = par_expect!(token, OfP::from_token(&ofp2_t, &mut build, program,&currentLocals), "Unknown word type: {}!",ofp2_t.typ.to_string(false));
-                                currentScope.body_unwrap_mut().unwrap().push((Op.location.clone(), Instruction::MOV(ofp1, ofp2)))
-                            },
-                            IntrinsicType::EQUALS => {
-                                let ofp2_t = par_expect!(lexer.currentLocation,lexer.next(),"Unexpected variable operation or another variable!");
-                                let ofp2 = par_expect!(token, OfP::from_token(&ofp2_t, &mut build, program,&currentLocals), "Unknown word type: {}!",ofp2_t.typ.to_string(false));
-                                currentScope.body_unwrap_mut().unwrap().push((Op.location.clone(), Instruction::EQUALS(ofp1, ofp2)))
-                            }
-                            IntrinsicType::NOTEQUALS => {
-                                let ofp2_t = par_expect!(lexer.currentLocation,lexer.next(),"Unexpected variable operation or another variable!");
-                                let ofp2 = par_expect!(token, OfP::from_token(&ofp2_t, &mut build, program,&currentLocals), "Unknown word type: {}!",ofp2_t.typ.to_string(false));
-                                currentScope.body_unwrap_mut().unwrap().push((Op.location.clone(), Instruction::NOTEQUALS(ofp1, ofp2)))
-                            }
-                            
-                            IntrinsicType::LESSTHAN => {
-                                let ofp2_t = par_expect!(lexer.currentLocation,lexer.next(),"Unexpected variable operation or another variable!");
-                                let ofp2 = par_expect!(token, OfP::from_token(&ofp2_t, &mut build, program,&currentLocals), "Unknown word type: {}!",ofp2_t.typ.to_string(false));
-                                currentScope.body_unwrap_mut().unwrap().push((Op.location.clone(), Instruction::LESSTHAN(ofp1, ofp2)))
-                            }
-                            IntrinsicType::MORETHAN => {
-                                let ofp2_t = par_expect!(lexer.currentLocation,lexer.next(),"Unexpected variable operation or another variable!");
-                                let ofp2 = par_expect!(token, OfP::from_token(&ofp2_t, &mut build, program,&currentLocals), "Unknown word type: {}!",ofp2_t.typ.to_string(false));
-                                currentScope.body_unwrap_mut().unwrap().push((Op.location.clone(), Instruction::MORETHAN(ofp1, ofp2)))
-                            }
-                            IntrinsicType::LESSTHANEQ => {
-                                let ofp2_t = par_expect!(lexer.currentLocation,lexer.next(),"Unexpected variable operation or another variable!");
-                                let ofp2 = par_expect!(token, OfP::from_token(&ofp2_t, &mut build, program,&currentLocals), "Unknown word type: {}!",ofp2_t.typ.to_string(false));
-                                currentScope.body_unwrap_mut().unwrap().push((Op.location.clone(), Instruction::LESSTHANEQUALS(ofp1, ofp2)))
-                            }
-                            IntrinsicType::MORETHANEQ => {
-                                let ofp2_t = par_expect!(lexer.currentLocation,lexer.next(),"Unexpected variable operation or another variable!");
-                                let ofp2 = par_expect!(token, OfP::from_token(&ofp2_t, &mut build, program,&currentLocals), "Unknown word type: {}!",ofp2_t.typ.to_string(false));
-                                currentScope.body_unwrap_mut().unwrap().push((Op.location.clone(), Instruction::MORETHANEQUALS(ofp1, ofp2)))
-                            }
-                            
-                            
-                            _ => {
-                                par_error!(Op, "Unexpected intrinsic {} after ofp",typ.to_string(false))
-                            }
-                        }
-                    },
-                    _ => {
-                        let ofp2 = par_expect!(token, OfP::from_token(&Op, &mut build, program,&currentLocals), "Unexpected token type: {} after ofp!",Op.typ.to_string(false));
-                        let Op = par_expect!(lexer.currentLocation,lexer.next(),"Unexpected variable operation or another variable!");
-                        match &Op.typ {
-                            TokenType::IntrinsicType(op) => {
-                                match op {
-                                    IntrinsicType::ADD => currentScope.body_unwrap_mut().unwrap().push((Op.location.clone(), Instruction::ADD(ofp1,ofp2))),
-                                    IntrinsicType::SUB => currentScope.body_unwrap_mut().unwrap().push((Op.location.clone(), Instruction::SUB(ofp1,ofp2))),
-                                    IntrinsicType::MUL => currentScope.body_unwrap_mut().unwrap().push((Op.location.clone(), Instruction::MUL(ofp1,ofp2))),
-                                    IntrinsicType::DIV => currentScope.body_unwrap_mut().unwrap().push((Op.location.clone(), Instruction::DIV(ofp1,ofp2))),
-                                    IntrinsicType::EQUALS  => currentScope.body_unwrap_mut().unwrap().push((Op.location.clone(), Instruction::EQUALS(ofp1,ofp2))),
-                                    _ => {
-                                        par_error!(Op, "Unexpected intrinsic {} after ofp",Op.typ.to_string(false))
-                                    }
-                                }
-                            },
-                            _ => {
-                                par_error!(Op, "Unexpected token type {} after ofp",Op.typ.to_string(false))
-                            }
-                        }
-                    }
-                }
-            }
-            TokenType::IntrinsicType(Type) => {
-                match Type {
-                    IntrinsicType::Extern => {
-                        let externType = lexer.next();
-                        let externType = par_expect!(lexer.currentLocation,externType,"Error: Unexpected abtrupt end of tokens in extern");
-                        match externType.typ {
-                            TokenType::WordType(Word) => {
-                                par_assert!(lexer.currentLocation, !build.contains_symbol(&Word), "Error: Redifinition of existing symbol {}",Word);
-                                let mut contract: Option<AnyContract> = None;
-                                
-                                if let Some(tok) = lexer.peekable().peek() {
-                                    if tok.typ == TokenType::IntrinsicType(IntrinsicType::OPENPAREN) {
-                                        let tok = tok.clone();
-                                        contract = Some(parse_any_contract(lexer));
-                                        par_assert!(tok, tok.typ==TokenType::IntrinsicType(IntrinsicType::DOTCOMA),"Error: Expected dotcoma at the end of extern definition!");
-                                    }
-                                    else{
-                                        par_assert!(tok, tok.typ==TokenType::IntrinsicType(IntrinsicType::DOTCOMA),"Error: Expected dotcoma at the end of extern definition!");
-                                    }
-                                }
-                                build.externals.insert(Word,External { typ: ExternalType::RawExternal, loc: externType.location.clone(), contract});
-                            }
-                            TokenType::StringType(Type) => {
-                                match Type.as_str() {
-                                    "C" => {
-                                        let externWord = lexer.next();
-                                        let externWord = externWord.expect("Error: C type extern defined but stream of tokens abruptly ended!");
-                                        match externWord.typ {
-                                            TokenType::WordType(Word) => {
-                                                par_assert!(lexer.currentLocation, !build.contains_symbol(&Word), "Error: Redifinition of existing symbol {}",Word);
-                                                let mut contract: Option<AnyContract> = None;
-                                                if let Some(tok) = lexer.peekable().peek() {
-                                                    if tok.typ == TokenType::IntrinsicType(IntrinsicType::OPENPAREN) {
-                                                        contract = Some(parse_any_contract(lexer));
-                                                        let ntc = par_expect!(lexer.currentLocation,lexer.next(),"Error: stream of tokens abruptly ended in extern definition");
-                                                        par_assert!(ntc, ntc.typ==TokenType::IntrinsicType(IntrinsicType::DOTCOMA),"Error: Expected dotcoma at the end of extern definition! But found {}",ntc.typ.to_string(false));
-                                                    }
-                                                    else {
-                                                        par_assert!(tok, tok.typ==TokenType::IntrinsicType(IntrinsicType::DOTCOMA),"Error: Expected dotcoma at the end of extern definition!");
-                                                    }
-                                                }
-                                                build.externals.insert(Word,External { typ: ExternalType::CExternal, loc: externWord.location.clone(), contract});
-
-                                            }
-                                            TokenType::StringType(Word) => {
-                                                par_error!(token, "Error: Expected type Word but found String \"{}\"",Word)
-                                            }
-                                            Other => {
-                                                par_error!(token, "Unexpected token type \"{}\", (Expected Word)",Other.to_string(false));
-                                            }
-                                        }
-                                    }
-                                    typ => {
-                                        par_error!(token, "Unexpected behaviour! Unexpected type: {}",typ)
-                                    }
-                                }
-                            },
-                            other => {
-                                par_error!(token,"Unexpected behaviour! expected type Word or String but found {}",other.to_string(false));
-                            }
-
-                        }
-                    }
-                    IntrinsicType::Func => {
-                        
-                        let funcName: Option<Token> = lexer.next();
-                        let funcName: Token = par_expect!(lexer.currentLocation,funcName,"Unexpected abtrupt end of tokens in func");
-                        match funcName.typ {
-                            TokenType::WordType(Word) => {
-                                par_assert!(lexer.currentLocation, !build.contains_symbol(&Word), "Error: Redifinition of existing symbol {}",Word);
-                                par_assert!(token,build.functions.get(&Word).is_none(),"Multiply defined symbols {}!",Word);
-                                let contract = parse_function_contract(lexer);
-                                lexer.CurrentFuncs.insert(Word.clone());
-                                let mut locals: Locals = LinkedHashMap::with_capacity(contract.Inputs.len());
-                                for (inn,inp) in contract.Inputs.iter() {
-                                    locals.insert(inn.clone(), inp.clone());
-                                }                                
-                                scopeStack.push(Scope { typ: ScopeType::FUNCTION(Function { contract, body:  vec![(token.location.clone(),Instruction::FNBEGIN())], location: token.location.clone(), locals: Locals::new() }, Word), hasBeenOpened: false });
-                                currentLocals.push(locals);
-                                build.functions.reserve(1);
-                            }
-                            Other => par_error!(token,"Unexpected behaviour! Expected type Word but found {}",Other.to_string(false))
-                        }
-
-                    }
-                    IntrinsicType::OPENPAREN => todo!("loc: {}",token.location.loc_display()),
-                    IntrinsicType::CLOSEPAREN => todo!(),
-                    IntrinsicType::DOUBLE_COLIN => todo!("Context {:#?}",build),
-                    IntrinsicType::COMA => todo!(),
-                    IntrinsicType::OPENCURLY => {
-                        let ln = scopeStack.len();
-                        if ln != 0 {
-                            let s = scopeStack.last_mut().unwrap();
-                            if s.hasBeenOpened {
-                                //println!("CurrentLocals: {:#?}",currentLocals);
-                                currentLocals.push(Locals::new());
-                                //println!("CurrentLocals: {:#?}",currentLocals);
-                                scopeStack.push(Scope { typ: ScopeType::NORMAL(NormalScope { typ: NormalScopeType::EMPTY, body: vec![], locals: Locals::new()}), hasBeenOpened: true });
-                                continue;
-                            }
-                            par_assert!(token,!s.hasBeenOpened, "Scope already opened! {:?}",scopeStack);
-                            s.hasBeenOpened = true;
-                            
-                            match &s.typ {
-                                ScopeType::FUNCTION(_, _) => {}
-                                ScopeType::NORMAL(normal) => {
-                                    //println!("CurrentLocals: {:#?}",currentLocals);
-                                    currentLocals.push(Locals::new());
-                                    match normal.typ {
-                                        NormalScopeType::IF => {
-                                           par_assert!(token, ln > 1, "Error: Alone if outside of any scope is not allowed!");
-                                           let prev = scopeStack.get_mut(ln-2).unwrap();
-                                           par_assert!(token, prev.body_is_some(), "Error: if can not be declared inside of scope of {} as they do not allow instructions!",prev.typ.to_string(true));
-                                        }
-                                        NormalScopeType::ELSE | NormalScopeType::EMPTY => {}
-                                    }
-                                }
-                            }
-                        }
-                        else {
-                            
-                            scopeStack.push(Scope { typ: ScopeType::NORMAL(NormalScope { typ: NormalScopeType::EMPTY, body: vec![], locals: Locals::new()}), hasBeenOpened: true});
-                        }
-                    }
-                    IntrinsicType::CLOSECURLY => {
-                        if let Some(sc) = scopeStack.pop() {
-                            par_assert!(token,sc.hasBeenOpened, "Error: scope closed but never opened!");
-                            match sc.typ {
-                                ScopeType::FUNCTION(mut func, name) => {
-                                    //println!("CurrentLocals function: {:#?}",currentLocals);
-                                    func.body.push((token.location.clone(),Instruction::SCOPEEND));
-                                    func.locals = currentLocals.pop().unwrap();
-                                    build.functions.insert(name, func);
-                                },
-                                ScopeType::NORMAL(mut normal) => {
-                                    //println!("CurrentLocals at Normal: {:#?}",currentLocals);
-                                    normal.locals = currentLocals.pop().unwrap();
-                                    match normal.typ {
-                                        NormalScopeType::IF => {
-                                            let currentScope = getTopMut(&mut scopeStack).unwrap();
-                                            let body = par_expect!(token,currentScope.body_unwrap_mut(), "Error: Can not close if, because it is inside a {} which doesn't support instructions!",currentScope.typ.to_string(false));
-                                            body.push((token.location.clone(),Instruction::EXPAND_IF_SCOPE(normal)))
-                                        },
-                                        NormalScopeType::EMPTY => {
-                                            let currentScope = getTopMut(&mut scopeStack).unwrap();
-                                            let body = par_expect!(token,currentScope.body_unwrap_mut(), "Error: Can not close if, because it is inside a {} which doesn't support instructions!",currentScope.typ.to_string(false));
-                                            body.push((token.location.clone(),Instruction::EXPAND_SCOPE(normal)));
-                                        }
-                                        NormalScopeType::ELSE => {
-                                            let currentScope = getTopMut(&mut scopeStack).unwrap();
-
-                                            let body = par_expect!(token,currentScope.body_unwrap_mut(), "Error: Can not close if, because it is inside a {} which doesn't support instructions!",currentScope.typ.to_string(false));
-                                            body.push((token.location.clone(),Instruction::EXPAND_ELSE_SCOPE(normal)));
-                                        },
-                                    }
-                                }
-                            }
-                            
-                        }
-                        else {
-                            par_error!(token, "Scope closed but never opened!!!");
-                        }
-                    }
-                    IntrinsicType::ADD | IntrinsicType::SET  | IntrinsicType::PUSH | IntrinsicType::SUB | IntrinsicType::MUL | IntrinsicType::POP => {
-                        par_error!(token,"Unexpected token {}",Type.to_string(false));   
-                    }
-                    IntrinsicType::RET => {
-                        par_assert!(token, scopeStack.len()> 0 && getTopMut(&mut scopeStack).unwrap().body_is_some(), "Error: Unexpected return intrinsic outside of scope! Scopes of type {} do not support instructions!",getTopMut(&mut scopeStack).unwrap().typ.to_string(false));
-                        let body = getTopMut(&mut scopeStack).unwrap().body_unwrap_mut().unwrap();
-                        body.push((token.location.clone(),Instruction::RET()));
-                    },
-                    IntrinsicType::INCLUDE => {
-                        let includeName = par_expect!(lexer.currentLocation,lexer.next(),"Error: abruptly ran out of tokens");
-                        match includeName.typ {
-                            TokenType::StringType(path) => {
-                                let p = PathBuf::from(&program.path);
-                                let p = p.parent().unwrap();
-                                let include_p  = PathBuf::from(path);
-                                let info = fs::read_to_string(String::from(p.join(&include_p).to_str().unwrap().replace("\\", "/"))).expect(&format!("Error: could not open file: {}",String::from(p.join(&include_p).to_str().unwrap()).replace("\\", "/")));
-                                let mut lf = Lexer::new(&info,lexer.Intrinsics,lexer.Definitions,HashSet::new());
-                                lf.currentLocation.file = Rc::new(String::from(p.join(&include_p).to_str().unwrap().replace("\\", "/")));
-                                let mut nprogram = program.clone();
-                                nprogram.path = String::from(p.join(&include_p).to_str().unwrap().replace("\\", "/"));
-                                let mut build2 = parse_tokens_to_build(&mut lf, &mut nprogram);
-                                build.externals.extend(build2.externals);
-                                for (strdefId,_strdef) in build2.stringdefs.iter() {
-                                    let orgstrdefId  = strdefId.clone();
-                                    let mut strdefId = strdefId.clone();
-                                    let isContaining = build.stringdefs.contains_key(&strdefId);
-                                    while build.stringdefs.contains_key(&strdefId) || build2.stringdefs.contains_key(&strdefId) {
-                                        strdefId = Uuid::new_v4();
-                                    }
-                                    if isContaining {
-                                        for (_, cn_cn) in build2.constdefs.iter_mut() {
-                                            match cn_cn.typ {
-                                                _ => {}
-                                                _ => {}
-                                                RawConstValueType::STR(ref mut val) => {
-                                                    if &orgstrdefId == val {
-                                                        *val = strdefId
-                                                    }
-                                                },
-                                            }
-                                        }
-                                    }
-                                }
-                                build.stringdefs.extend(build2.stringdefs);
-                                for (fn_name,fn_fn) in build2.functions {
-                                    let _loc = fn_fn.location.clone();
-                                    match build.functions.insert(fn_name.clone(), fn_fn) {
-                                        Some(_Other) => {
-                                            par_error!(_loc, "Error: mulitply defined symbols {}",fn_name);
-                                        },
-                                        None => {},
-                                    }
-                                }
-                                build.constdefs.reserve(build2.constdefs.len());
-                                for (cn_name,cn_val) in build2.constdefs{
-                                    let loc = cn_val.loc.clone();
-                                    match build.constdefs.insert(cn_name.clone(),cn_val) {
-                                        Some(_Other) => {
-                                            par_error!(loc,"Error: mulitply defined symbols {}",cn_name);
-                                        },
-                                        None => {},
-                                    }
-                                }
-                            }
-                            _ => {
-                                par_error!(includeName, "Expected token type String but found {}",includeName.typ.to_string(false));
-                            }
-                        }
-                    },
-                    IntrinsicType::IF => {
-                        scopeStack.push(Scope { typ: ScopeType::NORMAL(NormalScope { typ: NormalScopeType::IF, body: vec![], locals: Locals::new()}), hasBeenOpened: false })
-                    },
-                    IntrinsicType::CONSTANT => {
-                        let first = lexer.next();
-                        let first = par_expect!(lexer.currentLocation,first,"abruptly ran out of tokens in constant name definition");
-                        let name: String = match first.typ {
-                            TokenType::WordType(ref word) => {
-                                par_assert!(first, !lexer.CurrentFuncs.contains(word), "Error: multiple constant symbol definitions! Cannot define a constant that already exists as a function!\nFunction defined at: {}",build.functions.get(word).unwrap().location.loc_display());
-                                word.to_string()
-                            }
-                            _ => {
-                                par_error!(first, "Unexpected token type! Expected word but found {}",first.typ.to_string(false));
-                            }
-                        };
-                        par_assert!(first, !build.contains_symbol(&name) || build.constdefs.contains_key(&name), "Error: Cannot define constant {} as that would redefine a symbol of a different type!",name);
-                        let first = lexer.next();
-                        let first = par_expect!(lexer.currentLocation,first,"abruptly ran out of tokens in constant name definition");
-                        let mut expect_type: Option<VarType> = None;
-                        match first.typ {
-                            TokenType::IntrinsicType(typ) => {
-                                match typ {
-                                    IntrinsicType::SET => {}
-                                    IntrinsicType::DOUBLE_COLIN => {
-                                        let typ = par_expect!(lexer.currentLocation,lexer.next(), "Error: abruptly ran out of tokens in constant type definition");
-                                        if let TokenType::Definition(d) = typ.typ {
-                                            expect_type = Some(d);
-                                            let typ = par_expect!(lexer.currentLocation,lexer.next(), "Error: abruptly ran out of tokens in constant type definition");
-                                            par_assert!(typ, typ.typ == TokenType::IntrinsicType(IntrinsicType::SET), "Error: unexpected token type {} after constant definition! Expected =",typ.typ.to_string(false));
-                                        }
-                                        else {
-                                            par_error!(typ, "Error: Expected definition but found {}!",typ.typ.to_string(false));
-                                        }
-                                    }
-                                    _ => {
-                                        par_error!(first, "Error: expected = but found {}",typ.to_string(false));
-                                    }
-                                }
-                            }
-                            _ => {
-                                par_error!(first, "Unexpected token type! Expected intrinsic but found {}",first.typ.to_string(false));
-                            }
-                        }
-                        
-                        let val = eval_const_def(lexer,&mut build,TokenType::IntrinsicType(IntrinsicType::DOTCOMA));
-                        if let Some(expect_type) = expect_type {
-                            let tvt = val.typ.to_var_type();
-                            par_assert!(lexer.currentLocation, val.typ.is_eq_vartype(&expect_type), "Error: Non matching variable types!\nExpected: {}\nFound: {}",expect_type.to_string(false),if let Some(tvt) = tvt {tvt.to_string(false)} else {"None".to_string()});
-                        }
-                        let result = match val.typ {
-                            ConstValueType::INT(rval) => {
-                               RawConstValue {typ: RawConstValueType::INT(rval), loc: val.loc}
-                            }
-                            ConstValueType::LONG(rval) => {
-                                RawConstValue {typ: RawConstValueType::LONG(rval), loc: val.loc}
-                            }
-                            ConstValueType::STR(rval, typ) => {
-                                let mut UUID = Uuid::new_v4();
-                                while build.stringdefs.contains_key(&UUID) {
-                                    UUID = Uuid::new_v4();
-                                }
-                                build.stringdefs.insert(UUID,ProgramString {Data: rval, Typ: typ});
-                                RawConstValue {typ: RawConstValueType::STR(UUID), loc: val.loc}
-                            }
-                            ConstValueType::PTR(typ,v) => { 
-                                RawConstValue {typ: RawConstValueType::PTR(typ, v), loc: val.loc}
-                            }
- 
-                        };
-                        if let Some(constdef) = build.constdefs.get(&name) {
-                            let i1 = constdef.typ.to_type(&build);
-                            let i2 = result.typ.to_type(&build);
-                            par_assert!(result.loc, i1 == i2,"Error: Constant value defined at {}, Redined with a different type at {}!\nOriginal = {:?}\nRedefinition = {:?}",constdef.loc.loc_display(),result.loc.loc_display(),i1,i2);
-                        }
-                        build.constdefs.insert(name, result);
-                        
-                    },
-                    IntrinsicType::DOTCOMA => {},
-                    IntrinsicType::ELSE => todo!(),
-                    IntrinsicType::DIV => todo!("{:#?} at {}",build,lexer.currentLocation.loc_display()),
-                    IntrinsicType::Let => {
-                        
-                        let nametok = par_expect!(lexer.currentLocation, lexer.next(), "Error: abruptly ran out of tokens for Let");
-                        let loc = nametok.location.clone();
-                        match nametok.typ {
-                            TokenType::WordType(name) => {
-                                par_assert!(loc, !build.contains_symbol(&name), "Error: Redifinition of existing symbol {}",name);
-                                par_assert!(token, scopeStack.len() > 0 && getTopMut(&mut scopeStack).unwrap().body_is_some(), "Error: Unexpected multiply intrinsic outside of scope! Scopes of type {} do not support instructions!",getTopMut(&mut scopeStack).unwrap().typ.to_string(false));
-                                let currentScope = getTopMut(&mut scopeStack).unwrap();
-                                let typ = par_expect!(lexer.currentLocation, lexer.next(), "Error: abruptly ran out of tokens for let type");                                
-                                par_assert!(typ,typ.typ==TokenType::IntrinsicType(IntrinsicType::DOUBLE_COLIN), "Error: You probably forgot to put a : after the name!");
-                                let typ = par_expect!(lexer.currentLocation, lexer.next(), "Error: abruptly ran out of tokens for let type");
-                                match typ.typ {
-                                    TokenType::Definition(def) => {
-                                        currentLocals.last_mut().unwrap().insert(name.clone(), def);
-                                        currentScope.body_unwrap_mut().unwrap().push((lexer.currentLocation.clone(),Instruction::DEFVAR(name)))
-                                    }
-                                    _ => {
-                                        par_error!(typ, "Error: unexpected token type in let definition. Expected VarType but found {}",typ.typ.to_string(false))
-                                    }
-                                }
-                            },
-                            _ => {
-                                par_error!(nametok, "Unexpected name type, Expected Word but found {}", nametok.typ.to_string(false))
-                            }
-                        }
-                    },
-                    IntrinsicType::INTERRUPT => {
-                        
-                        par_assert!(token, scopeStack.len() > 0 && getTopMut(&mut scopeStack).unwrap().body_is_some(), "Error: Unexpected interrupt intrinsic outside of scope! Scopes of type {} do not support instructions!",getTopMut(&mut scopeStack).unwrap().typ.to_string(false));
-                        let body = getTopMut(&mut scopeStack).unwrap().body_unwrap_mut().unwrap();
-                        let lexerNext = par_expect!(lexer.currentLocation,lexer.next(),"Stream of tokens ended abruptly at INTERRUPT call");
-                        match lexerNext.typ {
-                            TokenType::Number32(val) => {
-                                body.push((lexer.currentLocation.clone(),Instruction::INTERRUPT(val as i64)));
-                            }
-                            TokenType::Number64(val) => {
-                                body.push((lexer.currentLocation.clone(),Instruction::INTERRUPT(val)));
-                            }
-                            TokenType::WordType(ref data) => {
-                                if let Some(cons) = build.constdefs.get(data) {
-                                    body.push((lexer.currentLocation.clone(),Instruction::INTERRUPT(cons.typ.get_num_data())));
-                                }
-                                else {
-                                    par_error!(lexerNext, "Unexpected word type for INTERRUPT, {}",lexerNext.typ.to_string(false))
-                                }
-                            }
-                            _ => {
-                                par_error!(lexerNext, "Unexpected token type for INTERRUPT, {}",lexerNext.typ.to_string(false))
-                            }
-                        }
-                        
-                    },
-                    IntrinsicType::RS => {
-                        par_assert!(token, scopeStack.len() > 0 && getTopMut(&mut scopeStack).unwrap().body_is_some(), "Error: Unexpected rs intrinsic outside of scope! Scopes of type {} do not support instructions!",getTopMut(&mut scopeStack).unwrap().typ.to_string(false));
-                        let body = getTopMut(&mut scopeStack).unwrap().body_unwrap_mut().unwrap();
-                        
-                        let lexerNext = par_expect!(lexer.currentLocation,lexer.next(),"Stream of tokens ended abruptly at RS call");
-                        match lexerNext.typ {
-                            TokenType::Register(reg) => {
-                                let optyp = par_expect!(lexer.currentLocation,lexer.next(),"Stream of tokens ended abruptly at RS push call");
-                                match optyp.typ {
-                                    TokenType::IntrinsicType(typ) => {
-                                    match typ {
-                                        IntrinsicType::PUSH => {
-                                            
-                                            body.push((lexer.currentLocation.clone(), Instruction::RSPUSH(OfP::REGISTER(reg))))            
-                                        }
-                                        _ => {
-                                            par_error!(lexerNext.location, "Error: Unexpected Intrinsic Type: {}",typ.to_string(false))
-                                        }
-                                    }
-                                    }
-                                    _ => {
-                                        par_error!(lexerNext.location, "Error: Expected Intrinsic but found {}",lexerNext.typ.to_string(false))
-                                    }
-                                }
-                                
-                            }
-                            _ => {
-                                par_error!(lexerNext.location, "Error: Expected Register but found {}",lexerNext.typ.to_string(false))                
-                            }
-                            
-                        }
-                    },
-                    IntrinsicType::TOP => todo!(),
-                    IntrinsicType::CAST => todo!(),
-                    IntrinsicType::OPENANGLE => todo!(),
-                    IntrinsicType::CLOSEANGLE => todo!(),
-                    IntrinsicType::DLL_IMPORT => {
-                        let ntok = par_expect!(lexer.currentLocation, lexer.next(), "Error: Abruptly ran out of tokens for DLL_IMPORT");
-                        let file_from = par_expect!(ntok, ntok.unwrap_string(), "Error: Expected token string but found {}",ntok.typ.to_string(false));
-                        let ntok = par_expect!(lexer.currentLocation, lexer.next(), "Error: Abruptly ran out of tokens for DLL_IMPORT");
-                        let symbol_name = par_expect!(ntok,ntok.unwrap_word(), "Error: Expected token word but found {}",ntok.typ.to_string(false));
-                        par_assert!(ntok, !build.contains_symbol(symbol_name), "Error: Trying to overwrite already existing symbol! {}",symbol_name);
-                        let ntok = par_expect!(lexer.currentLocation, lexer.next(), "Error: Abruptly ran out of tokens for DLL_IMPORT");
-                        par_assert!(ntok, ntok.typ == TokenType::IntrinsicType(IntrinsicType::OPENPAREN), "Error: Unexpected symbol {} in DLL_IMPORT! {}",ntok.typ.to_string(false),symbol_name);
-                        let symbol_contract = parse_any_contract(lexer);
-                        build.dll_imports.insert(symbol_name.clone(), DLL_import { from: file_from.clone(), contract: symbol_contract });
-                    },
-                    IntrinsicType::DLL_EXPORT => {
-                        let ntok = par_expect!(lexer.currentLocation, lexer.next(), "Error: Abruptly ran out of tokens for DLL_EXPORT");
-                        let symbol_name = par_expect!(ntok,ntok.unwrap_word(), "Error: Expected token word but found {}",ntok.typ.to_string(false));
-                        let ntok = par_expect!(lexer.currentLocation, lexer.next(), "Error: Abruptly ran out of tokens for DLL_EXPORT");
-                        par_assert!(ntok, ntok.typ == TokenType::IntrinsicType(IntrinsicType::OPENPAREN), "Error: Unexpected symbol {} in DLL_EXPORT! {}",ntok.typ.to_string(false),symbol_name);
-                        let symbol_contract = parse_any_contract(lexer);
-                        build.dll_exports.insert(symbol_name.clone(), DLL_export { contract: symbol_contract });
-                    },
-                    IntrinsicType::MORETHAN => todo!(),
-                    IntrinsicType::LESSTHAN => todo!(),
-                    IntrinsicType::MORETHANEQ => todo!(),
-                    IntrinsicType::LESSTHANEQ => todo!(),
-                    IntrinsicType::NOTEQUALS => todo!(),
-                    IntrinsicType::EQUALS => todo!(),
-                }
-            }
-            TokenType::StringType(_) => {
-                par_error!(lexer.currentLocation, "Error: Unexpected Token type String!");
-            }
-            TokenType::CStringType(_) => {
-                par_error!(lexer.currentLocation, "Error: Unexpected Token type CString!");
-            }
-            
-            TokenType::CharType(_) => {
-                todo!("{}: Unexpected char! Chars",token.loc_display())
-                
-            }
-            TokenType::Number32(_) => {
-                par_error!(lexer.currentLocation, "Error: Unexpected Token type Integer!");
-            }
-            TokenType::Number64(_) => {
-                par_error!(lexer.currentLocation, "Error: Unexpected Token type Long!");
-            }
-            TokenType::Definition(_) => todo!(),
-            TokenType::CStringType(_) => todo!(),
-            TokenType::Function(name) => {
-                let args = parse_argument_contract(lexer, &mut build, &currentLocals);
-                let body = getTopMut(&mut scopeStack).unwrap().body_unwrap_mut().unwrap();
-                body.push((token.location.clone(),Instruction::CALL(name, args)));
-                
-            },
-            TokenType::Register(reg) => {
-                let currentScope = getTopMut(&mut scopeStack).unwrap();
-                let regOp = par_expect!(lexer.currentLocation,lexer.next(),"Unexpected register operation or another register!");
-                match regOp.typ {
-                    TokenType::IntrinsicType(typ) => {
-                        match typ {
-                            IntrinsicType::SET => {
-                                let token = par_expect!(lexer.currentLocation,lexer.next(),"abruptly ran out of tokens");
-                                match token.typ {
-                                    TokenType::Number32(data) => {
-                                        if reg.size() >= 4 {
-                                            let body = currentScope.body_unwrap_mut().unwrap();
-                                            body.push((token.location,Instruction::MOV(OfP::REGISTER(reg), OfP::CONST(RawConstValueType::INT(data)))))
-                                        }
-                                    }
-                                    TokenType::Number64(data) => {
-                                        if reg.size() >= 8 {
-                                            let body = currentScope.body_unwrap_mut().unwrap();
-                                            body.push((token.location,Instruction::MOV(OfP::REGISTER(reg), OfP::CONST(RawConstValueType::LONG(data)))));
-                                        }
-                                    }
-                                    TokenType::Register(reg2) => {
-                                        currentScope.body_unwrap_mut().unwrap().push((token.location.clone(),Instruction::MOV(OfP::REGISTER(reg), OfP::REGISTER(reg2))));
-
-                                    }
-                                    TokenType::WordType(ref data) => {
-                                        if currentScope.contract_is_some() && currentScope.contract_unwrap().unwrap().Inputs.contains_key(data) {
-                                            let contract = currentScope.contract_unwrap().unwrap();
-                                            par_assert!(token, contract.Inputs.contains_key(data), "Error: Unexpected word for register: '{}'",data);
-                                            currentScope.body_unwrap_mut().unwrap().push((token.location.clone(), Instruction::MOV(OfP::REGISTER(reg), OfP::LOCALVAR(data.to_owned()))))
-                                        }
-                                        else if let Some(cons) = build.constdefs.get(data) {
-                                            currentScope.body_unwrap_mut().unwrap().push((token.location.clone(), Instruction::MOV(OfP::REGISTER(reg), OfP::CONST(cons.typ.clone()))))
-                                        }
-                                        else {
-                                            par_error!(token,"Unexpected Type for Mov Intrinsic. Expected Number32/Number64 but found {}",token.typ.to_string(false))
-                                        }
-                                    }
-                                    _ => par_error!(token,"Unexpected Type for Mov Intrinsic. Expected Number32/Number64 but found {}",token.typ.to_string(false))
-                                }
-                            }
-                            Other => {
-                                par_error!(token,"Unexpected Intrinsic Type: {}, Registers can only perform register operations \"pop\" \"push\" \"mov\" ",Other.to_string(false))
-                            }
-                        }
-                    },
-                    TokenType::Register(reg2) => {
-                        par_assert!(token,reg.size()==reg2.size(),"Gotten two differently sized registers to one op!");
-                        let regOp = lexer.next().expect(&format!("(P) [ERROR] {}:{}:{}: Unexpected register operation!",token.location.clone().file,&token.location.clone().linenumber,&token.location.clone().character));
-                        let body = currentScope.body_unwrap_mut().unwrap();
-                        match regOp.typ {
-                            TokenType::IntrinsicType(typ) => {
-                                
-                                match typ {
-                                    IntrinsicType::ADD => {
-                                        body.push((token.location.clone(),Instruction::ADD(OfP::REGISTER(reg), OfP::REGISTER(reg2))))
-                                    }
-                                    IntrinsicType::SUB => {
-                                        body.push((token.location.clone(),Instruction::SUB(OfP::REGISTER(reg), OfP::REGISTER(reg2))))
-                                    }
-                                    IntrinsicType::MUL => {
-                                        body.push((token.location.clone(),Instruction::MUL(OfP::REGISTER(reg), OfP::REGISTER(reg2))))
-                                    }
-                                    IntrinsicType::EQUALS => {
-                                        body.push((token.location.clone(),Instruction::EQUALS(OfP::REGISTER(reg), OfP::REGISTER(reg2))))
-                                    }
-                                    IntrinsicType::DIV => {
-                                        body.push((token.location.clone(),Instruction::DIV(OfP::REGISTER(reg), OfP::REGISTER(reg2))))
-                                    }
-                                    IntrinsicType::SET => {
-                                        body.push((token.location.clone(),Instruction::MOV(OfP::REGISTER(reg), OfP::REGISTER(reg2))))
-                                    }
-                                    other => par_error!(token,"Unexpected Intrinsic! Expected Register Intrinsic but found {}",other.to_string(false))
-                                }
-                            }
-                            other => {
-                                par_error!(token, "Unexpected token type: Expected Intrinsic but found {}",other.to_string(false));
-                            }
-                        }
-                    }
-                    typ => {
-                        par_error!(token,"Unexpected register operation! Expected Intrinsic or another Register but found {}",typ.to_string(false));
-                    }
-                }
-            },
-        }
+        parse_token_to_build_inst(token, lexer, program, &mut build, &mut scopeStack, &mut currentLocals);
     }
     for (fn_name, fn_fn)in build.functions.iter_mut() {
         if fn_name != "main" && fn_fn.location.file == lexer.currentLocation.file {
@@ -3110,9 +3142,10 @@ fn optimization_ops_scope(build: &BuildProgram, program: &CmdProgram, scope: TCS
                 
                 out.usedFuncs.insert(r.clone());
             }
-            Instruction::EXPAND_SCOPE(s) => {
+            Instruction::EXPAND_SCOPE(s) | Instruction::EXPAND_IF_SCOPE(s) | Instruction::EXPAND_ELSE_SCOPE(s) => {
                 optimization_ops_scope(build, program, TCScopeType::NORMAL(s), out, fn_name.clone())
             }
+            
             _ => {}
         }
     }
@@ -3439,7 +3472,7 @@ fn nasm_x86_64_handle_scope(f: &mut File, build: &BuildProgram, program: &CmdPro
     if dif > 0 {
         writeln!(f, "   sub rsp, {}",dif)?;
     }
-    for (loc,inst) in scope.get_body(build) {
+    for (i,(loc,inst)) in scope.get_body(build).iter().enumerate() {
         match inst {
             Instruction::MOV(Op, Op2) => {
                 match Op {
@@ -3772,8 +3805,26 @@ fn nasm_x86_64_handle_scope(f: &mut File, build: &BuildProgram, program: &CmdPro
                 }
             },
             Instruction::EXPAND_SCOPE(s) => nasm_x86_64_handle_scope(f, build, program, TCScopeType::NORMAL(s),local_vars.clone(),stack_size)?,
-            Instruction::EXPAND_IF_SCOPE(_) => todo!("EXPAND_IF_SCOPE"),
-            Instruction::EXPAND_ELSE_SCOPE(_) => todo!("EXPAND_ELSE_SCOPE"),
+            Instruction::EXPAND_IF_SCOPE(s)   => {
+                writeln!(f, "   cmp al, 0")?;
+                writeln!(f, "   jnz .IF_SCOPE_{}",i)?;
+                if let Some((_,elses)) = scope.get_body(build).get(i+1) {
+                    match elses {
+                        Instruction::EXPAND_ELSE_SCOPE(elses) => {
+                            nasm_x86_64_handle_scope(f, build, program, TCScopeType::NORMAL(elses), local_vars.clone(), stack_size)?;
+                        }
+                        _ => {}
+                    }
+                }
+                writeln!(f, "   jmp .IF_SCOPE_END_{}",i)?;
+                writeln!(f, "   .IF_SCOPE_{}:",i)?;
+                nasm_x86_64_handle_scope(f, build, program, TCScopeType::NORMAL(s), local_vars.clone(), stack_size)?;
+                writeln!(f, "   .IF_SCOPE_END_{}:",i)?;
+                //TODO: Implement actual conditions
+            },
+            Instruction::EXPAND_ELSE_SCOPE(_) => {
+                // com_error!(loc,"Error: this should never happen!"w);
+            },
 
             Instruction::MORETHAN(ofp1, ofp2) => {
                 let regs = ofp1.LOIRGNasm(vec![Register::RAX], f, program, build, &local_vars, stack_size,loc)?[0];
@@ -4487,7 +4538,7 @@ fn main() {
 - [x] TODO: Implement the rest of the floating point arithmetic registers
 - [x] TODO: Implement local variables for normal scopes
 - [x] TODO: implement booleans
-- [ ] TODO: Implement if statements as well as else statements
+- [x] TODO: Implement if statements as well as else statements
 - [ ] TODO: Fix returning from functions
 - [ ] TODO: Add 'result' as a part of OfP for calling the function and getting its result
 - [ ] TODO: Add more examples like OpenGL examples, native Windows examples with linking to kernel.dll etc.
