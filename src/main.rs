@@ -333,13 +333,12 @@ enum IntrinsicType {
     // REGISTER OPERATIONS
     POP,
     PUSH,
-    SET,
 
     // REGISTER MATH
-    ADD,
-    SUB,
-    MUL,
-    DIV,
+    // ADD,
+    // SUB,
+    // MUL,
+    // DIV,
     RET,
     INCLUDE,
     IF,
@@ -348,12 +347,12 @@ enum IntrinsicType {
     TOP,
     CAST,
     // BOOLEAN OPERATIONS
-    EQUALS,
-    MORETHAN,
-    LESSTHAN,
-    MORETHANEQ,
-    LESSTHANEQ,
-    NOTEQUALS,
+    // EQUALS,
+    // MORETHAN,
+    // LESSTHAN,
+    // MORETHANEQ,
+    // LESSTHANEQ,
+    // NOTEQUALS,
 }
 #[derive(Debug,Clone,PartialEq)]
 enum PtrTyp {
@@ -417,27 +416,15 @@ impl IntrinsicType {
             IntrinsicType::PUSH => {
                 if isplural {"Push".to_string()} else {"Push".to_string()}
             }
-            IntrinsicType::SET => {
-                if isplural {"Move".to_string()} else {"Move".to_string()}
-            }
-            IntrinsicType::ADD => {
-                if isplural {"Add".to_string()} else {"Add".to_string()}
-            },
-            IntrinsicType::SUB => {
-                if isplural {"Sub".to_string()} else {"Sub".to_string()}
-            }
-            IntrinsicType::MUL => {
-                if isplural {"Mul".to_string()} else {"Mul".to_string()}
-            }
             IntrinsicType::RET => {
                 if isplural {"Ret".to_string()} else {"Ret".to_string()}
             },
             IntrinsicType::INCLUDE => {
                 if isplural {"Includes".to_string()} else {"Include".to_string()}
-            }
+            },
             IntrinsicType::IF => {
                 if isplural {"Ifs".to_string()} else {"If".to_string()}
-            }
+            },
             
             IntrinsicType::CONSTANT => {
                 if isplural {"Constants".to_string()} else {"Constant".to_string()}
@@ -447,9 +434,6 @@ impl IntrinsicType {
             },
             IntrinsicType::ELSE => {
                 if isplural {"Else".to_string()} else {"Else".to_string()}
-            },
-            IntrinsicType::DIV => {
-                if isplural {"Div".to_string()} else {"Div".to_string()}
             },
             IntrinsicType::Let => {
                 if isplural {"Let".to_string()} else {"Let".to_string()}
@@ -478,12 +462,57 @@ impl IntrinsicType {
             IntrinsicType::DLL_EXPORT => {
                 if isplural {"Dll Exports".to_string()} else {"Dll Export".to_string().to_string()}
             },
-            IntrinsicType::MORETHAN   => if isplural {"Morethan   ".to_string()} else {"Morethan".to_string()},
-            IntrinsicType::LESSTHAN   => if isplural {"Lessthan   ".to_string()} else {"Lessthan".to_string()},
-            IntrinsicType::MORETHANEQ => if isplural {"Morethaneq ".to_string()} else {"Morethaneq".to_string()},
-            IntrinsicType::LESSTHANEQ => if isplural {"Lessthaneq ".to_string()} else {"Lessthaneq".to_string()},
-            IntrinsicType::NOTEQUALS  => if isplural {"Notequals  ".to_string()} else {"Notequals".to_string()},
-            IntrinsicType::EQUALS     => if isplural {"Equals".to_string()     } else {"Equal".to_string()},
+        }
+    }
+}
+#[derive(Debug,PartialEq,Clone)]
+#[repr(u8)]
+enum Op {
+    PLUS,
+    MINUS,
+    DIV,
+    MUL,
+    EQ,
+    NEQ,
+    GT,
+    GTEQ,
+    LT,
+    LTEQ,
+    NOT,
+    SET,
+}
+impl Op {
+    fn from_str(s: &str) -> Option<Self> {
+        match s {
+            "+" => Some(Op::PLUS),
+            "-" => Some(Op::MINUS),
+            "/" => Some(Op::DIV),
+            "*" => Some(Op::MUL),
+            "=="=> Some(Op::EQ),
+            "!="=> Some(Op::NEQ),
+            ">" => Some(Op::GT),
+            ">="=> Some(Op::GTEQ),
+            "<" => Some(Op::LT),
+            "<="=> Some(Op::LTEQ),
+            "!" => Some(Op::NOT),
+            "=" => Some(Op::SET),
+            _ => None
+        }
+    }
+    fn to_string(&self) -> &str {
+        match self {
+            Op::PLUS  => "+" ,
+            Op::MINUS => "-" ,
+            Op::DIV   => "/" ,
+            Op::MUL   => "*" ,
+            Op::EQ    => "==",
+            Op::NEQ   => "!=",
+            Op::GT    => ">" ,
+            Op::GTEQ  => ">=",
+            Op::LT    => "<" ,
+            Op::LTEQ  => "<=",
+            Op::NOT   => "!" ,
+            Op::SET   => "="
         }
     }
 }
@@ -499,7 +528,8 @@ enum TokenType {
     CStringType   (String),
     CharType      (char),
     Number32      (i32),
-    Number64      (i64)
+    Number64      (i64),
+    Operation     (Op)
 }
 
 impl TokenType {
@@ -534,7 +564,10 @@ impl TokenType {
             },
             TokenType::Register(reg) => {
                 if isplural {format!("Registers").to_string()} else {format!("Register {}",reg.to_string()).to_string()}
-            }
+            },
+            TokenType::Operation(op) => {
+                if isplural {format!("Operations").to_string()} else {format!("Operation {}",op.to_string()).to_string()}
+            },
 
         }
     }
@@ -746,7 +779,7 @@ impl Iterator for Lexer<'_> {
                             return self.next();
                         }
                         else {
-                            return Some(Token { typ: TokenType::IntrinsicType(IntrinsicType::DIV), location: self.currentLocation.clone() });
+                            return Some(Token { typ: TokenType::Operation(Op::DIV), location: self.currentLocation.clone() });
                         }
                     }
                     else {
@@ -769,6 +802,9 @@ impl Iterator for Lexer<'_> {
                         }      
                         else if let Some(reg) = Register::from_string(&outstr) {
                             return Some(Token { typ: TokenType::Register(reg), location: self.currentLocation.clone() })
+                        }
+                        else if let Some(op) = Op::from_str(&outstr) {
+                            return Some(Token { typ: TokenType::Operation(op), location: self.currentLocation.clone() })
                         }
                         else if self.CurrentFuncs.contains(&outstr) {
                             return Some(Token { typ: TokenType::Function(outstr), location: self.currentLocation.clone() })
@@ -897,7 +933,7 @@ impl Iterator for Lexer<'_> {
                         self.cursor -= 1;
                         self.currentLocation.character += outstr.len() as i32;
                         if outstr == "*" {
-                            return Some(Token { typ: TokenType::IntrinsicType(IntrinsicType::MUL), location: self.currentLocation.clone() });
+                            return Some(Token { typ: TokenType::Operation(Op::MUL), location: self.currentLocation.clone() });
                         }
                         else {
                             let osize = outstr.chars().take_while(|&c| c == '*').count();
@@ -926,6 +962,9 @@ impl Iterator for Lexer<'_> {
                         
                         if let Some(intrinsic) = self.Intrinsics.get(&outstr) {
                             return Some(Token { typ: TokenType::IntrinsicType(intrinsic.clone()), location: self.currentLocation.clone() })
+                        }
+                        else if let Some(op) = Op::from_str(&outstr) {
+                            return Some(Token { typ: TokenType::Operation(op), location: self.currentLocation.clone() })
                         }
                         else if self.CurrentFuncs.contains(&outstr) {
                             return Some(Token { typ: TokenType::Function(outstr), location: self.currentLocation.clone() })
@@ -2176,23 +2215,30 @@ fn eval_const_def(lexer: &mut Lexer, build: &mut BuildProgram, until: TokenType)
             break;
         }
         match token.typ {
-            TokenType::IntrinsicType(typ) => {
-                match typ {
-                    IntrinsicType::ADD => {
+            TokenType::Operation(ref op) => {
+                match op {
+                    Op::PLUS => {
                         let valTwo = par_expect!(token.location,varStack.pop(),"Stack underflow in constant definition");
                         let valOne = par_expect!(token.location,varStack.pop(),"Stack underflow in constant definition");
                         varStack.push(par_expect!(token.location,valOne.add(&valTwo),"Error: Failed to add the constant values together"));
                     }
-                    IntrinsicType::SUB => {
+                    Op::MINUS => {
                         let valTwo = par_expect!(token.location,varStack.pop(),"Stack underflow in constant definition");
                         let valOne = par_expect!(token.location,varStack.pop(),"Stack underflow in constant definition");
                         varStack.push(par_expect!(token.location,valOne.sub(&valTwo),"Error: Failed to add the constant values together"));
                     }
-                    IntrinsicType::MUL => {
+                    Op::MUL => {
                         let valTwo = par_expect!(token.location,varStack.pop(),"Stack underflow in constant definition");
                         let valOne = par_expect!(token.location,varStack.pop(),"Stack underflow in constant definition");
                         varStack.push(par_expect!(token.location,valOne.mul(&valTwo),"Error: Failed to add the constant values together"));
                     }
+                    _ => {
+                        par_error!(token, "Error: Unexpected op {} in constant definition!",op.to_string());
+                    }
+                }
+            }
+            TokenType::IntrinsicType(typ) => {
+                match typ {
                     IntrinsicType::CAST => {
                         let ntok = par_expect!(lexer.currentLocation, lexer.next(), "Error: abruptly ran out of tokens for constant definition cast!");
                         par_assert!(ntok, ntok.typ == TokenType::IntrinsicType(IntrinsicType::OPENANGLE),"Error: unexpected token type {} in cast! INVALID SYNTAX",ntok.typ.to_string(false));
@@ -2408,6 +2454,14 @@ fn contains_local<'a>(currentLocals: &'a Vec<Locals>, name: &String) -> bool {
     }
     false
 }
+fn parse_expression_from_tokens(body: &Vec<Token>) -> Option<Vec<Instruction>> {
+    
+    for t in body.iter() {
+
+    }
+
+    None
+}
 fn parse_token_to_build_inst(token: Token,lexer: &mut Lexer, program: &mut CmdProgram, build: &mut BuildProgram, scopeStack: &mut ScopeStack, currentLocals: &mut Vec<Locals>){
     match token.typ {
         TokenType::WordType(ref word) => {
@@ -2427,64 +2481,60 @@ fn parse_token_to_build_inst(token: Token,lexer: &mut Lexer, program: &mut CmdPr
             }
             let ofp1 = par_expect!(token, OfP::from_token(&token, build, program,currentLocals), "Unknown word type: {}!",word);
             let Op = par_expect!(lexer.currentLocation,lexer.next(),"Unexpected variable operation or another variable!");
+            //todo!("TODO: retire this");
             match &Op.typ {
-                
-                TokenType::IntrinsicType(typ) => {
-                    match typ {
-                        IntrinsicType::SET => {
-                            let ofp2_t = par_expect!(lexer.currentLocation,lexer.next(),"Unexpected variable operation or another variable!");
-                            let ofp2 = par_expect!(token, OfP::from_token(&ofp2_t, build, program,currentLocals), "Unknown word type: {}!",ofp2_t.typ.to_string(false));
-                            currentScope.body_unwrap_mut().unwrap().push((Op.location.clone(), Instruction::MOV(ofp1, ofp2)))
-                        },
-                        IntrinsicType::EQUALS => {
+                TokenType::Operation(op) => {
+                    match op {
+                        Op::EQ => {
                             let ofp2_t = par_expect!(lexer.currentLocation,lexer.next(),"Unexpected variable operation or another variable!");
                             let ofp2 = par_expect!(token, OfP::from_token(&ofp2_t, build, program,currentLocals), "Unknown word type: {}!",ofp2_t.typ.to_string(false));
                             currentScope.body_unwrap_mut().unwrap().push((Op.location.clone(), Instruction::EQUALS(ofp1, ofp2)))
                         }
-                        IntrinsicType::NOTEQUALS => {
+                        Op::SET => {
+                            let ofp2_t = par_expect!(lexer.currentLocation,lexer.next(),"Unexpected variable operation or another variable!");
+                            let ofp2 = par_expect!(token, OfP::from_token(&ofp2_t, build, program,currentLocals), "Unknown word type: {}!",ofp2_t.typ.to_string(false));
+                            currentScope.body_unwrap_mut().unwrap().push((Op.location.clone(), Instruction::MOV(ofp1, ofp2)))
+                        }
+                        Op::NEQ => {
                             let ofp2_t = par_expect!(lexer.currentLocation,lexer.next(),"Unexpected variable operation or another variable!");
                             let ofp2 = par_expect!(token, OfP::from_token(&ofp2_t, build, program,currentLocals), "Unknown word type: {}!",ofp2_t.typ.to_string(false));
                             currentScope.body_unwrap_mut().unwrap().push((Op.location.clone(), Instruction::NOTEQUALS(ofp1, ofp2)))
                         }
-                        
-                        IntrinsicType::LESSTHAN => {
+                        Op::LT => {
                             let ofp2_t = par_expect!(lexer.currentLocation,lexer.next(),"Unexpected variable operation or another variable!");
                             let ofp2 = par_expect!(token, OfP::from_token(&ofp2_t, build, program,currentLocals), "Unknown word type: {}!",ofp2_t.typ.to_string(false));
                             currentScope.body_unwrap_mut().unwrap().push((Op.location.clone(), Instruction::LESSTHAN(ofp1, ofp2)))
                         }
-                        IntrinsicType::MORETHAN => {
+                        Op::GT => {
                             let ofp2_t = par_expect!(lexer.currentLocation,lexer.next(),"Unexpected variable operation or another variable!");
                             let ofp2 = par_expect!(token, OfP::from_token(&ofp2_t, build, program,currentLocals), "Unknown word type: {}!",ofp2_t.typ.to_string(false));
                             currentScope.body_unwrap_mut().unwrap().push((Op.location.clone(), Instruction::MORETHAN(ofp1, ofp2)))
                         }
-                        IntrinsicType::LESSTHANEQ => {
+                        Op::LTEQ => {
                             let ofp2_t = par_expect!(lexer.currentLocation,lexer.next(),"Unexpected variable operation or another variable!");
                             let ofp2 = par_expect!(token, OfP::from_token(&ofp2_t, build, program,currentLocals), "Unknown word type: {}!",ofp2_t.typ.to_string(false));
                             currentScope.body_unwrap_mut().unwrap().push((Op.location.clone(), Instruction::LESSTHANEQUALS(ofp1, ofp2)))
                         }
-                        IntrinsicType::MORETHANEQ => {
+                        Op::GTEQ => {
                             let ofp2_t = par_expect!(lexer.currentLocation,lexer.next(),"Unexpected variable operation or another variable!");
                             let ofp2 = par_expect!(token, OfP::from_token(&ofp2_t, build, program,currentLocals), "Unknown word type: {}!",ofp2_t.typ.to_string(false));
                             currentScope.body_unwrap_mut().unwrap().push((Op.location.clone(), Instruction::MORETHANEQUALS(ofp1, ofp2)))
                         }
-                        
-                        
                         _ => {
-                            par_error!(Op, "Unexpected intrinsic {} after ofp",typ.to_string(false))
+                            par_error!(Op, "Error: Unexpected operation in set: {}",op.to_string());
                         }
                     }
-                },
+                }
                 _ => {
                     let ofp2 = par_expect!(token, OfP::from_token(&Op, build, program,currentLocals), "Unexpected token type: {} after ofp!",Op.typ.to_string(false));
                     let Op = par_expect!(lexer.currentLocation,lexer.next(),"Unexpected variable operation or another variable!");
                     match &Op.typ {
-                        TokenType::IntrinsicType(op) => {
+                        TokenType::Operation(op) => {
                             match op {
-                                IntrinsicType::ADD => currentScope.body_unwrap_mut().unwrap().push((Op.location.clone(), Instruction::ADD(ofp1,ofp2))),
-                                IntrinsicType::SUB => currentScope.body_unwrap_mut().unwrap().push((Op.location.clone(), Instruction::SUB(ofp1,ofp2))),
-                                IntrinsicType::MUL => currentScope.body_unwrap_mut().unwrap().push((Op.location.clone(), Instruction::MUL(ofp1,ofp2))),
-                                IntrinsicType::DIV => currentScope.body_unwrap_mut().unwrap().push((Op.location.clone(), Instruction::DIV(ofp1,ofp2))),
-                                IntrinsicType::EQUALS  => currentScope.body_unwrap_mut().unwrap().push((Op.location.clone(), Instruction::EQUALS(ofp1,ofp2))),
+                                Op::PLUS => currentScope.body_unwrap_mut().unwrap().push((Op.location.clone(), Instruction::ADD(ofp1,ofp2))),
+                                Op::MINUS=> currentScope.body_unwrap_mut().unwrap().push((Op.location.clone(), Instruction::SUB(ofp1,ofp2))),
+                                Op::MUL => currentScope.body_unwrap_mut().unwrap().push((Op.location.clone(), Instruction::MUL(ofp1,ofp2))),
+                                Op::DIV => currentScope.body_unwrap_mut().unwrap().push((Op.location.clone(), Instruction::DIV(ofp1,ofp2))),
                                 _ => {
                                     par_error!(Op, "Unexpected intrinsic {} after ofp",Op.typ.to_string(false))
                                 }
@@ -2660,7 +2710,7 @@ fn parse_token_to_build_inst(token: Token,lexer: &mut Lexer, program: &mut CmdPr
                         par_error!(token, "Scope closed but never opened!!!");
                     }
                 }
-                IntrinsicType::ADD | IntrinsicType::SET  | IntrinsicType::PUSH | IntrinsicType::SUB | IntrinsicType::MUL | IntrinsicType::POP => {
+                IntrinsicType::PUSH | IntrinsicType::POP => {
                     par_error!(token,"Unexpected token {}",Type.to_string(false));   
                 }
                 IntrinsicType::RET => {
@@ -2775,15 +2825,17 @@ fn parse_token_to_build_inst(token: Token,lexer: &mut Lexer, program: &mut CmdPr
                     let first = par_expect!(lexer.currentLocation,first,"abruptly ran out of tokens in constant name definition");
                     let mut expect_type: Option<VarType> = None;
                     match first.typ {
+                        TokenType::Operation(ref typ) => {
+                            par_assert!(first,*typ == Op::SET,"Error: Unexpected operation type: {}",typ.to_string());
+                        }
                         TokenType::IntrinsicType(typ) => {
                             match typ {
-                                IntrinsicType::SET => {}
                                 IntrinsicType::DOUBLE_COLIN => {
                                     let typ = par_expect!(lexer.currentLocation,lexer.next(), "Error: abruptly ran out of tokens in constant type definition");
                                     if let TokenType::Definition(d) = typ.typ {
                                         expect_type = Some(d);
                                         let typ = par_expect!(lexer.currentLocation,lexer.next(), "Error: abruptly ran out of tokens in constant type definition");
-                                        par_assert!(typ, typ.typ == TokenType::IntrinsicType(IntrinsicType::SET), "Error: unexpected token type {} after constant definition! Expected =",typ.typ.to_string(false));
+                                        par_assert!(typ, typ.typ == TokenType::Operation(Op::SET), "Error: unexpected token type {} after constant definition! Expected =",typ.typ.to_string(false));
                                     }
                                     else {
                                         par_error!(typ, "Error: Expected definition but found {}!",typ.typ.to_string(false));
@@ -2836,7 +2888,6 @@ fn parse_token_to_build_inst(token: Token,lexer: &mut Lexer, program: &mut CmdPr
                 IntrinsicType::ELSE => {
                     scopeStack.push(Scope { typ: ScopeType::NORMAL(NormalScope { typ: NormalScopeType::ELSE, body: vec![], locals: Locals::new()}), hasBeenOpened: false })
                 },
-                IntrinsicType::DIV => todo!("{:#?} at {}",build,lexer.currentLocation.loc_display()),
                 IntrinsicType::Let => {
                     
                     let nametok = par_expect!(lexer.currentLocation, lexer.next(), "Error: abruptly ran out of tokens for Let");
@@ -2945,12 +2996,6 @@ fn parse_token_to_build_inst(token: Token,lexer: &mut Lexer, program: &mut CmdPr
                     let symbol_contract = parse_any_contract(lexer);
                     build.dll_exports.insert(symbol_name.clone(), DLL_export { contract: symbol_contract });
                 },
-                IntrinsicType::MORETHAN => todo!(),
-                IntrinsicType::LESSTHAN => todo!(),
-                IntrinsicType::MORETHANEQ => todo!(),
-                IntrinsicType::LESSTHANEQ => todo!(),
-                IntrinsicType::NOTEQUALS => todo!(),
-                IntrinsicType::EQUALS => todo!(),
             }
         }
         TokenType::StringType(_) => {
@@ -2982,9 +3027,9 @@ fn parse_token_to_build_inst(token: Token,lexer: &mut Lexer, program: &mut CmdPr
             let currentScope = getTopMut(scopeStack).unwrap();
             let regOp = par_expect!(lexer.currentLocation,lexer.next(),"Unexpected register operation or another register!");
             match regOp.typ {
-                TokenType::IntrinsicType(typ) => {
-                    match typ {
-                        IntrinsicType::SET => {
+                TokenType::Operation(ref op) => {
+                    match op {
+                        Op::SET => {
                             let token = par_expect!(lexer.currentLocation,lexer.next(),"abruptly ran out of tokens");
                             match token.typ {
                                 TokenType::Number32(data) => {
@@ -3019,50 +3064,51 @@ fn parse_token_to_build_inst(token: Token,lexer: &mut Lexer, program: &mut CmdPr
                                 _ => par_error!(token,"Unexpected Type for Mov Intrinsic. Expected Number32/Number64 but found {}",token.typ.to_string(false))
                             }
                         }
-                        Other => {
-                            par_error!(token,"Unexpected Intrinsic Type: {}, Registers can only perform register operations \"pop\" \"push\" \"mov\" ",Other.to_string(false))
+                        _ => {
+                            par_error!(regOp,"Error: Unexepected operation {}",op.to_string());
                         }
                     }
-                },
+                }
                 TokenType::Register(reg2) => {
                     par_assert!(token,reg.size()==reg2.size(),"Gotten two differently sized registers to one op!");
                     let regOp = lexer.next().expect(&format!("(P) [ERROR] {}:{}:{}: Unexpected register operation!",token.location.clone().file,&token.location.clone().linenumber,&token.location.clone().character));
                     let body = currentScope.body_unwrap_mut().unwrap();
                     match regOp.typ {
-                        TokenType::IntrinsicType(typ) => {
+                        TokenType::Operation(typ) => {
                             
                             match typ {
-                                IntrinsicType::ADD => {
+                                Op::PLUS => {
                                     body.push((token.location.clone(),Instruction::ADD(OfP::REGISTER(reg), OfP::REGISTER(reg2))))
                                 }
-                                IntrinsicType::SUB => {
+                                Op::MINUS => {
                                     body.push((token.location.clone(),Instruction::SUB(OfP::REGISTER(reg), OfP::REGISTER(reg2))))
                                 }
-                                IntrinsicType::MUL => {
+                                Op::MUL => {
                                     body.push((token.location.clone(),Instruction::MUL(OfP::REGISTER(reg), OfP::REGISTER(reg2))))
                                 }
-                                IntrinsicType::EQUALS => {
+                                Op::EQ => {
                                     body.push((token.location.clone(),Instruction::EQUALS(OfP::REGISTER(reg), OfP::REGISTER(reg2))))
                                 }
-                                IntrinsicType::DIV => {
+                                Op::DIV => {
                                     body.push((token.location.clone(),Instruction::DIV(OfP::REGISTER(reg), OfP::REGISTER(reg2))))
                                 }
-                                IntrinsicType::SET => {
+                                Op::SET => {
                                     body.push((token.location.clone(),Instruction::MOV(OfP::REGISTER(reg), OfP::REGISTER(reg2))))
                                 }
-                                other => par_error!(token,"Unexpected Intrinsic! Expected Register Intrinsic but found {}",other.to_string(false))
+                                other => par_error!(token,"Unexpected Operation! Expected Register Operation but found {}",other.to_string())
                             }
                         }
                         other => {
-                            par_error!(token, "Unexpected token type: Expected Intrinsic but found {}",other.to_string(false));
+                            par_error!(token, "Unexpected token type: Expected Op but found {}",other.to_string(false));
                         }
                     }
                 }
                 typ => {
-                    par_error!(token,"Unexpected register operation! Expected Intrinsic or another Register but found {}",typ.to_string(false));
+                    par_error!(token,"Unexpected register operation! Expected Op or another Register but found {}",typ.to_string(false));
                 }
             }
         },
+        TokenType::Operation(_) => todo!(),
     }
 
 }
@@ -3143,7 +3189,7 @@ fn optimization_ops_scope(build: &BuildProgram, program: &CmdProgram, scope: TCS
                 out.usedFuncs.insert(r.clone());
             }
             Instruction::EXPAND_SCOPE(s) | Instruction::EXPAND_IF_SCOPE(s) | Instruction::EXPAND_ELSE_SCOPE(s) => {
-                optimization_ops_scope(build, program, TCScopeType::NORMAL(s), out, fn_name.clone())
+                optimization_ops_scope(build, program, TCScopeType::NORMAL(&s), out, fn_name.clone())
             }
             
             _ => {}
@@ -3804,21 +3850,21 @@ fn nasm_x86_64_handle_scope(f: &mut File, build: &BuildProgram, program: &CmdPro
                     OfP::CONST(_) => todo!(),
                 }
             },
-            Instruction::EXPAND_SCOPE(s) => nasm_x86_64_handle_scope(f, build, program, TCScopeType::NORMAL(s),local_vars.clone(),stack_size)?,
+            Instruction::EXPAND_SCOPE(s) => nasm_x86_64_handle_scope(f, build, program, TCScopeType::NORMAL(&s),local_vars.clone(),stack_size)?,
             Instruction::EXPAND_IF_SCOPE(s)   => {
                 writeln!(f, "   cmp al, 0")?;
                 writeln!(f, "   jnz .IF_SCOPE_{}",i)?;
                 if let Some((_,elses)) = scope.get_body(build).get(i+1) {
                     match elses {
                         Instruction::EXPAND_ELSE_SCOPE(elses) => {
-                            nasm_x86_64_handle_scope(f, build, program, TCScopeType::NORMAL(elses), local_vars.clone(), stack_size)?;
+                            nasm_x86_64_handle_scope(f, build, program, TCScopeType::NORMAL(&elses), local_vars.clone(), stack_size)?;
                         }
                         _ => {}
                     }
                 }
                 writeln!(f, "   jmp .IF_SCOPE_END_{}",i)?;
                 writeln!(f, "   .IF_SCOPE_{}:",i)?;
-                nasm_x86_64_handle_scope(f, build, program, TCScopeType::NORMAL(s), local_vars.clone(), stack_size)?;
+                nasm_x86_64_handle_scope(f, build, program, TCScopeType::NORMAL(&s), local_vars.clone(), stack_size)?;
                 writeln!(f, "   .IF_SCOPE_END_{}:",i)?;
                 //TODO: Implement actual conditions
             },
@@ -4141,9 +4187,9 @@ fn type_check_scope(build: &BuildProgram, program: &CmdProgram, scope: TCScopeTy
                     }
                 }
             },
-            Instruction::EXPAND_SCOPE(s)      => type_check_scope(build, program, TCScopeType::NORMAL(s), currentLocals),
-            Instruction::EXPAND_IF_SCOPE(s)   => type_check_scope(build, program, TCScopeType::NORMAL(s), currentLocals),
-            Instruction::EXPAND_ELSE_SCOPE(s) => type_check_scope(build, program, TCScopeType::NORMAL(s), currentLocals),
+            Instruction::EXPAND_SCOPE(s)      => type_check_scope(build, program, TCScopeType::NORMAL(&s), currentLocals),
+            Instruction::EXPAND_IF_SCOPE(s)   => type_check_scope(build, program, TCScopeType::NORMAL(&s), currentLocals),
+            Instruction::EXPAND_ELSE_SCOPE(s) => type_check_scope(build, program, TCScopeType::NORMAL(&s), currentLocals),
             //TODO: add typechecking for this:
             Instruction::MORETHAN(_, _)       => {},
             Instruction::LESSTHAN(_, _)       => {},
@@ -4423,22 +4469,11 @@ fn main() {
     Intrinsics.insert(":".to_string(),IntrinsicType::DOUBLE_COLIN);
     Intrinsics.insert(",".to_string(),IntrinsicType::COMA);
     Intrinsics.insert(";".to_string(),IntrinsicType::DOTCOMA);
-    Intrinsics.insert("=".to_string(),IntrinsicType::SET);
-    Intrinsics.insert("+".to_string(),IntrinsicType::ADD);
-    Intrinsics.insert("-".to_string(),IntrinsicType::SUB);
-    Intrinsics.insert("*".to_string(),IntrinsicType::MUL);
-    Intrinsics.insert("/".to_string(),IntrinsicType::DIV);
     Intrinsics.insert("return".to_string(),IntrinsicType::RET);
     Intrinsics.insert("if".to_string(), IntrinsicType::IF);
     Intrinsics.insert("else".to_string(), IntrinsicType::ELSE);
     Intrinsics.insert("cast".to_string(), IntrinsicType::CAST);
 
-    Intrinsics.insert("==".to_string(),IntrinsicType::EQUALS);
-    Intrinsics.insert("!=".to_string(),IntrinsicType::NOTEQUALS);
-    Intrinsics.insert(">".to_string(),IntrinsicType::MORETHAN);
-    Intrinsics.insert("<".to_string(),IntrinsicType::LESSTHAN);
-    Intrinsics.insert("<=".to_string(),IntrinsicType::LESSTHANEQ);
-    Intrinsics.insert(">=".to_string(),IntrinsicType::MORETHANEQ);
     let mut Definitions: HashMap<String,VarType> = HashMap::new();
     Definitions.insert("int".to_string(), VarType::INT);
     Definitions.insert("char".to_string(), VarType::CHAR);
@@ -4524,10 +4559,20 @@ fn main() {
 
 
 
-
-
-
-
+/*
+struct ExOp {
+    body1: Expression,
+    body2: Expression,
+    op: Op
+}
+enum Expression {
+    ofp(OfP),
+    eval(ExOp)
+}
+let mut out: Expression;
+let opstack: Vec<Op> = Vec::new();
+let valstack: Vec<OfP> = Vec::new();
+*/
 /*
 - [x] TODO: No point in keeping params and localvars seperate once we set LOCALVAR onto the stack instead of the CALLSTACK
 - [x] TODO: remove warn_rax_usage
@@ -4541,6 +4586,8 @@ fn main() {
 - [x] TODO: Implement if statements as well as else statements
 - [ ] TODO: Fix returning from functions
 - [ ] TODO: Add 'result' as a part of OfP for calling the function and getting its result
+- [ ] TODO: Implement conditions and 'evaluate_condition'
+- [ ] TODO: Implement while loops
 - [ ] TODO: Add more examples like OpenGL examples, native Windows examples with linking to kernel.dll etc.
 - [ ] TODO: Add some quality of life things such as __FILE__ __LINE__
 
@@ -4548,6 +4595,9 @@ fn main() {
 - [ ] TODO: Add EOL (End of line) token
 
 
+- [ ] TODO: Make it so that get_body returns None if scope has not been opened yet
+- [ ] TODO: Remove some dependencies like UUID since we don't exactly need it (also bench mark it to see the improvement in speed!)
 - [/] TODO: Make callraw use reference to UUID and name instead of raw when typechecking
 - [/] TODO: Make call use reference to UUID and name instead of raw
+
 */

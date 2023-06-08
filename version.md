@@ -1,8 +1,9 @@
 **(Latest patch versions in github history and at the top of Change Log)**
 
-Newest Version: [0.11.11A](#01111a)
+Newest Version: [0.11.12A](#01112a)
 # Manual:
-   - [0.11.11A](#01110a)
+  - [0.11.12A](#01112a)
+    - [0.11.11A](#01111a)
     - [0.11.10A](#01110a)
     - [0.11.9A](#0119a)
     - [0.11.8A](#0118a)
@@ -34,6 +35,8 @@ Newest Version: [0.11.11A](#01111a)
   - [0.2A](#02a)
   - [0.1A](#01a)
 # Change Log
+ ## 0.11.12A
+   - Moved +, -, *, / to a new Token type 'Operand'
  ## 0.11.11A
    - Added TEMPORARY if statements
    - Added else statements
