@@ -3,12 +3,12 @@ extern "C" printf(*char, bool : int);
 func main(){
     let a: int
     let b: int
-    a = 5
-    b = 4
-    a == b if {
-        let c: bool;
-        c = AL
-        printf("Al: %x"c,c);
+    let c: bool;
+    a = 5;
+    b = 5;
+    c = a==b;
+    if c {
+        printf("Al: %x\n"c,c);
     }
     else {
         puts("Bye!!!"c);

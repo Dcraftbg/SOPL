@@ -4,7 +4,7 @@ func main(){
     a = "Hello World!"c;
     {
         let b: *char;
-        b = a
+        b = a;
         puts(a);
         puts(b);
     }

@@ -1,5 +1,48 @@
 > Here you can expect to find anything really interesting or important
+# Evaluation and more
+10/06/23 **0.12A**
 
+Big news: Evaluation of expressions has finally been introduced to SOPL.
+Now you can do stuff like:
+```
+a = b+c*d;
+```
+The old ways of handling instructions like + - * and / have been re-purposed for += -= *= /= and have moved to be more consistent with the current syntax of =
+Before the update:
+```
+RAX = b
+RBX = c
+RBX d *
+RAX RBX +
+a RAX +
+```
+After the update:
+```
+a += b+c*d;
+```
+Not only is this now removing one of the core parts of using Registers in sopl in the first place, but its also preparing for their eventual deprecation.
+One of the only things that using raw registers is good for is returning from functions and that is expected to be fixed by the next patch (hopefully).
+
+With this new patch I've also fixed if statement conditions:
+```
+a = b==c;
+if a {
+    printf("They are equal")
+}
+else {
+    printf("They are NOT equal")
+}
+```
+Its not entirely how I want it to be, since expressions are still not yet evaluated but we are getting there and that is what counts :D.
+After hopefully fixing the majority of the bugs a push to master is planned to happen.
+
+
+(**NOTE:** More complicated evaluations will not work YET)
+## Why have I been holding back the push for so long?
+
+Well its because at the end of 0.4A (the last patch for master) I decided to disable ifs and re-work them the way I wanted them to work.
+However I decided to do a lot of other things in the process - which by the end majorly improved the way I handle things and how the language looks and feels. Some of the changes may be contrevertial but they are, in my opinion, all for the better of the language.
+After implementing if statements we are essentially going to be at the point at which we are essentially come full circle to the start but have all of these new and cool features to show for the other progress we have made.
 # Stack oriented removed
 31/05/23 **0.11.3A** 
 

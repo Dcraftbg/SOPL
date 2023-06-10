@@ -64,7 +64,7 @@ Ideas that are left for discussion and further expansion:
 [NOTE] that whilst registers are really powerful and useful for building with x86 64, they might get 'discontinued' after Java integration (theoretical Java integration). They will have support for nasm but in the future their usage will be warned and their features replaced by more modern ones. Deprecation isn't expected any time soon but when the majority of the boxes under 'plans' are ticked off you probably will expect deprecation of them. 
 For anyone wandering things like interrupts are probably going to be handled like so:
 ```sopl
-interrupt 128, 1, 1, "Hello World!" // Print Hello World! on linux
+interrupt 128 
 ```
 ^ Regarding previous [NOTE], functions now no longer take in arguments through the stack and have more modern syntax, lowering the practical usage of registers even more [0.11A](version.md#011a)
 ## Requirements
@@ -79,7 +79,7 @@ It also gives you a timeline of the most recent changes (newest -> oldest).
 
 Flags are really important and if not updated here, you can always check out what flag support there is by just running the compiler without anything (This will display information such as the usage, the currently supported builds and any flags you might want to use).
 
-As of [0.11.5A](version.md#0115a) flags consist of:
+As of [0.12A](version.md#012a) flags consist of:
 ```
 --------------------------------------------
 sopl [flags]
@@ -116,9 +116,8 @@ sopl [flags]
   - [ ] while statements
   - [ ] for statements
 - [x] locals
-- [ ] type checking
+- [x] type checking
   - [x] Function type checking
-  - [ ] Branching
 - [ ] structs
 - [ ] struct methods
 - [ ] interfaces
@@ -126,13 +125,13 @@ sopl [flags]
 *Note that documentation may not cover all of the latest features tho you might expect updates on them shortly after implementation*
 ### Hello World!
 ```sopl
-extern "C" printf(ptr : int)
+extern "C" printf(*char : int)
 
 func main() {
   printf("Hello World!"c);
 }
 ```
-### extern
+### Extern
   * Changed syntax in [0.11A](version.md#011a)
   * Added Files related in [0.7A](version.md#07a):
     - [stdio.spl](src/C/stdio.spl)
@@ -152,20 +151,9 @@ Externs are really powerful if you want to link to libraries that aren't previou
 
 **Example(s)**:
 ```
-extern "C" puts(ptr : int); // Links with puts from C
+extern "C" puts(*char : int); // Links with puts from C
 func main(){
   puts("Hello World"c) // uses it to print a string to the console
-}
-```
-
-```
-extern "C" puts(ptr : int); // Links with puts from C
-func main(){
-  "Hello World"c
-  puts(top) // uses it to print a string to the console (copying it) from the top of the stack
-  puts(top)
-  puts(top)
-  pop
 }
 ```
 ### functions
@@ -181,11 +169,11 @@ func (name) ((contract)) {
 ```
 Functions, just like in other languages have a name and a body. In sopl however you have to provide a contract:
 
-A contract is a way to tell the type checker what to expect to have put onto the stack after it calls your function.
+A contract is a way to tell the type checker what to expect to have passed to it before calling it.
 The contract contains:
 (Input parameters separated by , : Output parameters separated by ,)
 
-Inside of functions you can use the "ret" keyword to return although it is automatically done for you at the end of the functions declaration.
+Inside of functions you can use the "return" keyword to return although it is automatically done for you at the end of the functions declaration.
 
 **Example(s)**:
 ```sopl
@@ -193,27 +181,17 @@ func sayHello() {
   printf("Hello World!\n"c)
 }
 func counter(c: long : long) {
-  // Old syntax:
-  //RBX pop
-  //RCX = 1
-  //RBX RCX -
-  //RBX push
-  //counter
-  //RBX pop
-  //pop
-  //rs RBX push
-
-  // New (planned) syntax:
   c -= 1
   counter(n) 
   rs RAX push
 }
 ```
-
-As of 0.6A, there is a new keyword called 'rs' short for "Return stack"
+As of 0.12A, expression evaluation has been added so the code above does 'theoretically' work
 As of 0.11A, the 'rs' keyword is planned to be deprecated, and instead replaced with the new syntax and C standard
+As of 0.6A, there is a new keyword called 'rs' short for "Return stack"
 
 ### including
+* Fixed bug where constants weren't being included [0.5.1A](version.md#051a)
 * Pre 0.1A
 
 **Syntax**
@@ -283,6 +261,13 @@ All of their sub types respectfully:
 - [x] XMM1
 - [x] XMM2
 - [x] XMM3
+- [x] XMM4
+- [x] XMM5
+- [x] XMM6
+- [x] XMM7
+- [x] XMM8
+- [x] XMM9
+
 
 
 **[NOTE] RAX is used for returning longs/int/shorts/chars for C functions and your functions so usage of it outside of that is not advised** 
@@ -291,40 +276,24 @@ All of their sub types respectfully:
 (RegisterName) (Op | RegisterName) [RegisterName | Op]
 ```
 **Example(s)**
-```sopl
-RBX pop   // Pops RBX off the stack
-RCX = 4   // sets RCX
-RBX RCX + // Adds RCX to RBX
-```
 
 Currently supported register operations:
 ```
-(REG1) (REG2) +  -> adds the two registers together (RESULT IN REG1)
-(REG1) (REG2) -  -> subtracts the second register from the first register (RESULT IN REG1)
-(REG1) (REG2) *  -> multiples the two registers     (RESULT IN REG1)
-(REG1) (REG2) == -> compares two registers (RESULT IN REG1)
-(REG1) = (REG2)  -> Moves the value from REG2 to REG1
-(REG1) push      -> pushes register onto the stack                          
-(REG1) pop       -> pops the value off the stack and loads it into register 
-pop              -> pops 64 bit value off the stack and loads it into RAX
-push             -> pushes RAX onto the stack
+(REG1) + (REG2)  -> adds the two registers together 
+(REG1) - (REG2)  -> subtracts the second register from the first register 
+(REG1) * (REG2)  -> multiples the two registers     
+(REG1) == (REG2) -> compares two registers 
+
+(REG1) = (Expression)  -> Moves the value of the expression to REG1
+(REG1) += (Expression)  -> Adds the value of the expression to REG1
+(REG1) -= (Expression)  -> Subtracts the value of the expression to REG1
+(REG1) *= (Expression)  -> Multiplies the value of the expression to REG1
+(REG1) /= (Expression)  -> Divides the value of the expression to REG1
 ```
 ### managing C functions and their return values
 
-C functions are a little bit different than SOPL ones, As you know C actually copies its parameters when they are passed to a function and DOES NOT CONSUME them off the stack.
-It also returns its integers, longs, shorts or chars (this also includes pointers) in the RAX register. 
-Parameters to C functions are also passed backwards. As an example here is some C code:
-```c
-printf("%ld", 5);
-```
-And here is the same code in sopl:
-```sopl
-printf("%ld"c, 5l);
-```
-~~As you can see the parameters get passed in a reversed order (thats because of how your parameters in C get passed to functions normally)~~
-
-~~As for returning values that are higher than 8 bytes, C pushes them on the stack together with everything else.~~
-
+SOPL is made to be compatible with the C functions and using them throughout your code is totally acceptable.
+To link with external C funcions you can use the 'extern' keyword. For right now values are returned into the RAX register and you need to move them into your variable manually. (This is planned to change in the future)
 
 
 ### strings
@@ -353,7 +322,8 @@ func main() {
 
 
 ### control flow
-
+[0.12A](version.md#012a) Finally settled the syntax of ifs
+[0.11.11A](version.md#01111a) Added 'temporary' ifs
 > If     -> Pre 0.1A
 
 > Else   -> Pre 0.1A
@@ -365,18 +335,23 @@ if (condition) {(Body)}
 
 **Examples:**
 ```sopl
-RBX = 4
-RCX = 5
-if RBX RCX == {
-  "Nice!"c printf pop
+let a: int;
+let b: int;
+let c: bool;
+a = 5;
+b = 4;
+c = a==b;
+if RBX == RCX {
+  printf("Nice!"c);
 }
 else {
-  "Not nice!"c printf pop
+  printf("Not nice!"c);
 }
 ```
 
 
 ### constants
+* 0.11.4A Added types for constants as well as casting
 * Pre 0.1A
 
 **Syntax:**
@@ -398,25 +373,34 @@ const HelloWorldNine = HelloWorld C + ; // Concatenates the integers and strings
 In a constants expression can only be things that can be evaluated at compile time, such as Strings, Integers, Longs and other constants. If you try to use something like a function it would tell you that it doesn't recognize it as a constant value. 
 
 ### locals
+* 0.12A Added expressions
+* 0.11.6A Made local variables be on the stack and merged parameters with variables
 * Pre 0.1A
   * Add  -> Pre 0.1A
   * Set  -> Pre 0.1A
-  * Push -> Pre 0.1A
-  * Pop  -> Pre 0.1A
+  * (DEPRECATED) Push -> Pre 0.1A
+  * (DEPRECATED) Pop  -> Pre 0.1A
 
 **Syntax:**
 ```sopl
 let (name): (type)
 ```
 
-Whilst the stack is really flexible and neat, and unlike in most stack-oriented languages pretty customizable with the ability to access registers, having local variables is really important. Local variables in SOPL
-are allocated on the callstack and therefor after the functions end they are removed off the stack. All local variables have a type and a name. Names are bound to a specific **FUNCTION SCOPE**. There aren't yet local variables for
-normal scopes although they are planned for the future. Local variables are planned to be developed along side registers, with the majority of the operations matching in both syntax and usage. Although currently only a few are supported:
-```
-addition (+)
-set (=)
-pop
-push
+Local variables are a core part of any programming language. SOPL is no exception. Define a variable like this and then you can use it throughout your code later.
+**Example(s)**
+```sopl
+let a: int;
+let b: int;
+a = 5+4;
+b = 4+3;
+if a == b {
+  let c: int;
+  c = a+b;
+  printf("a=%d, b=%d, c=%d",a,b,c)
+}
+else {
+  printf("a=%d, b=%d and they are not equal!",a,b)
+}
 ```
 
 ### interrupts

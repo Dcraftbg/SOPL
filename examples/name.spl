@@ -10,14 +10,14 @@
 //    EAX pop
 //}
 
-extern "C" printf(ptr : int);
+extern "C" printf(*char : int);
 extern "C" malloc(long : ptr);
 extern "C" free(ptr);
 extern "C" memset(ptr, int, long);
 extern "C" gets(ptr);
 const NAMELEN = 50l;
 func main() {
-    let name: ptr;
+    let name: *char;
     malloc(NAMELEN)
     name = RAX
     memset(name, 0, NAMELEN);

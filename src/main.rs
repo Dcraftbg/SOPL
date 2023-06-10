@@ -327,8 +327,6 @@ enum IntrinsicType {
     DOTCOMA,
     OPENCURLY,
     CLOSECURLY,
-    OPENANGLE,
-    CLOSEANGLE,
     INTERRUPT,
     // REGISTER OPERATIONS
     POP,
@@ -450,12 +448,6 @@ impl IntrinsicType {
             IntrinsicType::CAST => {
                 if isplural {"Casts".to_string()} else {"Cast".to_string()}
             },
-            IntrinsicType::OPENANGLE => {
-                if isplural {"Open angle brackets".to_string()} else {"Open angle bracket".to_string().to_string()}
-            },
-            IntrinsicType::CLOSEANGLE => {
-                if isplural {"Close angle brackets".to_string()} else {"Close angle bracket".to_string().to_string()}
-            },
             IntrinsicType::DLL_IMPORT => {
                 if isplural {"Dll Imports".to_string()} else {"Dll Import".to_string().to_string()}
             },
@@ -467,7 +459,38 @@ impl IntrinsicType {
 }
 #[derive(Debug,PartialEq,Clone)]
 #[repr(u8)]
+enum SetOp {
+    SET,
+    PLUSSET,
+    MINUSSET,
+    MULSET,
+    DIVSET,
+}
+impl SetOp {
+    fn from_str(s: &str) -> Option<Self> {
+        match s {
+            "="  => Some(Self::SET),
+            "+=" => Some(Self::PLUSSET),
+            "+=" => Some(Self::MINUSSET),
+            "*=" => Some(Self::MULSET),
+            "/=" => Some(Self::DIVSET),
+            _ => None
+        }
+    }
+    fn to_string(&self) -> &str {
+        match self {
+            Self::SET    => "=",
+            Self::PLUSSET => "+=",
+            Self::MINUSSET => "+=",
+            Self::MULSET => "*=",
+            Self::DIVSET => "/="
+        }
+    }
+}
+#[derive(Debug,PartialEq,Clone)]
+#[repr(u8)]
 enum Op {
+    NONE = 0,
     PLUS,
     MINUS,
     DIV,
@@ -479,7 +502,6 @@ enum Op {
     LT,
     LTEQ,
     NOT,
-    SET,
 }
 impl Op {
     fn from_str(s: &str) -> Option<Self> {
@@ -495,12 +517,12 @@ impl Op {
             "<" => Some(Op::LT),
             "<="=> Some(Op::LTEQ),
             "!" => Some(Op::NOT),
-            "=" => Some(Op::SET),
             _ => None
         }
     }
     fn to_string(&self) -> &str {
         match self {
+            Op::NONE  => "None",
             Op::PLUS  => "+" ,
             Op::MINUS => "-" ,
             Op::DIV   => "/" ,
@@ -512,11 +534,329 @@ impl Op {
             Op::LT    => "<" ,
             Op::LTEQ  => "<=",
             Op::NOT   => "!" ,
-            Op::SET   => "="
+        }
+    }
+    fn get_priority(&self) -> usize {
+        match self {
+            Self::NOT =>  0,
+            Self::EQ   | Self::NEQ | Self::GT | Self::LT | Self::GTEQ | Self::LTEQ => 1,
+            Self::PLUS | Self::MINUS => 2,
+            Self::MUL  | Self::DIV   => 3,
+            Self::NONE  => panic!("This should not occur"),
+        }
+    }
+    fn is_boolean(&self) -> bool {
+        match self {
+            Self::EQ   | Self::NEQ | Self::GT | Self::LT | Self::GTEQ | Self::LTEQ => true,
+            _ => false
         }
     }
 }
+#[derive(Debug)]
+enum Expression {
+    val(OfP),
+    expr(Box<ExprTree>)
+}
+impl Expression {
+    fn unwrap_val(&self) -> &OfP {
+        if let Expression::val(v) = self {
+            v
+        }
+        else {
+            panic!("ERROR: Cannot unwrap on non val type!");
+        }
+    }
+    fn unwrap_expr(&self) -> &Box<ExprTree> {
+        if let Expression::expr(v) = self {
+            v
+        }
+        else {
+            panic!("ERROR: Cannot unwrap on non expr type!");
+        }
+    }
+    fn is_expr(&self) -> bool {
+        match self {
+            Self::expr(_) => true,
+            _ => false
+        }
+    }
+    fn is_ofp(&self) -> bool {
+        match self {
+            Self::val(_) => true,
+            _ => false
+        }
+    }
+}
+impl Expression {
+    fn LEIRnasm(&self,regs: Vec<Register>,f: &mut File, program: &CmdProgram,build: &BuildProgram,local_vars: &HashMap<String, LocalVariable>,stack_size: usize,loc: &ProgramLocation) -> std::io::Result<Vec<Register>>{
+        match self {
+            Expression::val(v) => {
+               v.LOIRGNasm(regs, f, program, build, local_vars, stack_size, loc)
+            },
+            Expression::expr(e) => {
+                //todo!("ERROR: this should stop here");
+                e.eval_nasm(regs,f,program,build,local_vars,stack_size,loc)
+            },
+        }
+    }
+}
+#[derive(Debug)]
+struct ExprTree {
+    left:  Option<Expression>,
+    right: Option<Expression>,
+    op: Op
+}
+impl ExprTree {
+    fn eval_nasm(&self,regs: Vec<Register>,f: &mut File,program: &CmdProgram,build: &BuildProgram,local_vars: &HashMap<String, LocalVariable>,stack_size: usize,loc: &ProgramLocation) -> std::io::Result<Vec<Register>>{
+        let mut o: Vec<Register> = Vec::new();
+        match self.op {
+            Op::NONE  => com_error!(loc,"Error: Cannot evaluate NONE operation!"),
+            Op::PLUS  => {
+                let left = com_expect!(loc,self.left.as_ref(),"Error: Cannot evaluate Op '{}' without left parameter",Op::PLUS .to_string());
+                if left.is_ofp() {
+                    com_assert!(loc,regs.len() > 1, "TODO: Handle multi-parameter loading for expressions!");
+                    let right       = com_expect!(loc,self.right.as_ref(),"Error: Cannot evaluate Op '{}' without left parameter",Op::PLUS .to_string());
+                    let rightregs1= right.LEIRnasm(regs.to_vec(), f, program, build, local_vars, stack_size, loc)?;
+                    let leftregs1 = left.LEIRnasm(regs[1..].to_vec(), f, program, build, local_vars, stack_size, loc)?;
+                    com_assert!(loc,rightregs1.len() == 1, "TODO: Handle multi-parameter loading for expressions!");
+                    writeln!(f, "   add {}, {}",leftregs1[0].to_string(),rightregs1[0].to_string())?;
+                    o = leftregs1;
+                }
+                else {
+                    let leftregs1 = left.LEIRnasm(regs.to_vec(), f, program, build, local_vars, stack_size, loc)?;
+                    com_assert!(loc,regs.len() > 1, "TODO: Handle multi-parameter loading for expressions!");
+                    let right       = com_expect!(loc,self.right.as_ref(),"Error: Cannot evaluate Op '{}' without left parameter",Op::PLUS.to_string());
+                    let rightregs1= right.LEIRnasm(regs[1..].to_vec(), f, program, build, local_vars, stack_size, loc)?;
+                    com_assert!(loc,rightregs1.len() == 1, "TODO: Handle multi-parameter loading for expressions!");
+                    writeln!(f, "   add {}, {}",leftregs1[0].to_string(),rightregs1[0].to_string())?;
+                    o = leftregs1;
+                }
+            },
+            Op::MINUS => {
+                let left = com_expect!(loc,self.left.as_ref(),"Error: Cannot evaluate Op '{}' without left parameter",Op::PLUS .to_string());
+                if left.is_ofp() {
+                    com_assert!(loc,regs.len() > 1, "TODO: Handle multi-parameter loading for expressions!");
+                    let right       = com_expect!(loc,self.right.as_ref(),"Error: Cannot evaluate Op '{}' without left parameter",Op::PLUS .to_string());
+                    let rightregs1= right.LEIRnasm(regs.to_vec(), f, program, build, local_vars, stack_size, loc)?;
+                    let leftregs1 = left.LEIRnasm(regs[1..].to_vec(), f, program, build, local_vars, stack_size, loc)?;
+                    com_assert!(loc,rightregs1.len() == 1, "TODO: Handle multi-parameter loading for expressions!");
+                    writeln!(f, "   sub {}, {}",leftregs1[0].to_string(),rightregs1[0].to_string())?;
+                    o = leftregs1;
+                }
+                else {
+                    let leftregs1 = left.LEIRnasm(regs.to_vec(), f, program, build, local_vars, stack_size, loc)?;
+                    com_assert!(loc,regs.len() > 1, "TODO: Handle multi-parameter loading for expressions!");
+                    let right       = com_expect!(loc,self.right.as_ref(),"Error: Cannot evaluate Op '{}' without left parameter",Op::PLUS.to_string());
+                    let rightregs1= right.LEIRnasm(regs[1..].to_vec(), f, program, build, local_vars, stack_size, loc)?;
+                    com_assert!(loc,rightregs1.len() == 1, "TODO: Handle multi-parameter loading for expressions!");
+                    writeln!(f, "   sub {}, {}",leftregs1[0].to_string(),rightregs1[0].to_string())?;
+                    o = leftregs1;
+                }
 
+            },
+            Op::DIV   => {
+                com_assert!(loc,regs[0].to_byte_size(8) == Register::RAX,"Error: Cannot do division with output register different from RAX");
+                let left = com_expect!(loc,self.left.as_ref(),"Error: Cannot evaluate Op '{}' without left parameter",Op::DIV  .to_string());
+                let leftregs1 = left.LEIRnasm(regs.clone(), f, program, build, local_vars, stack_size, loc)?;
+                com_assert!(loc,leftregs1.len() == 1, "TODO: Handle multi-parameter loading for expressions!");
+                let right = com_expect!(loc,self.right.as_ref(),"Error: Cannot evaluate Op '{}' without left parameter",Op::DIV  .to_string());
+                let rightregs1 = right.LEIRnasm(regs[1..].to_vec(), f, program, build, local_vars, stack_size, loc)?;
+                com_assert!(loc,rightregs1.len() == 1, "TODO: Handle multi-parameter loading for expressions!");
+                writeln!(f, "   div {}",rightregs1[0].to_string())?;
+                o = leftregs1;
+
+            },
+            Op::MUL   => {
+                com_assert!(loc,regs[0].to_byte_size(8) == Register::RAX,"Error: Cannot do multiplication with output register different from RAX");
+                let left = com_expect!(loc,self.left.as_ref(),"Error: Cannot evaluate Op '{}' without left parameter",Op::MUL  .to_string());
+                let leftregs1 = left.LEIRnasm(regs.clone(), f, program, build, local_vars, stack_size, loc)?;
+                com_assert!(loc,leftregs1.len() == 1, "TODO: Handle multi-parameter loading for expressions!");
+                let right = com_expect!(loc,self.right.as_ref(),"Error: Cannot evaluate Op '{}' without left parameter",Op::MUL  .to_string());
+                let rightregs1 = right.LEIRnasm(regs[1..].to_vec(), f, program, build, local_vars, stack_size, loc)?;
+                com_assert!(loc,rightregs1.len() == 1, "TODO: Handle multi-parameter loading for expressions!");
+                writeln!(f, "   imul {}",rightregs1[0].to_string())?;
+                o = leftregs1;
+
+            },
+            Op::EQ    => {
+                let left = com_expect!(loc,self.left.as_ref(),"Error: Cannot evaluate Op '{}' without left parameter",Op::EQ   .to_string());
+                let leftregs1 = left.LEIRnasm(regs.clone(), f, program, build, local_vars, stack_size, loc)?;
+                com_assert!(loc,leftregs1.len() == 1, "TODO: Handle multi-parameter loading for expressions!");
+                let right = com_expect!(loc,self.right.as_ref(),"Error: Cannot evaluate Op '{}' without left parameter",Op::EQ   .to_string());
+                let rightregs1 = right.LEIRnasm(regs[1..].to_vec(), f, program, build, local_vars, stack_size, loc)?;
+                com_assert!(loc,rightregs1.len() == 1, "TODO: Handle multi-parameter loading for expressions!");
+                writeln!(f, "   cmp {}, {}",leftregs1[0].to_string(),rightregs1[0].to_string())?;
+                writeln!(f, "   sete {}",leftregs1[0].to_byte_size(1).to_string())?;
+                o = vec![leftregs1[0].to_byte_size(1)];
+            },
+            Op::NEQ   => {
+                let left = com_expect!(loc,self.left.as_ref(),"Error: Cannot evaluate Op '{}' without left parameter",Op::NEQ  .to_string());
+                let leftregs1 = left.LEIRnasm(regs.clone(), f, program, build, local_vars, stack_size, loc)?;
+                com_assert!(loc,leftregs1.len() == 1, "TODO: Handle multi-parameter loading for expressions!");
+                let right = com_expect!(loc,self.right.as_ref(),"Error: Cannot evaluate Op '{}' without left parameter",Op::NEQ  .to_string());
+                let rightregs1 = right.LEIRnasm(regs[1..].to_vec(), f, program, build, local_vars, stack_size, loc)?;
+                com_assert!(loc,rightregs1.len() == 1, "TODO: Handle multi-parameter loading for expressions!");
+                writeln!(f, "   cmp {}, {}",leftregs1[0].to_string(),rightregs1[0].to_string())?;
+                writeln!(f, "   setne {}",leftregs1[0].to_byte_size(1).to_string())?;
+                o = vec![leftregs1[0].to_byte_size(1)];
+            },
+            Op::GT    => {
+                let left = com_expect!(loc,self.left.as_ref(),"Error: Cannot evaluate Op '{}' without left parameter",Op::GT   .to_string());
+                let leftregs1 = left.LEIRnasm(regs.clone(), f, program, build, local_vars, stack_size, loc)?;
+                com_assert!(loc,leftregs1.len() == 1, "TODO: Handle multi-parameter loading for expressions!");
+                let right = com_expect!(loc,self.right.as_ref(),"Error: Cannot evaluate Op '{}' without left parameter",Op::GT   .to_string());
+                let rightregs1 = right.LEIRnasm(regs[1..].to_vec(), f, program, build, local_vars, stack_size, loc)?;
+                com_assert!(loc,rightregs1.len() == 1, "TODO: Handle multi-parameter loading for expressions!");
+                writeln!(f, "   cmp {}, {}",leftregs1[0].to_string(),rightregs1[0].to_string())?;
+                writeln!(f, "   setg {}",leftregs1[0].to_byte_size(1).to_string())?;
+                o = vec![leftregs1[0].to_byte_size(1)];
+
+            },
+            Op::GTEQ  => {
+                let left = com_expect!(loc,self.left.as_ref(),"Error: Cannot evaluate Op '{}' without left parameter",Op::GTEQ .to_string());
+                let leftregs1 = left.LEIRnasm(regs.clone(), f, program, build, local_vars, stack_size, loc)?;
+                com_assert!(loc,leftregs1.len() == 1, "TODO: Handle multi-parameter loading for expressions!");
+                let right = com_expect!(loc,self.right.as_ref(),"Error: Cannot evaluate Op '{}' without left parameter",Op::GTEQ .to_string());
+                let rightregs1 = right.LEIRnasm(regs[1..].to_vec(), f, program, build, local_vars, stack_size, loc)?;
+                com_assert!(loc,rightregs1.len() == 1, "TODO: Handle multi-parameter loading for expressions!");
+                writeln!(f, "   cmp {}, {}",leftregs1[0].to_string(),rightregs1[0].to_string())?;
+                writeln!(f, "   setge {}",leftregs1[0].to_byte_size(1).to_string())?;
+                o = vec![leftregs1[0].to_byte_size(1)];
+
+            },
+            Op::LT    => {
+                let left = com_expect!(loc,self.left.as_ref(),"Error: Cannot evaluate Op '{}' without left parameter",Op::LT   .to_string());
+                let leftregs1 = left.LEIRnasm(regs.clone(), f, program, build, local_vars, stack_size, loc)?;
+                com_assert!(loc,leftregs1.len() == 1, "TODO: Handle multi-parameter loading for expressions!");
+                let right = com_expect!(loc,self.right.as_ref(),"Error: Cannot evaluate Op '{}' without left parameter",Op::LT   .to_string());
+                let rightregs1 = right.LEIRnasm(regs[1..].to_vec(), f, program, build, local_vars, stack_size, loc)?;
+                com_assert!(loc,rightregs1.len() == 1, "TODO: Handle multi-parameter loading for expressions!");
+                writeln!(f, "   cmp {}, {}",leftregs1[0].to_string(),rightregs1[0].to_string())?;
+                writeln!(f, "   setl {}",leftregs1[0].to_byte_size(1).to_string())?;
+                o = vec![leftregs1[0].to_byte_size(1)];
+
+            },
+            Op::LTEQ  => {
+                let left = com_expect!(loc,self.left.as_ref(),"Error: Cannot evaluate Op '{}' without left parameter",Op::LTEQ .to_string());
+                let leftregs1 = left.LEIRnasm(regs.clone(), f, program, build, local_vars, stack_size, loc)?;
+                com_assert!(loc,leftregs1.len() == 1, "TODO: Handle multi-parameter loading for expressions!");
+                let right = com_expect!(loc,self.right.as_ref(),"Error: Cannot evaluate Op '{}' without left parameter",Op::LTEQ .to_string());
+                let rightregs1 = right.LEIRnasm(regs[1..].to_vec(), f, program, build, local_vars, stack_size, loc)?;
+                com_assert!(loc,rightregs1.len() == 1, "TODO: Handle multi-parameter loading for expressions!");
+                writeln!(f, "   cmp {}, {}",leftregs1[0].to_string(),rightregs1[0].to_string())?;
+                writeln!(f, "   setle {}",leftregs1[0].to_byte_size(1).to_string())?;
+                o = vec![leftregs1[0].to_byte_size(1)];
+
+            },
+            Op::NOT   => {
+                todo!("Not is not yet implemented");
+                let left = com_expect!(loc,self.left.as_ref(),"Error: Cannot evaluate Op '{}' without left parameter",Op::NOT  .to_string());
+                let leftregs1 = left.LEIRnasm(regs.clone(), f, program, build, local_vars, stack_size, loc)?;
+                com_assert!(loc,leftregs1.len() == 1, "TODO: Handle multi-parameter loading for expressions!");
+                let right = com_expect!(loc,self.right.as_ref(),"Error: Cannot evaluate Op '{}' without left parameter",Op::NOT  .to_string());
+                let rightregs1 = right.LEIRnasm(regs[1..].to_vec(), f, program, build, local_vars, stack_size, loc)?;
+                com_assert!(loc,rightregs1.len() == 1, "TODO: Handle multi-parameter loading for expressions!");
+                writeln!(f, "   add {}, {}",leftregs1[0].to_string(),rightregs1[0].to_string())?;
+                o = leftregs1;
+
+            },
+        }
+        //println!("Output regs: {:?}",o);
+        Ok(o)
+        //todo!("ERROR: this should stop here")
+    }
+    fn new() -> Self {
+        Self { left: None, right: None, op: Op::NONE }
+    }
+}
+fn tokens_to_expression(body: &[Token],build: &mut BuildProgram, program: &CmdProgram,locals: &Vec<Locals>) -> Expression {
+    //println!("TOP: {:?}\nLen: {}",body,body.len());
+    if body.len() == 0 {
+        panic!("Error: Cannot evaluate empty body");
+    }
+    if body.len() == 1 {
+        return Expression::val(par_expect!(&body[0],OfP::from_token(&body[0], build, program, locals),"Error: Expected Ofp but found {}",&body[0].typ.to_string(false)));
+    }
+    //panic!("If you get here it is probably going to error since its inside an infinite loop!");
+    let mut currentETree: ExprTree = ExprTree::new();
+    let mut i: usize = 0;
+    let mut hasFoundOp = false;
+    //println!("------------");
+    //println!("Body: {:?}",body);
+    while i < body.len() {
+        let token = &body[i];
+        //println!("--------");
+        //println!("Gotten: token {:?}\nNext: {:?}",token,body.get(i+1));
+        i += 1;
+        //println!("And now at i: {:?}",body.get(i));
+        //println!("--------");
+        if let Some(val) = OfP::from_token(token, build, program, locals) {
+            par_assert!(token,currentETree.left.is_none() || (hasFoundOp && currentETree.right.is_none()),"Error: Cannot have multiple Ofp values consecutively!");
+            if currentETree.left.is_none() {
+                currentETree.left = Some(Expression::val(val))
+            }
+            else if currentETree.right.is_none() && hasFoundOp {
+                currentETree.right = Some(Expression::val(val))
+            }
+            else {
+                par_error!(token, "Error: Cannot assign value of an expression where both are the sides are fufilled or an operator was not provided before the right side!");
+            }
+        }
+        else if let TokenType::Operation(op) = &token.typ {
+            if *op == Op::NOT {
+                par_assert!(token, currentETree.left.is_none(), "Error: Cannot have NOT with a left side already defined!");
+            }
+            else {
+                par_assert!(token, currentETree.left.is_some(), "Error: Cannot have an Operator different from NOT without a left side!");
+            }
+            currentETree.op = op.clone();
+            let mut opo = &Op::NONE;
+            let priority = op.get_priority();
+            let mut i2 = i;
+            if body.len() < i+1 {
+                continue;
+            }
+            for exprTok in &body[i..] {
+                //println!("exprTok: {:?} at {}",exprTok,i2);
+                if OfP::from_token(exprTok, build, program, locals).is_some() {}
+                else if let TokenType::Operation(op2) = &exprTok.typ {
+                    //println!("----------\nAt token {:?}\nGotten op: {} with priority: {} and my priority: {}\nwith my op: {}\n----------",exprTok,op2.to_string(),op2.get_priority(),priority,currentETree.op.to_string());
+                    if op2.get_priority() <= priority {            
+                        opo = op2;
+                        //println!("Ending at {} {:?}",i2, body[i2-1]);
+                        break;
+                    }
+                }
+                else {
+                    par_error!(token, "Error: unknown token type in expression: {}",token.typ.to_string(false))        
+                }
+                i2 += 1;
+            }
+            //println!("------------------------");
+            //println!("End of iteration: {}",i2);
+            //println!("Ended at: {:?}",body[i2-1]);
+            //println!("Result: {:?}",&body[i..i2]);
+            //println!("------------------------");
+            currentETree.right = Some(tokens_to_expression(&body[i..i2],build,program,locals));
+            if i2 == body.len() {}
+            else {
+                let buf = Expression::expr(Box::new(currentETree));
+                currentETree = ExprTree::new();
+                currentETree.left = Some(buf);
+                currentETree.op = opo.to_owned();
+                hasFoundOp = true
+            }
+            i = i2
+        }
+        else {
+            par_error!(token, "Error: unknown token type in expression: {}",token.typ.to_string(false))
+        }
+        
+    }
+    //println!("Output expression tree: {:#?}",currentETree);
+    //println!("------------");
+    Expression::expr(Box::new(currentETree))
+}
 #[derive(Debug,PartialEq,Clone)]
 enum TokenType {
     WordType      (String),
@@ -529,7 +869,8 @@ enum TokenType {
     CharType      (char),
     Number32      (i32),
     Number64      (i64),
-    Operation     (Op)
+    Operation     (Op),
+    SETOperation  (SetOp)
 }
 
 impl TokenType {
@@ -567,6 +908,9 @@ impl TokenType {
             },
             TokenType::Operation(op) => {
                 if isplural {format!("Operations").to_string()} else {format!("Operation {}",op.to_string()).to_string()}
+            },
+            TokenType::SETOperation(sop) => {
+                if isplural {format!("Set Operations").to_string()} else {format!("Set Operation {}",sop.to_string()).to_string()}
             },
 
         }
@@ -704,6 +1048,20 @@ impl<'a> Lexer<'a> {
         }
         None
     }
+
+
+
+    fn next_line(&mut self) -> Option<Vec<Token>> {
+        self.trim_left();
+        let mut o: Vec<Token> = Vec::new();
+        while let Some(t) = self.next(){
+            o.push(t);
+            if self.source[self.cursor]  == '\n' {
+                break;
+            }
+        }
+        Some(o)
+    }
 }
 impl Iterator for Lexer<'_> {
     type Item = Token;
@@ -778,6 +1136,11 @@ impl Iterator for Lexer<'_> {
                             self.drop_line();
                             return self.next();
                         }
+                        else if nc == '=' {
+                            self.cursor += 1;
+                            self.currentLocation.character += 1;
+                            return Some(Token { typ: TokenType::SETOperation(SetOp::DIVSET), location: self.currentLocation.clone() });
+                        }
                         else {
                             return Some(Token { typ: TokenType::Operation(Op::DIV), location: self.currentLocation.clone() });
                         }
@@ -805,6 +1168,9 @@ impl Iterator for Lexer<'_> {
                         }
                         else if let Some(op) = Op::from_str(&outstr) {
                             return Some(Token { typ: TokenType::Operation(op), location: self.currentLocation.clone() })
+                        }
+                        else if let Some(op) = SetOp::from_str(&outstr) {
+                            return Some(Token { typ: TokenType::SETOperation(op), location: self.currentLocation.clone() })
                         }
                         else if self.CurrentFuncs.contains(&outstr) {
                             return Some(Token { typ: TokenType::Function(outstr), location: self.currentLocation.clone() })
@@ -945,8 +1311,11 @@ impl Iterator for Lexer<'_> {
                             }
                             else {
                                 //TODO: Maybe a*b could be an issue V Fix this
-                                todo!("Handle situation of unknown pointer! Make it return a Mul and reset back the cursor!");
-                                
+                                //todo!("Handle situation of unknown pointer! Make it return a Mul and reset back the cursor!");
+                                self.cursor -= outstr.len()-1;
+                                self.currentLocation.character -= (outstr.len()-1) as i32;
+                                //println!("Current char: {}\nNext char: {}",self.cchar(),self.source[self.cursor+1]);
+                                return Some(Token { typ: TokenType::Operation(Op::MUL), location: self.currentLocation.clone() });
                             }
                         }
                     }
@@ -965,6 +1334,9 @@ impl Iterator for Lexer<'_> {
                         }
                         else if let Some(op) = Op::from_str(&outstr) {
                             return Some(Token { typ: TokenType::Operation(op), location: self.currentLocation.clone() })
+                        }
+                        else if let Some(op) = SetOp::from_str(&outstr) {
+                            return Some(Token { typ: TokenType::SETOperation(op), location: self.currentLocation.clone() })
                         }
                         else if self.CurrentFuncs.contains(&outstr) {
                             return Some(Token { typ: TokenType::Function(outstr), location: self.currentLocation.clone() })
@@ -1634,14 +2006,14 @@ enum Instruction {
     RSPUSH  (OfP),
     //PUSH    (OfP),
     DEFVAR  (String),
-    MOV     (OfP, OfP),
+    MOV     (OfP, Expression),
     //POP     (OfP),
-    CALLRAW (String, CallArgs),
-    ADD     (OfP, OfP),
-    SUB     (OfP, OfP),
-    MUL     (OfP, OfP),
-    DIV     (OfP, OfP),
+    ADDSET     (OfP, Expression),
+    SUBSET     (OfP, Expression),
+    MULSET     (OfP, Expression),
+    DIVSET     (OfP, Expression),
     CALL    (String, CallArgs),
+    CALLRAW (String, CallArgs),
     FNBEGIN (),
     RET     (),
     SCOPEBEGIN,
@@ -1651,16 +2023,16 @@ enum Instruction {
     // JUMP(usize),
     INTERRUPT(i64),
     
-    EXPAND_SCOPE(NormalScope),
-    EXPAND_IF_SCOPE(NormalScope),
+    EXPAND_SCOPE     (NormalScope),
+    EXPAND_IF_SCOPE  (NormalScope),
     EXPAND_ELSE_SCOPE(NormalScope),
 
-    EQUALS  (OfP, OfP),
-    MORETHAN  (OfP, OfP),
-    LESSTHAN  (OfP, OfP),
-    MORETHANEQUALS  (OfP, OfP),
-    LESSTHANEQUALS  (OfP, OfP),
-    NOTEQUALS  (OfP, OfP),
+    EQUALS          (Expression, Expression),
+    MORETHAN        (Expression, Expression),
+    LESSTHAN        (Expression, Expression),
+    MORETHANEQUALS  (Expression, Expression),
+    LESSTHANEQUALS  (Expression, Expression),
+    NOTEQUALS       (Expression, Expression),
 }
 
 #[derive(Debug,Clone,PartialEq)]
@@ -2084,7 +2456,7 @@ struct AnyContract {
 }
 #[derive(Debug)]
 enum NormalScopeType {
-    IF,
+    IF(Expression),
     ELSE,
     EMPTY
 }
@@ -2188,8 +2560,8 @@ impl ScopeType {
             }
             ScopeType::NORMAL(normal)=> {
                 match normal.typ {
-                    NormalScopeType::IF =>    if isplural {"ifs"}     else {"if"},
-                    NormalScopeType::ELSE =>  if isplural {"elses"}   else {"else"},
+                    NormalScopeType::IF(_) => if isplural {"ifs"}     else {"if"},
+                    NormalScopeType::ELSE  => if isplural {"elses"}   else {"else"},
                     NormalScopeType::EMPTY => if isplural {"empties"} else {"empty"},
                 }
             },
@@ -2241,11 +2613,11 @@ fn eval_const_def(lexer: &mut Lexer, build: &mut BuildProgram, until: TokenType)
                 match typ {
                     IntrinsicType::CAST => {
                         let ntok = par_expect!(lexer.currentLocation, lexer.next(), "Error: abruptly ran out of tokens for constant definition cast!");
-                        par_assert!(ntok, ntok.typ == TokenType::IntrinsicType(IntrinsicType::OPENANGLE),"Error: unexpected token type {} in cast! INVALID SYNTAX",ntok.typ.to_string(false));
+                        par_assert!(ntok, ntok.typ == TokenType::Operation(Op::LT),"Error: unexpected token type {} in cast! INVALID SYNTAX",ntok.typ.to_string(false));
                         let ntok = par_expect!(lexer.currentLocation, lexer.next(), "Error: abruptly ran out of tokens for constant definition cast!");
                         let typ = if let TokenType::Definition(typ) = ntok.typ { typ } else {par_error!(ntok, "Error: expected definition but found {}",ntok.typ.to_string(false))};
                         let ntok = par_expect!(lexer.currentLocation, lexer.next(), "Error: abruptly ran out of tokens for constant definition cast!");
-                        par_assert!(ntok, ntok.typ == TokenType::IntrinsicType(IntrinsicType::CLOSEANGLE),"Error: unexpected token type {} in cast! INVALID SYNTAX",ntok.typ.to_string(false));
+                        par_assert!(ntok, ntok.typ == TokenType::Operation(Op::GT),"Error: unexpected token type {} in cast! INVALID SYNTAX",ntok.typ.to_string(false));
                         let ntok = par_expect!(lexer.currentLocation, lexer.next(), "Error: abruptly ran out of tokens for constant definition cast!");
                         par_assert!(ntok, ntok.typ == TokenType::IntrinsicType(IntrinsicType::OPENPAREN),"Error: unexpected token type {} in cast! INVALID SYNTAX",ntok.typ.to_string(false));
                         let val = eval_const_def(lexer, build,TokenType::IntrinsicType(IntrinsicType::CLOSEPAREN));
@@ -2454,14 +2826,6 @@ fn contains_local<'a>(currentLocals: &'a Vec<Locals>, name: &String) -> bool {
     }
     false
 }
-fn parse_expression_from_tokens(body: &Vec<Token>) -> Option<Vec<Instruction>> {
-    
-    for t in body.iter() {
-
-    }
-
-    None
-}
 fn parse_token_to_build_inst(token: Token,lexer: &mut Lexer, program: &mut CmdProgram, build: &mut BuildProgram, scopeStack: &mut ScopeStack, currentLocals: &mut Vec<Locals>){
     match token.typ {
         TokenType::WordType(ref word) => {
@@ -2482,70 +2846,95 @@ fn parse_token_to_build_inst(token: Token,lexer: &mut Lexer, program: &mut CmdPr
             let ofp1 = par_expect!(token, OfP::from_token(&token, build, program,currentLocals), "Unknown word type: {}!",word);
             let Op = par_expect!(lexer.currentLocation,lexer.next(),"Unexpected variable operation or another variable!");
             //todo!("TODO: retire this");
-            match &Op.typ {
-                TokenType::Operation(op) => {
-                    match op {
-                        Op::EQ => {
-                            let ofp2_t = par_expect!(lexer.currentLocation,lexer.next(),"Unexpected variable operation or another variable!");
-                            let ofp2 = par_expect!(token, OfP::from_token(&ofp2_t, build, program,currentLocals), "Unknown word type: {}!",ofp2_t.typ.to_string(false));
-                            currentScope.body_unwrap_mut().unwrap().push((Op.location.clone(), Instruction::EQUALS(ofp1, ofp2)))
-                        }
-                        Op::SET => {
-                            let ofp2_t = par_expect!(lexer.currentLocation,lexer.next(),"Unexpected variable operation or another variable!");
-                            let ofp2 = par_expect!(token, OfP::from_token(&ofp2_t, build, program,currentLocals), "Unknown word type: {}!",ofp2_t.typ.to_string(false));
-                            currentScope.body_unwrap_mut().unwrap().push((Op.location.clone(), Instruction::MOV(ofp1, ofp2)))
-                        }
-                        Op::NEQ => {
-                            let ofp2_t = par_expect!(lexer.currentLocation,lexer.next(),"Unexpected variable operation or another variable!");
-                            let ofp2 = par_expect!(token, OfP::from_token(&ofp2_t, build, program,currentLocals), "Unknown word type: {}!",ofp2_t.typ.to_string(false));
-                            currentScope.body_unwrap_mut().unwrap().push((Op.location.clone(), Instruction::NOTEQUALS(ofp1, ofp2)))
-                        }
-                        Op::LT => {
-                            let ofp2_t = par_expect!(lexer.currentLocation,lexer.next(),"Unexpected variable operation or another variable!");
-                            let ofp2 = par_expect!(token, OfP::from_token(&ofp2_t, build, program,currentLocals), "Unknown word type: {}!",ofp2_t.typ.to_string(false));
-                            currentScope.body_unwrap_mut().unwrap().push((Op.location.clone(), Instruction::LESSTHAN(ofp1, ofp2)))
-                        }
-                        Op::GT => {
-                            let ofp2_t = par_expect!(lexer.currentLocation,lexer.next(),"Unexpected variable operation or another variable!");
-                            let ofp2 = par_expect!(token, OfP::from_token(&ofp2_t, build, program,currentLocals), "Unknown word type: {}!",ofp2_t.typ.to_string(false));
-                            currentScope.body_unwrap_mut().unwrap().push((Op.location.clone(), Instruction::MORETHAN(ofp1, ofp2)))
-                        }
-                        Op::LTEQ => {
-                            let ofp2_t = par_expect!(lexer.currentLocation,lexer.next(),"Unexpected variable operation or another variable!");
-                            let ofp2 = par_expect!(token, OfP::from_token(&ofp2_t, build, program,currentLocals), "Unknown word type: {}!",ofp2_t.typ.to_string(false));
-                            currentScope.body_unwrap_mut().unwrap().push((Op.location.clone(), Instruction::LESSTHANEQUALS(ofp1, ofp2)))
-                        }
-                        Op::GTEQ => {
-                            let ofp2_t = par_expect!(lexer.currentLocation,lexer.next(),"Unexpected variable operation or another variable!");
-                            let ofp2 = par_expect!(token, OfP::from_token(&ofp2_t, build, program,currentLocals), "Unknown word type: {}!",ofp2_t.typ.to_string(false));
-                            currentScope.body_unwrap_mut().unwrap().push((Op.location.clone(), Instruction::MORETHANEQUALS(ofp1, ofp2)))
-                        }
-                        _ => {
-                            par_error!(Op, "Error: Unexpected operation in set: {}",op.to_string());
-                        }
-                    }
+            if let TokenType::SETOperation(op) = Op.typ {
+                let expr_body: Vec<Token> = lexer.map_while(|t| if t.typ != TokenType::IntrinsicType(IntrinsicType::DOTCOMA) {Some(t)} else { None }).collect();
+                let expr = tokens_to_expression(&expr_body, build, program, &currentLocals);
+                let body = currentScope.body_unwrap_mut().unwrap();
+                match &op {
+                    SetOp::SET      => {
+                        body.push((token.location.clone(),Instruction::MOV(ofp1, expr)))
+                    },
+                    SetOp::PLUSSET  => {
+                        body.push((token.location.clone(),Instruction::ADDSET(ofp1, expr)))
+                    },
+                    SetOp::MINUSSET => {
+                        body.push((token.location.clone(),Instruction::SUBSET(ofp1, expr)))
+                    },
+                    SetOp::MULSET   => {
+                        body.push((token.location.clone(),Instruction::MULSET(ofp1, expr)))
+                    },
+                    SetOp::DIVSET   => {
+                        body.push((token.location.clone(),Instruction::DIVSET(ofp1, expr)))
+                    },
                 }
-                _ => {
-                    let ofp2 = par_expect!(token, OfP::from_token(&Op, build, program,currentLocals), "Unexpected token type: {} after ofp!",Op.typ.to_string(false));
-                    let Op = par_expect!(lexer.currentLocation,lexer.next(),"Unexpected variable operation or another variable!");
-                    match &Op.typ {
-                        TokenType::Operation(op) => {
-                            match op {
-                                Op::PLUS => currentScope.body_unwrap_mut().unwrap().push((Op.location.clone(), Instruction::ADD(ofp1,ofp2))),
-                                Op::MINUS=> currentScope.body_unwrap_mut().unwrap().push((Op.location.clone(), Instruction::SUB(ofp1,ofp2))),
-                                Op::MUL => currentScope.body_unwrap_mut().unwrap().push((Op.location.clone(), Instruction::MUL(ofp1,ofp2))),
-                                Op::DIV => currentScope.body_unwrap_mut().unwrap().push((Op.location.clone(), Instruction::DIV(ofp1,ofp2))),
-                                _ => {
-                                    par_error!(Op, "Unexpected intrinsic {} after ofp",Op.typ.to_string(false))
-                                }
-                            }
-                        },
-                        _ => {
-                            par_error!(Op, "Unexpected token type {} after ofp",Op.typ.to_string(false))
-                        }
-                    }
-                }
+            } 
+            else {
+                par_error!(Op,"Error: Unexpected token {} after ofp!",Op.typ.to_string(false))
             }
+            // match &Op.typ {
+            //     TokenType::Operation(op) => {
+            //         match op {
+            //             Op::EQ => {
+            //                 let ofp2_t = par_expect!(lexer.currentLocation,lexer.next(),"Unexpected variable operation or another variable!");
+            //                 let ofp2 = par_expect!(token, OfP::from_token(&ofp2_t, build, program,currentLocals), "Unknown word type: {}!",ofp2_t.typ.to_string(false));
+            //                 currentScope.body_unwrap_mut().unwrap().push((Op.location.clone(), Instruction::EQUALS(Expression::val(ofp1), Expression::val(ofp2))))
+            //             }
+            //             Op::SET => {
+            //                 let ofp2_t = par_expect!(lexer.currentLocation,lexer.next(),"Unexpected variable operation or another variable!");
+            //                 let ofp2 = par_expect!(token, OfP::from_token(&ofp2_t, build, program,currentLocals), "Unknown word type: {}!",ofp2_t.typ.to_string(false));
+            //                 currentScope.body_unwrap_mut().unwrap().push((Op.location.clone(), Instruction::MOV(ofp1, Expression::val(ofp2))))
+            //             }
+            //             Op::NEQ => {
+            //                 let ofp2_t = par_expect!(lexer.currentLocation,lexer.next(),"Unexpected variable operation or another variable!");
+            //                 let ofp2 = par_expect!(token, OfP::from_token(&ofp2_t, build, program,currentLocals), "Unknown word type: {}!",ofp2_t.typ.to_string(false));
+            //                 currentScope.body_unwrap_mut().unwrap().push((Op.location.clone(), Instruction::NOTEQUALS(Expression::val(ofp1), Expression::val(ofp2))))
+            //             }
+            //             Op::LT => {
+            //                 let ofp2_t = par_expect!(lexer.currentLocation,lexer.next(),"Unexpected variable operation or another variable!");
+            //                 let ofp2 = par_expect!(token, OfP::from_token(&ofp2_t, build, program,currentLocals), "Unknown word type: {}!",ofp2_t.typ.to_string(false));
+            //                 currentScope.body_unwrap_mut().unwrap().push((Op.location.clone(), Instruction::LESSTHAN(Expression::val(ofp1), Expression::val(ofp2))))
+            //             }
+            //             Op::GT => {
+            //                 let ofp2_t = par_expect!(lexer.currentLocation,lexer.next(),"Unexpected variable operation or another variable!");
+            //                 let ofp2 = par_expect!(token, OfP::from_token(&ofp2_t, build, program,currentLocals), "Unknown word type: {}!",ofp2_t.typ.to_string(false));
+            //                 currentScope.body_unwrap_mut().unwrap().push((Op.location.clone(), Instruction::MORETHAN(Expression::val(ofp1), Expression::val(ofp2))))
+            //             }
+            //             Op::LTEQ => {
+            //                 let ofp2_t = par_expect!(lexer.currentLocation,lexer.next(),"Unexpected variable operation or another variable!");
+            //                 let ofp2 = par_expect!(token, OfP::from_token(&ofp2_t, build, program,currentLocals), "Unknown word type: {}!",ofp2_t.typ.to_string(false));
+            //                 currentScope.body_unwrap_mut().unwrap().push((Op.location.clone(), Instruction::LESSTHANEQUALS(Expression::val(ofp1), Expression::val(ofp2))))
+            //             }
+            //             Op::GTEQ => {
+            //                 let ofp2_t = par_expect!(lexer.currentLocation,lexer.next(),"Unexpected variable operation or another variable!");
+            //                 let ofp2 = par_expect!(token, OfP::from_token(&ofp2_t, build, program,currentLocals), "Unknown word type: {}!",ofp2_t.typ.to_string(false));
+            //                 currentScope.body_unwrap_mut().unwrap().push((Op.location.clone(), Instruction::MORETHANEQUALS(Expression::val(ofp1), Expression::val(ofp2))))
+            //             }
+            //             _ => {
+            //                 par_error!(Op, "Error: Unexpected operation in set: {}",op.to_string());
+            //             }
+            //         }
+            //     }
+            //     _ => {
+            //         let ofp2 = par_expect!(token, OfP::from_token(&Op, build, program,currentLocals), "Unexpected token type: {} after ofp!",Op.typ.to_string(false));
+            //         let Op = par_expect!(lexer.currentLocation,lexer.next(),"Unexpected variable operation or another variable!");
+            //         match &Op.typ {
+            //             TokenType::Operation(op) => {
+            //                 match op {
+            //                     Op::PLUS => currentScope.body_unwrap_mut().unwrap().push((Op.location.clone(), Instruction::ADDSET(ofp1,Expression::val(ofp2)))),
+            //                     Op::MINUS=> currentScope.body_unwrap_mut().unwrap().push((Op.location.clone(), Instruction::SUBSET(ofp1,Expression::val(ofp2)))),
+            //                     Op::MUL => currentScope.body_unwrap_mut().unwrap().push ((Op.location.clone(), Instruction::MULSET(ofp1,Expression::val(ofp2)))),
+            //                     Op::DIV => currentScope.body_unwrap_mut().unwrap().push ((Op.location.clone(), Instruction::DIVSET(ofp1,Expression::val(ofp2)))),
+            //                     _ => {
+            //                         par_error!(Op, "Unexpected intrinsic {} after ofp",Op.typ.to_string(false))
+            //                     }
+            //                 }
+            //             },
+            //             _ => {
+            //                 par_error!(Op, "Unexpected token type {} after ofp",Op.typ.to_string(false))
+            //             }
+            //         }
+            //     }
+            // }
         }
         TokenType::IntrinsicType(Type) => {
             match Type {
@@ -2656,7 +3045,7 @@ fn parse_token_to_build_inst(token: Token,lexer: &mut Lexer, program: &mut CmdPr
                                 //println!("CurrentLocals: {:#?}",currentLocals);
                                 currentLocals.push(Locals::new());
                                 match normal.typ {
-                                    NormalScopeType::IF => {
+                                    NormalScopeType::IF(_) => {
                                        par_assert!(token, ln > 1, "Error: Alone if outside of any scope is not allowed!");
                                        let prev = scopeStack.get_mut(ln-2).unwrap();
                                        par_assert!(token, prev.body_is_some(), "Error: if can not be declared inside of scope of {} as they do not allow instructions!",prev.typ.to_string(true));
@@ -2685,7 +3074,7 @@ fn parse_token_to_build_inst(token: Token,lexer: &mut Lexer, program: &mut CmdPr
                                 //println!("CurrentLocals at Normal: {:#?}",currentLocals);
                                 normal.locals = currentLocals.pop().unwrap();
                                 match normal.typ {
-                                    NormalScopeType::IF => {
+                                    NormalScopeType::IF(_) => {
                                         let currentScope = getTopMut(scopeStack).unwrap();
                                         let body = par_expect!(token,currentScope.body_unwrap_mut(), "Error: Can not close if, because it is inside a {} which doesn't support instructions!",currentScope.typ.to_string(false));
                                         body.push((token.location.clone(),Instruction::EXPAND_IF_SCOPE(normal)))
@@ -2782,7 +3171,16 @@ fn parse_token_to_build_inst(token: Token,lexer: &mut Lexer, program: &mut CmdPr
                 IntrinsicType::IF => {
                     //let inbody = scopeStack.last_mut().unwrap();
                     //let org_i = scopeStack.len();
-                    scopeStack.push(Scope { typ: ScopeType::NORMAL(NormalScope { typ: NormalScopeType::IF, body: vec![], locals: Locals::new()}), hasBeenOpened: false });
+                    let condition: Vec<Token> = lexer.map_while(|t| {
+                        if t.typ == TokenType::IntrinsicType(IntrinsicType::OPENCURLY) {
+                            None
+                        }
+                        else{
+                            Some(t)
+                        }
+                    }).collect();
+                    scopeStack.push(Scope { typ: ScopeType::NORMAL(NormalScope { typ: NormalScopeType::IF(tokens_to_expression(&condition, build, program, &currentLocals)), body: vec![], locals: Locals::new()}), hasBeenOpened: true});
+                    currentLocals.push(Locals::new());
                     // scopeStack.push(Scope { typ: ScopeType::NORMAL(NormalScope { typ: NormalScopeType::EMPTY, body: vec![], locals: Locals::new()}), hasBeenOpened: true });
                     // currentLocals.push(Locals::new());
                     // let prev_len = scopeStack.len();
@@ -2825,8 +3223,8 @@ fn parse_token_to_build_inst(token: Token,lexer: &mut Lexer, program: &mut CmdPr
                     let first = par_expect!(lexer.currentLocation,first,"abruptly ran out of tokens in constant name definition");
                     let mut expect_type: Option<VarType> = None;
                     match first.typ {
-                        TokenType::Operation(ref typ) => {
-                            par_assert!(first,*typ == Op::SET,"Error: Unexpected operation type: {}",typ.to_string());
+                        TokenType::SETOperation(ref typ) => {
+                            par_assert!(first,*typ == SetOp::SET,"Error: Unexpected operation type: {}",typ.to_string());
                         }
                         TokenType::IntrinsicType(typ) => {
                             match typ {
@@ -2835,7 +3233,7 @@ fn parse_token_to_build_inst(token: Token,lexer: &mut Lexer, program: &mut CmdPr
                                     if let TokenType::Definition(d) = typ.typ {
                                         expect_type = Some(d);
                                         let typ = par_expect!(lexer.currentLocation,lexer.next(), "Error: abruptly ran out of tokens in constant type definition");
-                                        par_assert!(typ, typ.typ == TokenType::Operation(Op::SET), "Error: unexpected token type {} after constant definition! Expected =",typ.typ.to_string(false));
+                                        par_assert!(typ, typ.typ == TokenType::SETOperation(SetOp::SET), "Error: unexpected token type {} after constant definition! Expected =",typ.typ.to_string(false));
                                     }
                                     else {
                                         par_error!(typ, "Error: Expected definition but found {}!",typ.typ.to_string(false));
@@ -2975,8 +3373,6 @@ fn parse_token_to_build_inst(token: Token,lexer: &mut Lexer, program: &mut CmdPr
                 },
                 IntrinsicType::TOP => todo!(),
                 IntrinsicType::CAST => todo!(),
-                IntrinsicType::OPENANGLE => todo!(),
-                IntrinsicType::CLOSEANGLE => todo!(),
                 IntrinsicType::DLL_IMPORT => {
                     let ntok = par_expect!(lexer.currentLocation, lexer.next(), "Error: Abruptly ran out of tokens for DLL_IMPORT");
                     let file_from = par_expect!(ntok, ntok.unwrap_string(), "Error: Expected token string but found {}",ntok.typ.to_string(false));
@@ -3027,35 +3423,35 @@ fn parse_token_to_build_inst(token: Token,lexer: &mut Lexer, program: &mut CmdPr
             let currentScope = getTopMut(scopeStack).unwrap();
             let regOp = par_expect!(lexer.currentLocation,lexer.next(),"Unexpected register operation or another register!");
             match regOp.typ {
-                TokenType::Operation(ref op) => {
+                TokenType::SETOperation(ref op) => {
                     match op {
-                        Op::SET => {
+                        SetOp::SET => {
                             let token = par_expect!(lexer.currentLocation,lexer.next(),"abruptly ran out of tokens");
                             match token.typ {
                                 TokenType::Number32(data) => {
                                     if reg.size() >= 4 {
                                         let body = currentScope.body_unwrap_mut().unwrap();
-                                        body.push((token.location,Instruction::MOV(OfP::REGISTER(reg), OfP::CONST(RawConstValueType::INT(data)))))
+                                        body.push((token.location,Instruction::MOV(OfP::REGISTER(reg), Expression::val(OfP::CONST(RawConstValueType::INT(data))))))
                                     }
                                 }
                                 TokenType::Number64(data) => {
                                     if reg.size() >= 8 {
                                         let body = currentScope.body_unwrap_mut().unwrap();
-                                        body.push((token.location,Instruction::MOV(OfP::REGISTER(reg), OfP::CONST(RawConstValueType::LONG(data)))));
+                                        body.push((token.location,Instruction::MOV(OfP::REGISTER(reg), Expression::val(OfP::CONST(RawConstValueType::LONG(data))))));
                                     }
                                 }
                                 TokenType::Register(reg2) => {
-                                    currentScope.body_unwrap_mut().unwrap().push((token.location.clone(),Instruction::MOV(OfP::REGISTER(reg), OfP::REGISTER(reg2))));
+                                    currentScope.body_unwrap_mut().unwrap().push((token.location.clone(),Instruction::MOV(OfP::REGISTER(reg), Expression::val(OfP::REGISTER(reg2)))));
 
                                 }
                                 TokenType::WordType(ref data) => {
                                     if currentScope.contract_is_some() && currentScope.contract_unwrap().unwrap().Inputs.contains_key(data) {
                                         let contract = currentScope.contract_unwrap().unwrap();
                                         par_assert!(token, contract.Inputs.contains_key(data), "Error: Unexpected word for register: '{}'",data);
-                                        currentScope.body_unwrap_mut().unwrap().push((token.location.clone(), Instruction::MOV(OfP::REGISTER(reg), OfP::LOCALVAR(data.to_owned()))))
+                                        currentScope.body_unwrap_mut().unwrap().push((token.location.clone(), Instruction::MOV(OfP::REGISTER(reg), Expression::val(OfP::LOCALVAR(data.to_owned())))))
                                     }
                                     else if let Some(cons) = build.constdefs.get(data) {
-                                        currentScope.body_unwrap_mut().unwrap().push((token.location.clone(), Instruction::MOV(OfP::REGISTER(reg), OfP::CONST(cons.typ.clone()))))
+                                        currentScope.body_unwrap_mut().unwrap().push((token.location.clone(), Instruction::MOV(OfP::REGISTER(reg), Expression::val(OfP::CONST(cons.typ.clone())))))
                                     }
                                     else {
                                         par_error!(token,"Unexpected Type for Mov Intrinsic. Expected Number32/Number64 but found {}",token.typ.to_string(false))
@@ -3074,26 +3470,25 @@ fn parse_token_to_build_inst(token: Token,lexer: &mut Lexer, program: &mut CmdPr
                     let regOp = lexer.next().expect(&format!("(P) [ERROR] {}:{}:{}: Unexpected register operation!",token.location.clone().file,&token.location.clone().linenumber,&token.location.clone().character));
                     let body = currentScope.body_unwrap_mut().unwrap();
                     match regOp.typ {
-                        TokenType::Operation(typ) => {
-                            
+                        TokenType::SETOperation(typ) => {
                             match typ {
-                                Op::PLUS => {
-                                    body.push((token.location.clone(),Instruction::ADD(OfP::REGISTER(reg), OfP::REGISTER(reg2))))
+                                SetOp::PLUSSET => {
+                                    body.push((token.location.clone(),Instruction::ADDSET(OfP::REGISTER(reg), Expression::val(OfP::REGISTER(reg2)))))
                                 }
-                                Op::MINUS => {
-                                    body.push((token.location.clone(),Instruction::SUB(OfP::REGISTER(reg), OfP::REGISTER(reg2))))
+                                SetOp::MINUSSET => {
+                                    body.push((token.location.clone(),Instruction::SUBSET(OfP::REGISTER(reg), Expression::val(OfP::REGISTER(reg2)))))
                                 }
-                                Op::MUL => {
-                                    body.push((token.location.clone(),Instruction::MUL(OfP::REGISTER(reg), OfP::REGISTER(reg2))))
+                                SetOp::MULSET => {
+                                    body.push((token.location.clone(),Instruction::MULSET(OfP::REGISTER(reg), Expression::val(OfP::REGISTER(reg2)))))
                                 }
-                                Op::EQ => {
-                                    body.push((token.location.clone(),Instruction::EQUALS(OfP::REGISTER(reg), OfP::REGISTER(reg2))))
+                                // Op::EQ => {
+                                //     body.push((token.location.clone(),Instruction::EQUALS(OfP::REGISTER(reg), Expression::val(OfP::REGISTER(reg2)))))
+                                // }
+                                SetOp::DIVSET => {
+                                    body.push((token.location.clone(),Instruction::DIVSET(OfP::REGISTER(reg), Expression::val(OfP::REGISTER(reg2)))))
                                 }
-                                Op::DIV => {
-                                    body.push((token.location.clone(),Instruction::DIV(OfP::REGISTER(reg), OfP::REGISTER(reg2))))
-                                }
-                                Op::SET => {
-                                    body.push((token.location.clone(),Instruction::MOV(OfP::REGISTER(reg), OfP::REGISTER(reg2))))
+                                SetOp::SET => {
+                                    body.push((token.location.clone(),Instruction::MOV(OfP::REGISTER(reg), Expression::val(OfP::REGISTER(reg2)))))
                                 }
                                 other => par_error!(token,"Unexpected Operation! Expected Register Operation but found {}",other.to_string())
                             }
@@ -3109,6 +3504,7 @@ fn parse_token_to_build_inst(token: Token,lexer: &mut Lexer, program: &mut CmdPr
             }
         },
         TokenType::Operation(_) => todo!(),
+        TokenType::SETOperation(_) => todo!(),
     }
 
 }
@@ -3158,7 +3554,7 @@ fn optimization_ops_scope(build: &BuildProgram, program: &CmdProgram, scope: TCS
                 out.usedExterns.insert(r.clone());
             }
             Instruction::MOV(_, v2) => {
-                match v2 {
+                match v2.unwrap_val() {
                     OfP::CONST(val) => {
                         match val {
                             RawConstValueType::STR(uuid) => {
@@ -3523,142 +3919,20 @@ fn nasm_x86_64_handle_scope(f: &mut File, build: &BuildProgram, program: &CmdPro
             Instruction::MOV(Op, Op2) => {
                 match Op {
                     OfP::REGISTER(Reg1) => {
-                        match Op2 {
-                            OfP::REGISTER(Reg2) => {
-                                writeln!(f, "   mov {}, {}",Reg1.to_string(), Reg2.to_string())?;
-                            },
-                            OfP::LOCALVAR(_) => todo!(),
-                            OfP::CONST(val) => {
-                                match val {
-                                    RawConstValueType::INT(Data) => {
-                                        writeln!(f, "   mov {}, {}",Reg1.to_string(), Data)?;
-                                    },
-                                    RawConstValueType::LONG(Data) => {
-                                        writeln!(f, "   mov {}, {}",Reg1.to_string(), Data)?;
-                                    },
-                                    RawConstValueType::STR(_) => todo!(),
-                                    RawConstValueType::PTR(_,_) => todo!(),
-                                }
-                            }
-                            // OfP::PARAM(data) => {
-                            //     //let i = com_expect!(loc, scope.get_contract(build).unwrap().Inputs.get(data),"Error: Unexpected variable {}",data).clone();
-                            //     let osize = local_vars.get(data).unwrap().operand;
-                            //     let offset = stack_size - osize;
-                            //     if offset > 0 {
-                            //         writeln!(f, "   mov {}, {} [rsp+{}]",Reg1.to_string(),size_to_nasm_type(Reg1.size()),offset)?;
-                            //     }
-                            //     else {
-                            //         writeln!(f, "   mov {}, {} [rsp]",Reg1.to_string(),size_to_nasm_type(Reg1.size()))?;
-                            //     }
-                            // },
-                        }
+                        let oreg2 = Register::RBX.to_byte_size(Reg1.size());
+                        //TODO: This may break
+                        Op2.LEIRnasm(vec![*Reg1,oreg2], f, program, build,&local_vars, stack_size, loc)?;
                     }
                     OfP::LOCALVAR(varOrg) => {
-                        match Op2 {
-                            OfP::REGISTER(val) => {
-                                let var = com_expect!(loc,local_vars.get(varOrg),"Error: Unknown variable found during compilation {}",varOrg);
-                                let osize = var.typ.get_size(program);
-                                if osize <= 8  {
-                                    if stack_size-var.operand == 0 {
-                                        writeln!(f, "   mov {} [rsp], {}",size_to_nasm_type(var.typ.get_size(program)), val.to_string())?;
-                                    }
-                                    else {
-                                        writeln!(f, "   mov {} [rsp+{}], {}",size_to_nasm_type(var.typ.get_size(program)),stack_size-var.operand, val.to_string())?;
-                                    }
-                                }
-                                else {
-                                    todo!()
-                                }
-
-                            },
-                            OfP::LOCALVAR(varSet) => {
-                                let var1 = com_expect!(loc,local_vars.get(varOrg),"Error: Unknown variable found during compilation {}",varOrg);
-                                let var2 = com_expect!(loc,local_vars.get(varSet),"Error: Unknown variable found during compilation {}",varOrg);
-                                com_assert!(loc, var1.typ.get_size(program) == var2.typ.get_size(program), "Error: Can not set differently sized variabled together");
-                                let osize = var1.typ.get_size(program);
-                                let oreg = Register::RAX.to_byte_size(osize);
-                                if osize <= 8  {
-                                    if stack_size-var2.operand == 0 {
-                                        writeln!(f, "   mov {}, {} [rsp]", oreg.to_string(),size_to_nasm_type(var1.typ.get_size(program)))?;
-                                    }
-                                    else {
-                                        writeln!(f, "   mov {}, {} [rsp+{}]",oreg.to_string(),size_to_nasm_type(var1.typ.get_size(program)),stack_size-var2.operand)?;
-                                    }
-                                }
-                                else {
-                                    todo!()
-                                }
-                                if osize <= 8  {
-                                    if stack_size-var1.operand == 0 {
-                                        writeln!(f, "   mov {} [rsp], {}",size_to_nasm_type(var1.typ.get_size(program)), oreg.to_string())?;
-                                    }
-                                    else {
-                                        writeln!(f, "   mov {} [rsp+{}], {}",size_to_nasm_type(var1.typ.get_size(program)),stack_size-var1.operand, oreg.to_string())?;
-                                    }
-                                }
-                                else {
-                                    todo!()
-                                }
-                            },
-                            OfP::CONST(val) => {
-                                match val {
-                                    RawConstValueType::INT(val) => {
-                                        let var = com_expect!(loc,local_vars.get(varOrg),"Error: Unknown variable found during compilation {}",varOrg);
-                                        if var.typ.get_size(program) <= 8  {
-                                            if stack_size-var.operand == 0 {
-                                                writeln!(f, "   mov {} [rsp], {}",size_to_nasm_type(var.typ.get_size(program)), val)?;
-                                            }
-                                            else {
-                                                writeln!(f, "   mov {} [rsp+{}], {}",size_to_nasm_type(var.typ.get_size(program)),stack_size-var.operand, val)?;
-                                            }
-                                        }
-                                        else {
-                                            todo!()
-                                        }
-                                    },
-                                    RawConstValueType::LONG(val) => {
-                                        let var = com_expect!(loc,local_vars.get(varOrg),"Error: Unknown variable found during compilation {}",varOrg);
-                                        if var.typ.get_size(program) <= 8  {
-                                            if stack_size-var.operand == 0 {
-                                                writeln!(f, "   mov {} [rsp], {}",size_to_nasm_type(var.typ.get_size(program)), val)?;
-                                            }
-                                            else {
-                                                writeln!(f, "   mov {} [rsp+{}], {}",size_to_nasm_type(var.typ.get_size(program)),stack_size -var.operand, val)?;
-                                            }
-                                        }
-                                        else {
-                                            todo!()
-                                        }
-                                    },
-                                    RawConstValueType::STR(UUID) => {
-                                        let strdef = build.stringdefs.get(UUID).unwrap();
-                                        com_assert!(loc,strdef.Typ == ProgramStringType::CSTR,"TODO: Cannot assign types of string different from cstr yet!");
-                                        writeln!(f, "   lea rax, [_STRING_{}_]",UUID.to_string().replace("-", ""))?;
-                                        let var = com_expect!(loc,local_vars.get(varOrg),"Error: Unknown variable found during compilation {}",varOrg);
-                                        //TODO: there are a lot of problems with these hardcoded rax stuff
-                                        if stack_size-var.operand == 0 {
-                                            writeln!(f, "   mov {} [rsp], rax",size_to_nasm_type(var.typ.get_size(program)))?;
-                                        }
-                                        else {
-                                            writeln!(f, "   mov {} [rsp+{}], rax",size_to_nasm_type(var.typ.get_size(program)),stack_size -var.operand)?;
-                                        }
-                                    },
-                                    RawConstValueType::PTR(_,_) => todo!(),
-                                }
-                            }
-                            // OfP::PARAM(param) => {
-                            //     let var = com_expect!(loc,local_vars.get(varOrg),"Error: Unknown variable found during compilation {}",varOrg);
-                            //     let osize = var.typ.get_size(program);
-                            //     let offset = stack_size - var.operand;
-                            //     let reg = Register::RAX.to_byte_size(osize);
-                            //     writeln!(f, "   mov {}, {} [rsp+{}]",reg.to_string(),size_to_nasm_type(osize),offset)?;
-                            //     if stack_size-var.operand == 0 {
-                            //         writeln!(f, "   mov {} [rsp], {}",size_to_nasm_type(osize), reg.to_string())?;
-                            //     }
-                            //     else {
-                            //         writeln!(f, "   mov {} [rsp+{}], {}",size_to_nasm_type(var.typ.get_size(program)),stack_size-var.operand, reg.to_string())?;
-                            //     }
-                            // },
+                        let var = com_expect!(loc,local_vars.get(varOrg),"Error: Unknown variable found during compilation {}",varOrg);
+                        let oreg = Register::RAX.to_byte_size(var.typ.get_size(program));
+                        let oreg2 = Register::RBX.to_byte_size(var.typ.get_size(program));
+                        let oregs = Op2.LEIRnasm(vec![oreg,oreg2], f, program,build, &local_vars, stack_size, loc)?;
+                        if stack_size-var.operand == 0 {
+                            writeln!(f, "   mov {} [rsp], {}",size_to_nasm_type(var.typ.get_size(program)), oregs[0].to_string())?;
+                        }
+                        else {
+                            writeln!(f, "   mov {} [rsp+{}], {}",size_to_nasm_type(var.typ.get_size(program)),stack_size-var.operand, oregs[0].to_string())?;
                         }
                     }
                     _ => {
@@ -3682,128 +3956,99 @@ fn nasm_x86_64_handle_scope(f: &mut File, build: &BuildProgram, program: &CmdPro
                     }
                 }
             }
-            Instruction::ADD(op1, op2) => {
+            Instruction::ADDSET(op1, op2) => {
                 match op1 {
                     OfP::REGISTER(reg1) => {
-                        match op2 {
-                            OfP::REGISTER(reg2) => {
-                                assert!(reg1.size() == reg2.size(), "Two different sized registers passed to add Instruction");
-                                writeln!(f, "   add {}, {}",reg1.to_string(), reg2.to_string())?;
-                            }
-                            OfP::LOCALVAR(_) => todo!(),
-                            OfP::CONST(val) => {
-                                if val.get_num_data() != 0 {
-                                    writeln!(f, "   add {}, {}",reg1.to_string(),val.get_num_data())?;
-                                }
-                            }
-                        }
+                        let reg2 = Register::RAX.to_byte_size(reg1.size());
+                        let reg3 = Register::RBX.to_byte_size(reg1.size());
+                        op2.LEIRnasm(vec![reg2,reg3], f, program,build, &local_vars, stack_size, loc)?;
+                        writeln!(f, "   add {}, {}",reg1.to_string(), reg2.to_string())?;
                     }
                     OfP::LOCALVAR(var1) => {
-                        match op2 {
-                            OfP::REGISTER(_) => todo!(),
-                            OfP::LOCALVAR(var2) => {
-                                com_assert!(loc, local_vars.contains_key(var1) && local_vars.contains_key(var2), "Unknown variable");
-                                let nvar1 = var1;
-                                let nvar2 = var2;
-                                let var1 = local_vars.get(var1).unwrap();
-                                let var2 = local_vars.get(var2).unwrap();
-                                println!("Local_vars: {:?}\nVar1({}): {:?}\nVar2({}): {:?}",local_vars,nvar1,var1,nvar2,var2);
-                                com_assert!(loc, var1.typ.get_size(program) == var2.typ.get_size(program), "Unknown variable size");
-                                //let osize = var1.typ.get_size(program);
-                                if stack_size-var1.operand == 0 {
-                                    writeln!(f, "   mov rax, qword [rsp]")?;
-                                }
-                                else {
-                                    writeln!(f, "   mov rax, qword [rsp+{}]",stack_size-var1.operand)?;
-                                }
-                                if stack_size-var2.operand == 0{
-                                    writeln!(f, "   add rax, qword [rsp]")?;  
-                                }
-                                else {
-                                    writeln!(f, "   add rax, qword [rsp+{}]", stack_size-var2.operand)?;  
-                                }
-                                //let osize = var2.typ.get_size(program);
-                                if stack_size-var1.operand == 0 {
-                                    writeln!(f, "   mov qword [rsp], rax")?;
-                                }
-                                else {
-                                    writeln!(f, "   mov qword [rsp+{}], rax",stack_size-var1.operand)?;
-                                }
-                            },
-                            OfP::CONST(_) => todo!(),
+                        let var1 = com_expect!(loc,local_vars.get(var1),"Error: Unknown variable found during compilation {}",var1);
+                        let reg1 = Register::RAX.to_byte_size(var1.typ.get_size(program));
+                        let reg2 = Register::RBX.to_byte_size(reg1.size());
+                        op2.LEIRnasm(vec![reg1,reg2], f, program,build, &local_vars, stack_size, loc)?;
+                        if stack_size-var1.operand == 0 {
+                            writeln!(f, "   add {} [rsp], {}",size_to_nasm_type(var1.typ.get_size(program)),reg1.to_string())?;
+                        }
+                        else {
+                            writeln!(f, "   add {} [rsp+{}], {}",size_to_nasm_type(var1.typ.get_size(program)),stack_size-var1.operand,reg1.to_string())?;
                         }
                     },
-                    
                     OfP::CONST(_) => todo!(),
-                    
+                }   
+            }
+            Instruction::SUBSET(op1, op2) => {
+                match op1 {
+                    OfP::REGISTER(reg1) => {
+                        let reg2 = Register::RAX.to_byte_size(reg1.size());
+                        let reg3 = Register::RBX.to_byte_size(reg1.size());
+                        op2.LEIRnasm(vec![reg2,reg3], f, program,build, &local_vars, stack_size, loc)?;
+                        writeln!(f, "   sub {}, {}",reg1.to_string(), reg2.to_string())?;
+                    }
+                    OfP::LOCALVAR(var1) => {
+                        let var1 = com_expect!(loc,local_vars.get(var1),"Error: Unknown variable found during compilation {}",var1);
+                        let reg1 = Register::RAX.to_byte_size(var1.typ.get_size(program));
+                        let reg2 = Register::RBX.to_byte_size(reg1.size());
+                        op2.LEIRnasm(vec![reg1,reg2], f, program,build, &local_vars, stack_size, loc)?;
+                        if stack_size-var1.operand == 0 {
+                            writeln!(f, "   sub {} [rsp], {}",size_to_nasm_type(var1.typ.get_size(program)),reg1.to_string())?;
+                        }
+                        else {
+                            writeln!(f, "   sub {} [rsp+{}], {}",size_to_nasm_type(var1.typ.get_size(program)),stack_size-var1.operand,reg1.to_string())?;
+                        }
+                    },
+                    OfP::CONST(_) => todo!(),
+                }
+            }
+            Instruction::MULSET(op1, op2) => {
+                match op1 {
+                    OfP::REGISTER(reg1) => {
+                        let reg2 = Register::RAX.to_byte_size(reg1.size());
+                        op2.LEIRnasm(vec![reg2], f, program,build, &local_vars, stack_size, loc)?;
+                        writeln!(f, "   imul {}, {}",reg1.to_string(), reg2.to_string())?;
+                    }
+                    OfP::LOCALVAR(var1) => {
+                        let var1 = com_expect!(loc,local_vars.get(var1),"Error: Unknown variable found during compilation {}",var1);
+                        let reg1 = Register::RAX.to_byte_size(var1.typ.get_size(program));
+                        op2.LEIRnasm(vec![reg1], f, program,build, &local_vars, stack_size, loc)?;
+                        if stack_size-var1.operand == 0 {
+                            writeln!(f, "   imul {} [rsp], {}",size_to_nasm_type(var1.typ.get_size(program)),reg1.to_string())?;
+                        }
+                        else {
+                            writeln!(f, "   imul {} [rsp+{}], {}",size_to_nasm_type(var1.typ.get_size(program)),stack_size-var1.operand,reg1.to_string())?;
+                        }
+                    },
+                    _ => todo!()
                 }
                 
             }
-            Instruction::SUB(op1, op2) => {
-                match op1 {
-                    OfP::REGISTER(reg1) => {
-                        match op2 {
-                            OfP::REGISTER(reg2) => {
-                                assert!(reg1.size() == reg2.size(), "Two different sized registers passed to sub Instruction");
-                                writeln!(f, "   sub {} {}, {}",size_to_nasm_type(reg1.size()),reg1.to_string(), reg2.to_string())?;
-                            }
-                            OfP::LOCALVAR(_) => todo!(),
-                            OfP::CONST(val) => {
-                                writeln!(f, "   sub {}, {}",reg1.to_string(),val.get_num_data() )?;
-                            }
-                  
-                        }
-                    }
-                    OfP::LOCALVAR(_) => todo!(),
-                  
-                    OfP::CONST(_) => todo!(),
-                }
-            }
-            Instruction::MUL(op1, op2) => {
-                match op1 {
-                    OfP::REGISTER(reg1) => {
-                        match op2 {
-                            OfP::REGISTER(reg2) => {
-                                assert!(reg1.size() == reg2.size(), "Two different sized registers passed to mul Instruction");
-                                writeln!(f, "   mul {} {}, {}",size_to_nasm_type(reg1.size()),reg1.to_string(), reg2.to_string())?;
-                            }
-                            OfP::LOCALVAR(_) => todo!(),
-                            OfP::CONST(val) => {
-                                writeln!(f, "   mul {}, {}",reg1.to_string(),val.get_num_data())?;
-                            }
-                        
-                        }
-                    }
-                    OfP::LOCALVAR(_) => todo!(),
-                    OfP::CONST(_) => todo!(),
-                }
-                
-            }
-            Instruction::DIV(op1, op2) => {
-                match op1 {
-                    OfP::REGISTER(reg1) => {
-                        match op2 {
-                            OfP::REGISTER(reg2) => {
-                                assert!(reg1.size() == reg2.size(), "Two different sized registers passed to div Instruction");
-                                writeln!(f, "   mov r9, rdx")?;
-                                writeln!(f, "   xor rdx, rdx")?;
-                                writeln!(f, "   cqo")?;
-                                writeln!(f, "   mov rax, {}",reg1.to_string())?;
-                                writeln!(f, "   idiv {}",reg2.to_string())?;
-                                writeln!(f, "   mov {}, rax",reg1.to_string())?;
-                                writeln!(f, "   mov {}, rdx",reg2.to_string())?;
-                                writeln!(f, "   mov rdx, r9")?;
-                            }
-                            OfP::LOCALVAR(_) => todo!(),
+            Instruction::DIVSET(_, _) => {
+                todo!("Divset is not yet implemented!");
+                // match op1 {
+                //     OfP::REGISTER(reg1) => {
+                //         match op2 {
+                //             OfP::REGISTER(reg2) => {
+                //                 assert!(reg1.size() == reg2.size(), "Two different sized registers passed to div Instruction");
+                //                 writeln!(f, "   mov r9, rdx")?;
+                //                 writeln!(f, "   xor rdx, rdx")?;
+                //                 writeln!(f, "   cqo")?;
+                //                 writeln!(f, "   mov rax, {}",reg1.to_string())?;
+                //                 writeln!(f, "   idiv {}",reg2.to_string())?;
+                //                 writeln!(f, "   mov {}, rax",reg1.to_string())?;
+                //                 writeln!(f, "   mov {}, rdx",reg2.to_string())?;
+                //                 writeln!(f, "   mov rdx, r9")?;
+                //             }
+                //             OfP::LOCALVAR(_) => todo!(),
                    
-                            OfP::CONST(_) => todo!(),
-                        }
-                    }
-                    OfP::LOCALVAR(_) => todo!(),
+                //             OfP::CONST(_) => todo!(),
+                //         }
+                //     }
+                //     OfP::LOCALVAR(_) => todo!(),
                    
-                    OfP::CONST(_) => todo!(),
-                }
-                
+                //     OfP::CONST(_) => todo!(),
+                // }
             }
             Instruction::CALL(Func,args) => {
                 nasm_x86_64_prep_args(program, build, f, build.functions.get(Func).unwrap().contract.to_any_contract(), args, &mut stack_size, loc.clone(), &local_vars)?;
@@ -3852,7 +4097,37 @@ fn nasm_x86_64_handle_scope(f: &mut File, build: &BuildProgram, program: &CmdPro
             },
             Instruction::EXPAND_SCOPE(s) => nasm_x86_64_handle_scope(f, build, program, TCScopeType::NORMAL(&s),local_vars.clone(),stack_size)?,
             Instruction::EXPAND_IF_SCOPE(s)   => {
-                writeln!(f, "   cmp al, 0")?;
+                let condition = match s.typ {
+                    NormalScopeType::IF(ref c) => c,
+                    _ => panic!("Unreachable")
+                };
+                if condition.is_ofp() {
+                    let val = condition.unwrap_val();
+                    match val {
+                        OfP::REGISTER(reg) => {
+                            let reg = reg.to_byte_size(1);
+                            writeln!(f, "   cmp {}, 0",reg.to_string())?;
+                        },
+                        OfP::LOCALVAR(v) => {
+                            let var = local_vars.get(v).unwrap();
+                            com_assert!(loc,var.typ.weak_eq(&VarType::BOOLEAN),"Error: Expected boolean but found {}",var.typ.to_string(false));
+                            if stack_size-var.operand == 0 {
+                                writeln!(f, "   cmp {} [rsp], 0",size_to_nasm_type(var.typ.get_size(program)),)?;
+                            }
+                            else {
+                                writeln!(f, "   cmp {} [rsp+{}], 0",size_to_nasm_type(var.typ.get_size(program)),stack_size-var.operand)?;
+                            }
+                        },
+                        OfP::CONST(val) => {
+                            writeln!(f, "   cmp {}, 0",val.get_num_data())?;
+                        },
+                    }
+                }
+                else {
+                    let val = condition.unwrap_expr();
+                    com_assert!(loc,val.op.is_boolean(),"Error: Condition MUST be of type boolean but encountered op {}",val.op.to_string());
+                    todo!("Eval this");
+                }
                 writeln!(f, "   jnz .IF_SCOPE_{}",i)?;
                 if let Some((_,elses)) = scope.get_body(build).get(i+1) {
                     match elses {
@@ -3871,43 +4146,44 @@ fn nasm_x86_64_handle_scope(f: &mut File, build: &BuildProgram, program: &CmdPro
             Instruction::EXPAND_ELSE_SCOPE(_) => {
                 // com_error!(loc,"Error: this should never happen!"w);
             },
-
-            Instruction::MORETHAN(ofp1, ofp2) => {
-                let regs = ofp1.LOIRGNasm(vec![Register::RAX], f, program, build, &local_vars, stack_size,loc)?[0];
-                let regs2 = ofp2.LOIRGNasm(vec![Register::RBX], f, program, build, &local_vars, stack_size,loc)?[0];
-                writeln!(f,"   cmp {}, {}",regs.to_string(),regs2.to_string())?;
-                writeln!(f,"   setg al")?;
-            },
-            Instruction::LESSTHAN(ofp1, ofp2) => {
-                let regs = ofp1.LOIRGNasm(vec![Register::RAX], f, program, build, &local_vars, stack_size,loc)?[0];
-                let regs2 = ofp2.LOIRGNasm(vec![Register::RBX], f, program, build, &local_vars, stack_size,loc)?[0];
-                writeln!(f,"   cmp {}, {}",regs.to_string(),regs2.to_string())?;
-                writeln!(f,"   setl al")?;
-            },
-            Instruction::MORETHANEQUALS(ofp1, ofp2) => {
-                let regs = ofp1.LOIRGNasm(vec![Register::RAX], f, program, build, &local_vars, stack_size,loc)?[0];
-                let regs2 = ofp2.LOIRGNasm(vec![Register::RBX], f, program, build, &local_vars, stack_size,loc)?[0];
-                writeln!(f,"   cmp {}, {}",regs.to_string(),regs2.to_string())?;
-                writeln!(f,"   setge al")?;
-            },
-            Instruction::LESSTHANEQUALS(ofp1, ofp2) => {
-                let regs = ofp1.LOIRGNasm(vec![Register::RAX], f, program, build, &local_vars, stack_size,loc)?[0];
-                let regs2 = ofp2.LOIRGNasm(vec![Register::RBX], f, program, build, &local_vars, stack_size,loc)?[0];
-                writeln!(f,"   cmp {}, {}",regs.to_string(),regs2.to_string())?;
-                writeln!(f,"   setle al")?;
-            },
-            Instruction::NOTEQUALS(ofp1, ofp2) => {
-                let regs = ofp1.LOIRGNasm(vec![Register::RAX], f, program, build, &local_vars, stack_size,loc)?[0];
-                let regs2 = ofp2.LOIRGNasm(vec![Register::RBX], f, program, build, &local_vars, stack_size,loc)?[0];
-                writeln!(f,"   cmp {}, {}",regs.to_string(),regs2.to_string())?;
-                writeln!(f,"   setne al")?;
-            },
-            Instruction::EQUALS(ofp1, ofp2) => {
-                let regs = ofp1.LOIRGNasm(vec![Register::RAX], f, program, build, &local_vars, stack_size,loc)?[0];
-                let regs2 = ofp2.LOIRGNasm(vec![Register::RBX], f, program, build, &local_vars, stack_size,loc)?[0];
-                writeln!(f,"   cmp {}, {}",regs.to_string(),regs2.to_string())?;
-                writeln!(f,"   sete al")?;
-            },
+            //TODO: Re-enble these
+            _ => todo!("Re-enable these:")
+            // Instruction::MORETHAN(ofp1, ofp2) => {
+            //     let regs = ofp1.LOIRGNasm(vec![Register::RAX], f, program, build, &local_vars, stack_size,loc)?[0];
+            //     let regs2 = ofp2.LOIRGNasm(vec![Register::RBX], f, program, build, &local_vars, stack_size,loc)?[0];
+            //     writeln!(f,"   cmp {}, {}",regs.to_string(),regs2.to_string())?;
+            //     writeln!(f,"   setg al")?;
+            // },
+            // Instruction::LESSTHAN(ofp1, ofp2) => {
+            //     let regs = ofp1.LOIRGNasm(vec![Register::RAX], f, program, build, &local_vars, stack_size,loc)?[0];
+            //     let regs2 = ofp2.LOIRGNasm(vec![Register::RBX], f, program, build, &local_vars, stack_size,loc)?[0];
+            //     writeln!(f,"   cmp {}, {}",regs.to_string(),regs2.to_string())?;
+            //     writeln!(f,"   setl al")?;
+            // },
+            // Instruction::MORETHANEQUALS(ofp1, ofp2) => {
+            //     let regs = ofp1.LOIRGNasm(vec![Register::RAX], f, program, build, &local_vars, stack_size,loc)?[0];
+            //     let regs2 = ofp2.LOIRGNasm(vec![Register::RBX], f, program, build, &local_vars, stack_size,loc)?[0];
+            //     writeln!(f,"   cmp {}, {}",regs.to_string(),regs2.to_string())?;
+            //     writeln!(f,"   setge al")?;
+            // },
+            // Instruction::LESSTHANEQUALS(ofp1, ofp2) => {
+            //     let regs = ofp1.LOIRGNasm(vec![Register::RAX], f, program, build, &local_vars, stack_size,loc)?[0];
+            //     let regs2 = ofp2.LOIRGNasm(vec![Register::RBX], f, program, build, &local_vars, stack_size,loc)?[0];
+            //     writeln!(f,"   cmp {}, {}",regs.to_string(),regs2.to_string())?;
+            //     writeln!(f,"   setle al")?;
+            // },
+            // Instruction::NOTEQUALS(ofp1, ofp2) => {
+            //     let regs = ofp1.LOIRGNasm(vec![Register::RAX], f, program, build, &local_vars, stack_size,loc)?[0];
+            //     let regs2 = ofp2.LOIRGNasm(vec![Register::RBX], f, program, build, &local_vars, stack_size,loc)?[0];
+            //     writeln!(f,"   cmp {}, {}",regs.to_string(),regs2.to_string())?;
+            //     writeln!(f,"   setne al")?;
+            // },
+            // Instruction::EQUALS(ofp1, ofp2) => {
+            //     let regs = ofp1.LOIRGNasm(vec![Register::RAX], f, program, build, &local_vars, stack_size,loc)?[0];
+            //     let regs2 = ofp2.LOIRGNasm(vec![Register::RBX], f, program, build, &local_vars, stack_size,loc)?[0];
+            //     writeln!(f,"   cmp {}, {}",regs.to_string(),regs2.to_string())?;
+            //     writeln!(f,"   sete al")?;
+            // },
         }
     }
     if !scope.is_func() {
@@ -4123,9 +4399,10 @@ fn type_check_scope(build: &BuildProgram, program: &CmdProgram, scope: TCScopeTy
             Instruction::CALLRAW(name,contract)        => {
                 let mut externContract = build.get_contract_of_symbol(name).unwrap_or(&AnyContract { InputPool: vec![], Outputs: vec![] }).clone();//build.externals.get(name).unwrap().contract.as_ref().unwrap_or(&AnyContract { InputPool: vec![], Outputs: vec![] }).clone();
                 externContract.InputPool.reverse();
-                
+                //println!("externContract: {:?}",externContract);
                 typ_assert!(loc, externContract.InputPool.len() == contract.len(), "Error: Expected: {} amount of arguments but found {}",externContract.InputPool.len(), contract.len());
                 for arg in contract {
+                    //println!("arg = {:?}",arg);
                     match &arg.typ {
                         CallArgType::LOCALVAR(name) => {
                             let etyp = typ_expect!(loc, externContract.InputPool.pop(), "Error: Additional arguments provided for external that doesn't take in any more arguments!");
@@ -4143,10 +4420,10 @@ fn type_check_scope(build: &BuildProgram, program: &CmdProgram, scope: TCScopeTy
                     }
                 }
             },
-            Instruction::ADD(_, _)           => {},
-            Instruction::SUB(_, _)           => {},
-            Instruction::MUL(_, _)           => {},
-            Instruction::DIV(_, _)           => {},
+            Instruction::ADDSET(_, _)           => {},
+            Instruction::SUBSET(_, _)           => {},
+            Instruction::MULSET(_, _)           => {},
+            Instruction::DIVSET(_, _)           => {},
             
             Instruction::CALL(funcn, args)             => {
                 let function = typ_expect!(loc, build.functions.get(funcn), "Error: unknown function call to {}, Function may not exist!",funcn);
@@ -4188,7 +4465,7 @@ fn type_check_scope(build: &BuildProgram, program: &CmdProgram, scope: TCScopeTy
                 }
             },
             Instruction::EXPAND_SCOPE(s)      => type_check_scope(build, program, TCScopeType::NORMAL(&s), currentLocals),
-            Instruction::EXPAND_IF_SCOPE(s)   => type_check_scope(build, program, TCScopeType::NORMAL(&s), currentLocals),
+            Instruction::EXPAND_IF_SCOPE(s)   => type_check_scope(build, program, TCScopeType::NORMAL(&s), currentLocals), //TODO: Typecheck condition
             Instruction::EXPAND_ELSE_SCOPE(s) => type_check_scope(build, program, TCScopeType::NORMAL(&s), currentLocals),
             //TODO: add typechecking for this:
             Instruction::MORETHAN(_, _)       => {},
@@ -4464,8 +4741,6 @@ fn main() {
     Intrinsics.insert(")".to_string(),IntrinsicType::CLOSEPAREN);
     Intrinsics.insert("{".to_string(),IntrinsicType::OPENCURLY);
     Intrinsics.insert("}".to_string(),IntrinsicType::CLOSECURLY);
-    Intrinsics.insert("<".to_string(),IntrinsicType::OPENANGLE);
-    Intrinsics.insert(">".to_string(),IntrinsicType::CLOSEANGLE);
     Intrinsics.insert(":".to_string(),IntrinsicType::DOUBLE_COLIN);
     Intrinsics.insert(",".to_string(),IntrinsicType::COMA);
     Intrinsics.insert(";".to_string(),IntrinsicType::DOTCOMA);
@@ -4555,24 +4830,6 @@ fn main() {
 
 
 
-
-
-
-
-/*
-struct ExOp {
-    body1: Expression,
-    body2: Expression,
-    op: Op
-}
-enum Expression {
-    ofp(OfP),
-    eval(ExOp)
-}
-let mut out: Expression;
-let opstack: Vec<Op> = Vec::new();
-let valstack: Vec<OfP> = Vec::new();
-*/
 /*
 - [x] TODO: No point in keeping params and localvars seperate once we set LOCALVAR onto the stack instead of the CALLSTACK
 - [x] TODO: remove warn_rax_usage
@@ -4584,14 +4841,17 @@ let valstack: Vec<OfP> = Vec::new();
 - [x] TODO: Implement local variables for normal scopes
 - [x] TODO: implement booleans
 - [x] TODO: Implement if statements as well as else statements
+- [x] TODO: Implement conditions and 'evaluate_condition'
+- [x] TODO: Add expressions like a+b*c etc. 
+
+- [ ] TODO: Remove -callstack
+- [ ] TODO: Update all of readme and add more documentation
+- [ ] TODO: Add more useful examples
 - [ ] TODO: Fix returning from functions
 - [ ] TODO: Add 'result' as a part of OfP for calling the function and getting its result
-- [ ] TODO: Implement conditions and 'evaluate_condition'
 - [ ] TODO: Implement while loops
-- [ ] TODO: Add more examples like OpenGL examples, native Windows examples with linking to kernel.dll etc.
+- [x] TODO: Add more examples like OpenGL examples, native Windows examples with linking to kernel.dll etc.
 - [ ] TODO: Add some quality of life things such as __FILE__ __LINE__
-
-- [ ] TODO: Add expressions like a+b*c etc. 
 - [ ] TODO: Add EOL (End of line) token
 
 
@@ -4599,5 +4859,4 @@ let valstack: Vec<OfP> = Vec::new();
 - [ ] TODO: Remove some dependencies like UUID since we don't exactly need it (also bench mark it to see the improvement in speed!)
 - [/] TODO: Make callraw use reference to UUID and name instead of raw when typechecking
 - [/] TODO: Make call use reference to UUID and name instead of raw
-
 */

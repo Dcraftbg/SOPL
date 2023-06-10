@@ -1,8 +1,9 @@
 **(Latest patch versions in github history and at the top of Change Log)**
 
-Newest Version: [0.11.12A](#01112a)
+Newest Version: [0.12A](#012a)
 # Manual:
-  - [0.11.12A](#01112a)
+  - [0.12A](#012a)
+    - [0.11.12A](#01112a)
     - [0.11.11A](#01111a)
     - [0.11.10A](#01110a)
     - [0.11.9A](#0119a)
@@ -35,6 +36,13 @@ Newest Version: [0.11.12A](#01112a)
   - [0.2A](#02a)
   - [0.1A](#01a)
 # Change Log
+ ## 0.12A 
+   - Added +=, -=, *=, /= as SETOperations
+   - Added evaluation (updated examples)
+   - Added expressions
+   - Added expression evaluation
+   - Fixed ifs and added condition (conditions still don't get typechecked nor can they be evaluated with expressions (yet) - only with ofps: constants,local variables and registers)
+   
  ## 0.11.12A
    - Moved +, -, *, / to a new Token type 'Operand'
  ## 0.11.11A
