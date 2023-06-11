@@ -1,0 +1,23 @@
+const num: int = 100;
+extern "C" printf(*char, int);
+func main(){
+    let sum_sq: int;
+    let sq_sum: int;
+    sum_sq = 0;
+    sq_sum = 0;
+    {
+        let i: int;
+        i = 0;
+        while i <= num {
+            sum_sq += i*i;
+            sq_sum += i;
+            i+=1;
+        }
+        sq_sum = sq_sum*sq_sum;
+    }
+    printf("sum_sq: %d\n"c,sum_sq);
+    printf("sq_sum: %d\n"c,sq_sum);
+    let result: int;
+    result = sq_sum - sum_sq;
+    printf("sq_sum-sum_sq: %d\n"c,result);
+}

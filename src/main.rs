@@ -336,6 +336,7 @@ enum IntrinsicType {
     INCLUDE,
     IF,
     ELSE,
+    WHILE,
     
     TOP,
     CAST,
@@ -441,6 +442,9 @@ impl IntrinsicType {
             IntrinsicType::DLL_EXPORT => {
                 if isplural {"Dll Exports".to_string()} else {"Dll Export".to_string().to_string()}
             },
+            IntrinsicType::WHILE => {
+                if isplural {"While".to_string()} else {"While".to_string().to_string()}
+            },
         }
     }
 }
@@ -482,6 +486,7 @@ enum Op {
     MINUS,
     DIV,
     MUL,
+    REMAINDER,
     EQ,
     NEQ,
     GT,
@@ -496,6 +501,7 @@ impl Op {
             "+" => Some(Op::PLUS),
             "-" => Some(Op::MINUS),
             "/" => Some(Op::DIV),
+            "%" => Some(Op::REMAINDER),
             "*" => Some(Op::MUL),
             "=="=> Some(Op::EQ),
             "!="=> Some(Op::NEQ),
@@ -521,14 +527,15 @@ impl Op {
             Op::LT    => "<" ,
             Op::LTEQ  => "<=",
             Op::NOT   => "!" ,
+            Op::REMAINDER => "%",
         }
     }
     fn get_priority(&self) -> usize {
         match self {
             Self::NOT =>  0,
             Self::EQ   | Self::NEQ | Self::GT | Self::LT | Self::GTEQ | Self::LTEQ => 1,
-            Self::PLUS | Self::MINUS => 2,
-            Self::MUL  | Self::DIV   => 3,
+            Self::PLUS | Self::MINUS                                               => 2,
+            Self::MUL  | Self::DIV | Self::REMAINDER                               => 3,
             Self::NONE  => panic!("This should not occur"),
         }
     }
@@ -653,25 +660,79 @@ impl ExprTree {
             Op::DIV   => {
                 com_assert!(loc,regs[0].to_byte_size(8) == Register::RAX,"Error: Cannot do division with output register different from RAX");
                 let left = com_expect!(loc,self.left.as_ref(),"Error: Cannot evaluate Op '{}' without left parameter",Op::DIV  .to_string());
-                let leftregs1 = left.LEIRnasm(regs.clone(), f, program, build, local_vars, stack_size, loc)?;
-                com_assert!(loc,leftregs1.len() == 1, "TODO: Handle multi-parameter loading for expressions!");
-                let right = com_expect!(loc,self.right.as_ref(),"Error: Cannot evaluate Op '{}' without left parameter",Op::DIV  .to_string());
-                let rightregs1 = right.LEIRnasm(regs[1..].to_vec(), f, program, build, local_vars, stack_size, loc)?;
-                com_assert!(loc,rightregs1.len() == 1, "TODO: Handle multi-parameter loading for expressions!");
-                writeln!(f, "   div {}",rightregs1[0].to_string())?;
-                o = leftregs1;
-
+                if left.is_ofp() {
+                    let leftregs1 = left.LEIRnasm(regs.clone(), f, program, build, local_vars, stack_size, loc)?;
+                    com_assert!(loc,leftregs1.len() == 1, "TODO: Handle multi-parameter loading for expressions!");
+                    let right = com_expect!(loc,self.right.as_ref(),"Error: Cannot evaluate Op '{}' without left parameter",Op::DIV  .to_string());
+                    let rightregs1 = right.LEIRnasm(regs[1..].to_vec(), f, program, build, local_vars, stack_size, loc)?;
+                    com_assert!(loc,rightregs1.len() == 1, "TODO: Handle multi-parameter loading for expressions!");
+                    //writeln!(f, "   xor rdx, rdx")?;
+                    writeln!(f, "   cqo")?;
+                    writeln!(f, "   idiv {}",rightregs1[0].to_string())?;
+                    o = leftregs1;
+                }
+                else {
+                    let right = com_expect!(loc,self.right.as_ref(),"Error: Cannot evaluate Op '{}' without left parameter",Op::DIV  .to_string());
+                    let rightregs1 = right.LEIRnasm(regs.to_vec(), f, program, build, local_vars, stack_size, loc)?;
+                    let leftregs1 = left.LEIRnasm(regs[1..].to_vec(), f, program, build, local_vars, stack_size, loc)?;
+                    com_assert!(loc,leftregs1.len() == 1, "TODO: Handle multi-parameter loading for expressions!");
+                    com_assert!(loc,rightregs1.len() == 1, "TODO: Handle multi-parameter loading for expressions!");
+                    //writeln!(f, "   xor rdx, rdx")?;
+                    writeln!(f, "   cqo")?;
+                    writeln!(f, "   idiv {}",rightregs1[0].to_string())?;
+                    o = leftregs1;
+                }
+            },
+            Op::REMAINDER => {
+                com_assert!(loc,regs[0].to_byte_size(8) == Register::RAX,"Error: Cannot do division with output register different from RAX");
+                let left = com_expect!(loc,self.left.as_ref(),"Error: Cannot evaluate Op '{}' without left parameter",Op::DIV.to_string());
+                if left.is_ofp() {
+                    let leftregs1 = left.LEIRnasm(regs.clone(), f, program, build, local_vars, stack_size, loc)?;
+                    com_assert!(loc,leftregs1.len() == 1, "TODO: Handle multi-parameter loading for expressions!");
+                    let right = com_expect!(loc,self.right.as_ref(),"Error: Cannot evaluate Op '{}' without left parameter",Op::DIV.to_string());
+                    let rightregs1 = right.LEIRnasm(regs[1..].to_vec(), f, program, build, local_vars, stack_size, loc)?;
+                    com_assert!(loc,rightregs1.len() == 1, "TODO: Handle multi-parameter loading for expressions!");
+                    writeln!(f, "   cqo")?;
+                    writeln!(f, "   idiv {}",rightregs1[0].to_string())?;     
+                    o = vec![Register::RDX.to_byte_size(rightregs1[0].size())]               
+                }
+                else {
+                    let right = com_expect!(loc,self.right.as_ref(),"Error: Cannot evaluate Op '{}' without left parameter",Op::DIV.to_string());
+                    let rightregs1 = right.LEIRnasm(regs.to_vec(), f, program, build, local_vars, stack_size, loc)?;
+                    let leftregs1 = left.LEIRnasm(regs[1..].to_vec(), f, program, build, local_vars, stack_size, loc)?;
+                    com_assert!(loc,leftregs1.len() == 1, "TODO: Handle multi-parameter loading for expressions!");
+                    com_assert!(loc,rightregs1.len() == 1, "TODO: Handle multi-parameter loading for expressions!");
+                    writeln!(f, "   cqo")?;
+                    writeln!(f, "   idiv {}",rightregs1[0].to_string())?;
+                    o = vec![Register::RDX.to_byte_size(rightregs1[0].size())]
+                }
+                
             },
             Op::MUL   => {
-                com_assert!(loc,regs[0].to_byte_size(8) == Register::RAX,"Error: Cannot do multiplication with output register different from RAX");
-                let left = com_expect!(loc,self.left.as_ref(),"Error: Cannot evaluate Op '{}' without left parameter",Op::MUL  .to_string());
-                let leftregs1 = left.LEIRnasm(regs.clone(), f, program, build, local_vars, stack_size, loc)?;
-                com_assert!(loc,leftregs1.len() == 1, "TODO: Handle multi-parameter loading for expressions!");
-                let right = com_expect!(loc,self.right.as_ref(),"Error: Cannot evaluate Op '{}' without left parameter",Op::MUL  .to_string());
-                let rightregs1 = right.LEIRnasm(regs[1..].to_vec(), f, program, build, local_vars, stack_size, loc)?;
-                com_assert!(loc,rightregs1.len() == 1, "TODO: Handle multi-parameter loading for expressions!");
-                writeln!(f, "   imul {}",rightregs1[0].to_string())?;
-                o = leftregs1;
+                com_assert!(loc,regs[0].to_byte_size(8) == Register::RAX,"Error: Cannot do division with output register different from RAX");
+                let left = com_expect!(loc,self.left.as_ref(),"Error: Cannot evaluate Op '{}' without left parameter",Op::DIV  .to_string());
+                if left.is_ofp() {
+                    let leftregs1 = left.LEIRnasm(regs.clone(), f, program, build, local_vars, stack_size, loc)?;
+                    com_assert!(loc,leftregs1.len() == 1, "TODO: Handle multi-parameter loading for expressions!");
+                    let right = com_expect!(loc,self.right.as_ref(),"Error: Cannot evaluate Op '{}' without left parameter",Op::DIV  .to_string());
+                    let rightregs1 = right.LEIRnasm(regs[1..].to_vec(), f, program, build, local_vars, stack_size, loc)?;
+                    com_assert!(loc,rightregs1.len() == 1, "TODO: Handle multi-parameter loading for expressions!");
+                    //writeln!(f, "   xor rdx, rdx")?;
+                    writeln!(f, "   cqo")?;
+                    writeln!(f, "   imul {}",rightregs1[0].to_string())?;
+                    o = leftregs1;
+                }
+                else {
+                    let right = com_expect!(loc,self.right.as_ref(),"Error: Cannot evaluate Op '{}' without left parameter",Op::DIV  .to_string());
+                    let rightregs1 = right.LEIRnasm(regs.to_vec(), f, program, build, local_vars, stack_size, loc)?;
+                    let leftregs1 = left.LEIRnasm(regs[1..].to_vec(), f, program, build, local_vars, stack_size, loc)?;
+                    com_assert!(loc,leftregs1.len() == 1, "TODO: Handle multi-parameter loading for expressions!");
+                    com_assert!(loc,rightregs1.len() == 1, "TODO: Handle multi-parameter loading for expressions!");
+                    //writeln!(f, "   xor rdx, rdx")?;
+                    writeln!(f, "   cqo")?;
+                    writeln!(f, "   imul {}",rightregs1[0].to_string())?;
+                    o = leftregs1;
+                }
 
             },
             Op::EQ    => {
@@ -756,6 +817,7 @@ impl ExprTree {
                 // o = leftregs1;
 
             },
+            
         }
         //println!("Output regs: {:?}",o);
         Ok(o)
@@ -2097,9 +2159,10 @@ enum Instruction {
     // JUMP(usize),
     INTERRUPT(i64),
     
-    EXPAND_SCOPE     (NormalScope),
-    EXPAND_IF_SCOPE  (NormalScope),
-    EXPAND_ELSE_SCOPE(NormalScope),
+    EXPAND_SCOPE       (NormalScope),
+    EXPAND_IF_SCOPE    (NormalScope),
+    EXPAND_WHILE_SCOPE (NormalScope),
+    EXPAND_ELSE_SCOPE  (NormalScope),
 
     EQUALS          (Expression, Expression),
     MORETHAN        (Expression, Expression),
@@ -2535,6 +2598,7 @@ struct AnyContract {
 enum NormalScopeType {
     IF(Expression),
     ELSE,
+    WHILE(Expression),
     EMPTY
 }
 
@@ -2567,7 +2631,7 @@ impl ScopeType {
                 Some(&func.body)
             },
             Self::NORMAL(scope) => {
-                Some(&scope.body)
+                Some(&scope.body)                
             },
         }
     }
@@ -2637,17 +2701,18 @@ impl ScopeType {
             }
             ScopeType::NORMAL(normal)=> {
                 match normal.typ {
-                    NormalScopeType::IF(_) => if isplural {"ifs"}     else {"if"},
-                    NormalScopeType::ELSE  => if isplural {"elses"}   else {"else"},
-                    NormalScopeType::EMPTY => if isplural {"empties"} else {"empty"},
+                    NormalScopeType::IF(_)    => if isplural {"ifs"}     else {"if"},
+                    NormalScopeType::ELSE     => if isplural {"elses"}   else {"else"},
+                    NormalScopeType::EMPTY    => if isplural {"empties"} else {"empty"},
+                    NormalScopeType::WHILE(_) => if isplural {"while"}else {"while"},
                 }
             },
         }
     }
 }
 impl Scope {
-    fn body_unwrap(&self)         -> Option<&ScopeBody>                    {self.typ.body_unwrap()}
-    fn body_unwrap_mut(&mut self) -> Option<&mut ScopeBody>                {self.typ.body_unwrap_mut()}
+    fn body_unwrap(&self)         -> Option<&ScopeBody>                    {if self.hasBeenOpened { self.typ.body_unwrap()} else { None }}
+    fn body_unwrap_mut(&mut self) -> Option<&mut ScopeBody>                {if self.hasBeenOpened { self.typ.body_unwrap_mut()} else { None }}
     fn locals_unwrap(&self)          -> Option<& Locals>                   {self.typ.locals_unwrap()}
     fn locals_unwrap_mut(&mut self)  -> Option<&mut Locals>                {self.typ.locals_unwrap_mut()}
     fn contract_unwrap(&self)        -> Option<&FunctionContract>          {self.typ.contract_unwrap()}
@@ -3158,6 +3223,11 @@ fn parse_token_to_build_inst(token: Token,lexer: &mut Lexer, program: &mut CmdPr
                                        par_assert!(token, prev.body_is_some(), "Error: if can not be declared inside of scope of {} as they do not allow instructions!",prev.typ.to_string(true));
                                     }
                                     NormalScopeType::ELSE | NormalScopeType::EMPTY => {}
+                                    NormalScopeType::WHILE(_) => {
+                                        par_assert!(token, ln > 1, "Error: Alone if outside of any scope is not allowed!");
+                                        let prev = scopeStack.get_mut(ln-2).unwrap();
+                                        par_assert!(token, prev.body_is_some(), "Error: if can not be declared inside of scope of {} as they do not allow instructions!",prev.typ.to_string(true));
+                                    },
                                 }
                             }
                         }
@@ -3196,6 +3266,11 @@ fn parse_token_to_build_inst(token: Token,lexer: &mut Lexer, program: &mut CmdPr
 
                                         let body = par_expect!(token,currentScope.body_unwrap_mut(), "Error: Can not close if, because it is inside a {} which doesn't support instructions!",currentScope.typ.to_string(false));
                                         body.push((token.location.clone(),Instruction::EXPAND_ELSE_SCOPE(normal)));
+                                    },
+                                    NormalScopeType::WHILE(_) => {
+                                        let currentScope = getTopMut(scopeStack).unwrap();
+                                        let body = par_expect!(token,currentScope.body_unwrap_mut(), "Error: Can not close if, because it is inside a {} which doesn't support instructions!",currentScope.typ.to_string(false));
+                                        body.push((token.location.clone(),Instruction::EXPAND_WHILE_SCOPE(normal)))
                                     },
                                 }
                             }
@@ -3280,44 +3355,7 @@ fn parse_token_to_build_inst(token: Token,lexer: &mut Lexer, program: &mut CmdPr
                         }
                     }
                 },
-                IntrinsicType::IF => {
-                    //let inbody = scopeStack.last_mut().unwrap();
-                    //let org_i = scopeStack.len();
-                    let condition: Vec<Token> = lexer.map_while(|t| {
-                        if t.typ == TokenType::IntrinsicType(IntrinsicType::OPENCURLY) {
-                            None
-                        }
-                        else{
-                            Some(t)
-                        }
-                    }).collect();
-                    scopeStack.push(Scope { typ: ScopeType::NORMAL(NormalScope { typ: NormalScopeType::IF(tokens_to_expression(&condition, build, program, &currentLocals)), body: vec![], locals: Locals::new()}), hasBeenOpened: true});
-                    currentLocals.push(Locals::new());
-                    // scopeStack.push(Scope { typ: ScopeType::NORMAL(NormalScope { typ: NormalScopeType::EMPTY, body: vec![], locals: Locals::new()}), hasBeenOpened: true });
-                    // currentLocals.push(Locals::new());
-                    // let prev_len = scopeStack.len();
-                    // while let Some(tok) = lexer.next() {
-                    //     if tok.typ == TokenType::IntrinsicType(IntrinsicType::OPENCURLY) {
-                    //         break;
-                    //     }
-                    //     parse_token_to_build_inst(tok, lexer, program, build, scopeStack, currentLocals);
-                    // }
-                    // let now_len = scopeStack.len();
-                    // par_assert!(token,prev_len == now_len,"Error: Expected to find the same exact amount of scopes as before!");
-                    // let t = scopeStack.pop().unwrap();
-                    // match t.typ {
-                    //     ScopeType::NORMAL(t) => {
-                    //         match t.typ {
-                    //             NormalScopeType::EMPTY => {},
-                    //             _ => par_error!(token, "Error: Expected EMPTY scope but found another!")
-                    //         }
-                    //         scopeStack[org_i].body_unwrap_mut().unwrap().extend(t.body);
-                    //     }
-                    //     _ => {
-                    //         par_error!(token,"Unexpected scope type in IF condition!");
-                    //     }
-                    // }
-                },
+                
                 IntrinsicType::CONSTANT => {
                     let first = lexer.next();
                     let first = par_expect!(lexer.currentLocation,first,"abruptly ran out of tokens in constant name definition");
@@ -3395,9 +3433,7 @@ fn parse_token_to_build_inst(token: Token,lexer: &mut Lexer, program: &mut CmdPr
                     
                 },
                 IntrinsicType::DOTCOMA => {},
-                IntrinsicType::ELSE => {
-                    scopeStack.push(Scope { typ: ScopeType::NORMAL(NormalScope { typ: NormalScopeType::ELSE, body: vec![], locals: Locals::new()}), hasBeenOpened: false })
-                },
+                
                 IntrinsicType::Let => {
                     
                     let nametok = par_expect!(lexer.currentLocation, lexer.next(), "Error: abruptly ran out of tokens for Let");
@@ -3471,6 +3507,34 @@ fn parse_token_to_build_inst(token: Token,lexer: &mut Lexer, program: &mut CmdPr
                     par_assert!(ntok, ntok.typ == TokenType::IntrinsicType(IntrinsicType::OPENPAREN), "Error: Unexpected symbol {} in DLL_EXPORT! {}",ntok.typ.to_string(false),symbol_name);
                     let symbol_contract = parse_any_contract(lexer);
                     build.dll_exports.insert(symbol_name.clone(), DLL_export { contract: symbol_contract });
+                },
+                IntrinsicType::WHILE => {
+                    let condition: Vec<Token> = lexer.map_while(|t| {
+                        if t.typ == TokenType::IntrinsicType(IntrinsicType::OPENCURLY) {
+                            None
+                        }
+                        else{
+                            Some(t)
+                        }
+                    }).collect();
+                    scopeStack.push(Scope { typ: ScopeType::NORMAL(NormalScope { typ: NormalScopeType::WHILE(tokens_to_expression(&condition, build, program, &currentLocals)), body: vec![], locals: Locals::new()}), hasBeenOpened: true});
+                    currentLocals.push(Locals::new());
+                },
+                IntrinsicType::IF => {
+                    let condition: Vec<Token> = lexer.map_while(|t| {
+                        if t.typ == TokenType::IntrinsicType(IntrinsicType::OPENCURLY) {
+                            None
+                        }
+                        else{
+                            Some(t)
+                        }
+                    }).collect();
+                    scopeStack.push(Scope { typ: ScopeType::NORMAL(NormalScope { typ: NormalScopeType::IF(tokens_to_expression(&condition, build, program, &currentLocals)), body: vec![], locals: Locals::new()}), hasBeenOpened: true});
+                    currentLocals.push(Locals::new());
+                    
+                },
+                IntrinsicType::ELSE => {
+                    scopeStack.push(Scope { typ: ScopeType::NORMAL(NormalScope { typ: NormalScopeType::ELSE, body: vec![], locals: Locals::new()}), hasBeenOpened: false })
                 },
             }
         }
@@ -3972,7 +4036,7 @@ fn nasm_x86_64_load_args(f: &mut File, scope: &TCScopeType, build: &BuildProgram
     }
     Ok(offset)
 }
-fn nasm_x86_64_handle_scope(f: &mut File, build: &BuildProgram, program: &CmdProgram, scope: TCScopeType, mut local_vars: HashMap<String, LocalVariable>, mut stack_size: usize) -> io::Result<()> {
+fn nasm_x86_64_handle_scope(f: &mut File, build: &BuildProgram, program: &CmdProgram, scope: TCScopeType, mut local_vars: HashMap<String, LocalVariable>, mut stack_size: usize, func_stack_begin: usize, inst_count: &mut usize) -> io::Result<()> {
     let expect_loc_t = LinkedHashMap::new();
     let contract_loc_t = FunctionContract { Inputs: LinkedHashMap::new(), Outputs: Vec::new()};
     let expect_locals = scope.get_locals(build).unwrap_or(&expect_loc_t);
@@ -3995,6 +4059,8 @@ fn nasm_x86_64_handle_scope(f: &mut File, build: &BuildProgram, program: &CmdPro
         writeln!(f, "   sub rsp, {}",dif)?;
     }
     for (i,(loc,inst)) in scope.get_body(build).iter().enumerate() {
+        
+        //println!("Instruction at {}: {:?}",i,inst);
         match inst {
             Instruction::MOV(Op, Op2) => {
                 match Op {
@@ -4009,10 +4075,10 @@ fn nasm_x86_64_handle_scope(f: &mut File, build: &BuildProgram, program: &CmdPro
                         let oreg2 = Register::RBX.to_byte_size(var.typ.get_size(program));
                         let oregs = Op2.LEIRnasm(vec![oreg,oreg2], f, program,build, &local_vars, stack_size, loc)?;
                         if stack_size-var.operand == 0 {
-                            writeln!(f, "   mov {} [rsp], {}",size_to_nasm_type(var.typ.get_size(program)), oregs[0].to_string())?;
+                            writeln!(f, "   mov {} [rsp], {}",size_to_nasm_type(var.typ.get_size(program)), oregs[0].to_byte_size(var.typ.get_size(program)).to_string())?;
                         }
                         else {
-                            writeln!(f, "   mov {} [rsp+{}], {}",size_to_nasm_type(var.typ.get_size(program)),stack_size-var.operand, oregs[0].to_string())?;
+                            writeln!(f, "   mov {} [rsp+{}], {}",size_to_nasm_type(var.typ.get_size(program)),stack_size-var.operand, oregs[0].to_byte_size(var.typ.get_size(program)).to_string())?;
                         }
                     }
                     _ => {
@@ -4146,11 +4212,14 @@ fn nasm_x86_64_handle_scope(f: &mut File, build: &BuildProgram, program: &CmdPro
                 
             }
             Instruction::RET(expr) => {
-                let dif = stack_size-stack_size_org;
+                let dif = if scope.is_normal() {stack_size-func_stack_begin} else {stack_size-stack_size_org};
                 let _regs = expr.LEIRnasm(vec![Register::RAX,Register::RBX,Register::RCX], f, program, build, &local_vars, stack_size, loc)?;
                 let oreg = Register::RAX.to_byte_size(_regs[0].size());
                 writeln!(f, "   mov {}, {}",oreg.to_string(),_regs[0].to_string())?;
-                writeln!(f, "   add rsp, {}",dif)?;
+                if dif > 0 {
+                    writeln!(f, "   add rsp, {}",dif)?;
+                }
+                //writeln!(f, "   ; its this ret")?;
                 writeln!(f, "   ret")?;
             }
             //TOOD: Potentially remove these
@@ -4167,7 +4236,7 @@ fn nasm_x86_64_handle_scope(f: &mut File, build: &BuildProgram, program: &CmdPro
             Instruction::INTERRUPT(val) => {
                 writeln!(f, "   int 0x{:x}",val)?;
             },
-            Instruction::EXPAND_SCOPE(s) => nasm_x86_64_handle_scope(f, build, program, TCScopeType::NORMAL(&s),local_vars.clone(),stack_size)?,
+            Instruction::EXPAND_SCOPE(s) => nasm_x86_64_handle_scope(f, build, program, TCScopeType::NORMAL(&s),local_vars.clone(),stack_size,func_stack_begin,inst_count)?,
             Instruction::EXPAND_IF_SCOPE(s)   => {
                 let condition = match s.typ {
                     NormalScopeType::IF(ref c) => c,
@@ -4191,34 +4260,187 @@ fn nasm_x86_64_handle_scope(f: &mut File, build: &BuildProgram, program: &CmdPro
                             }
                         },
                         OfP::CONST(val) => {
-                            writeln!(f, "   cmp {}, 0",val.get_num_data())?;
+                            writeln!(f, "   mov rax, {}",val.get_num_data())?;
+                            writeln!(f, "   cmp rax, 0")?;
                         },
                         OfP::RESULT(_, _) => todo!(),
                     }
+                    writeln!(f, "   jnz .IF_SCOPE_{}",inst_count)?;
                 }
                 else {
                     let val = condition.unwrap_expr();
                     com_assert!(loc,val.op.is_boolean(),"Error: Condition MUST be of type boolean but encountered op {}",val.op.to_string());
-                    todo!("Eval this");
+                    match val.op {
+                        Op::EQ   => {
+                            let oreg1 = val.left.as_ref().unwrap().LEIRnasm(vec![Register::RAX, Register::RBX, Register::RCX], f, program, build, &local_vars, stack_size, loc)?;
+                            let tmp = Register::RSI.to_byte_size(oreg1[0].size());
+                            writeln!(f, "   mov {}, {}",tmp.to_string(),oreg1[0].to_string())?;
+                            let oreg2 = val.right.as_ref().unwrap().LEIRnasm(vec![Register::RAX, Register::RBX, Register::RCX], f, program, build, &local_vars, stack_size, loc)?;
+                            writeln!(f, "   cmp {}, {}",tmp.to_string(),oreg2[0].to_string())?;
+                            writeln!(f, "   jz .IF_SCOPE_{}",inst_count)?;
+                        },
+                        Op::NEQ  => {
+                            let oreg1 = val.left.as_ref().unwrap().LEIRnasm(vec![Register::RAX, Register::RBX, Register::RCX], f, program, build, &local_vars, stack_size, loc)?;
+                            let tmp = Register::RSI.to_byte_size(oreg1[0].size());
+                            writeln!(f, "   mov {}, {}",tmp.to_string(),oreg1[0].to_string())?;
+                            let oreg2 = val.right.as_ref().unwrap().LEIRnasm(vec![Register::RAX, Register::RBX, Register::RCX], f, program, build, &local_vars, stack_size, loc)?;
+                            writeln!(f, "   cmp {}, {}",tmp.to_string(),oreg2[0].to_string())?;
+                            writeln!(f, "   jnz .IF_SCOPE_{}",inst_count)?;
+                        },
+                        Op::GT   => {
+                            let oreg1 = val.left.as_ref().unwrap().LEIRnasm(vec![Register::RAX, Register::RBX, Register::RCX], f, program, build, &local_vars, stack_size, loc)?;
+                            let tmp = Register::RSI.to_byte_size(oreg1[0].size());
+                            writeln!(f, "   mov {}, {}",tmp.to_string(),oreg1[0].to_string())?;
+                            let oreg2 = val.right.as_ref().unwrap().LEIRnasm(vec![Register::RAX, Register::RBX, Register::RCX], f, program, build, &local_vars, stack_size, loc)?;
+                            writeln!(f, "   cmp {}, {}",tmp.to_string(),oreg2[0].to_string())?;
+                            writeln!(f, "   jg .IF_SCOPE_{}",inst_count)?;
+                        },
+                        Op::GTEQ => {
+                            let oreg1 = val.left.as_ref().unwrap().LEIRnasm(vec![Register::RAX, Register::RBX, Register::RCX], f, program, build, &local_vars, stack_size, loc)?;
+                            let tmp = Register::RSI.to_byte_size(oreg1[0].size());
+                            writeln!(f, "   mov {}, {}",tmp.to_string(),oreg1[0].to_string())?;
+                            let oreg2 = val.right.as_ref().unwrap().LEIRnasm(vec![Register::RAX, Register::RBX, Register::RCX], f, program, build, &local_vars, stack_size, loc)?;
+                            writeln!(f, "   cmp {}, {}",tmp.to_string(),oreg2[0].to_string())?;
+                            writeln!(f, "   jge .IF_SCOPE_{}",inst_count)?;
+                        },
+                        Op::LT   => {
+                            let oreg1 = val.left.as_ref().unwrap().LEIRnasm(vec![Register::RAX, Register::RBX, Register::RCX], f, program, build, &local_vars, stack_size, loc)?;
+                            let tmp = Register::RSI.to_byte_size(oreg1[0].size());
+                            writeln!(f, "   mov {}, {}",tmp.to_string(),oreg1[0].to_string())?;
+                            let oreg2 = val.right.as_ref().unwrap().LEIRnasm(vec![Register::RAX, Register::RBX, Register::RCX], f, program, build, &local_vars, stack_size, loc)?;
+                            writeln!(f, "   cmp {}, {}",tmp.to_string(),oreg2[0].to_string())?;
+                            writeln!(f, "   jl .IF_SCOPE_{}",inst_count)?;
+                        },
+                        Op::LTEQ => {
+                            let oreg1 = val.left.as_ref().unwrap().LEIRnasm(vec![Register::RAX, Register::RBX, Register::RCX], f, program, build, &local_vars, stack_size, loc)?;
+                            let tmp = Register::RSI.to_byte_size(oreg1[0].size());
+                            writeln!(f, "   mov {}, {}",tmp.to_string(),oreg1[0].to_string())?;
+                            let oreg2 = val.right.as_ref().unwrap().LEIRnasm(vec![Register::RAX, Register::RBX, Register::RCX], f, program, build, &local_vars, stack_size, loc)?;
+                            writeln!(f, "   cmp {}, {}",tmp.to_string(),oreg2[0].to_string())?;
+                            writeln!(f, "   jle .IF_SCOPE_{}",inst_count)?;
+                        },
+                        Op::NOT  => todo!(),
+                        _ => panic!("Unreachable")
+                    }
                 }
-                writeln!(f, "   jnz .IF_SCOPE_{}",i)?;
+                //println!("Count: {} at {:?}",inst_count.clone()-2,scope.get_body(build).get(inst_count.clone()-4));
                 if let Some((_,elses)) = scope.get_body(build).get(i+1) {
                     match elses {
                         Instruction::EXPAND_ELSE_SCOPE(elses) => {
-                            nasm_x86_64_handle_scope(f, build, program, TCScopeType::NORMAL(&elses), local_vars.clone(), stack_size)?;
+                            nasm_x86_64_handle_scope(f, build, program, TCScopeType::NORMAL(&elses), local_vars.clone(), stack_size,func_stack_begin,inst_count)?;
                         }
                         _ => {}
                     }
                 }
-                writeln!(f, "   jmp .IF_SCOPE_END_{}",i)?;
-                writeln!(f, "   .IF_SCOPE_{}:",i)?;
-                nasm_x86_64_handle_scope(f, build, program, TCScopeType::NORMAL(&s), local_vars.clone(), stack_size)?;
-                writeln!(f, "   .IF_SCOPE_END_{}:",i)?;
+                let binst = inst_count.clone();
+                writeln!(f, "   jmp .IF_SCOPE_END_{}",binst)?;
+                writeln!(f, "   .IF_SCOPE_{}:",binst)?;
+                *inst_count += 1;
+                nasm_x86_64_handle_scope(f, build, program, TCScopeType::NORMAL(&s), local_vars.clone(), stack_size,func_stack_begin,inst_count)?;
+                *inst_count -= 1;
+                writeln!(f, "   .IF_SCOPE_END_{}:",binst)?;
                 //TODO: Implement actual conditions
             },
+            Instruction::EXPAND_WHILE_SCOPE(s) => {
+                writeln!(f, "   .WHILE_SCOPE_{}:",inst_count)?;
+                let condition = match s.typ {
+                    NormalScopeType::WHILE(ref c) => c,
+                    _ => panic!("Unreachable")
+                };
+                if condition.is_ofp() {
+                    let val = condition.unwrap_val();
+                    match val {
+                        OfP::REGISTER(reg) => {
+                            let reg = reg.to_byte_size(1);
+                            writeln!(f, "   cmp {}, 0",reg.to_string())?;
+                        },
+                        OfP::LOCALVAR(v) => {
+                            let var = local_vars.get(v).unwrap();
+                            com_assert!(loc,var.typ.weak_eq(&VarType::BOOLEAN),"Error: Expected boolean but found {}",var.typ.to_string(false));
+                            if stack_size-var.operand == 0 {
+                                writeln!(f, "   cmp {} [rsp], 0",size_to_nasm_type(var.typ.get_size(program)),)?;
+                            }
+                            else {
+                                writeln!(f, "   cmp {} [rsp+{}], 0",size_to_nasm_type(var.typ.get_size(program)),stack_size-var.operand)?;
+                            }
+                        },
+                        OfP::CONST(val) => {
+                            writeln!(f, "   mov rax, {}",val.get_num_data())?;
+                            writeln!(f, "   cmp rax, 0")?;
+                        },
+                        OfP::RESULT(_, _) => todo!(),
+                    }
+                    writeln!(f, "   jz .WHILE_SCOPE_END_{}",inst_count)?;
+                }
+                else {
+                    let val = condition.unwrap_expr();
+                    com_assert!(loc,val.op.is_boolean(),"Error: Condition MUST be of type boolean but encountered op {}",val.op.to_string());
+                    match val.op {
+                        Op::EQ   => {
+                            let oreg1 = val.left.as_ref().unwrap().LEIRnasm(vec![Register::RAX, Register::RBX, Register::RCX], f, program, build, &local_vars, stack_size, loc)?;
+                            let tmp = Register::RSI.to_byte_size(oreg1[0].size());
+                            writeln!(f, "   mov {}, {}",tmp.to_string(),oreg1[0].to_string())?;
+                            let oreg2 = val.right.as_ref().unwrap().LEIRnasm(vec![Register::RAX, Register::RBX, Register::RCX], f, program, build, &local_vars, stack_size, loc)?;
+                            writeln!(f, "   cmp {}, {}",tmp.to_string(),oreg2[0].to_string())?;
+                            writeln!(f, "   jnz .WHILE_SCOPE_END_{}",inst_count)?;
+                        },
+                        Op::NEQ  => {
+                            let oreg1 = val.left.as_ref().unwrap().LEIRnasm(vec![Register::RAX, Register::RBX, Register::RCX], f, program, build, &local_vars, stack_size, loc)?;
+                            let tmp = Register::RSI.to_byte_size(oreg1[0].size());
+                            writeln!(f, "   mov {}, {}",tmp.to_string(),oreg1[0].to_string())?;
+                            let oreg2 = val.right.as_ref().unwrap().LEIRnasm(vec![Register::RAX, Register::RBX, Register::RCX], f, program, build, &local_vars, stack_size, loc)?;
+                            writeln!(f, "   cmp {}, {}",tmp.to_string(),oreg2[0].to_string())?;
+                            writeln!(f, "   jz .WHILE_SCOPE_END_{}",inst_count)?;
+                        },
+                        Op::GT   => {
+                            let oreg1 = val.left.as_ref().unwrap().LEIRnasm(vec![Register::RAX, Register::RBX, Register::RCX], f, program, build, &local_vars, stack_size, loc)?;
+                            let tmp = Register::RSI.to_byte_size(oreg1[0].size());
+                            writeln!(f, "   mov {}, {}",tmp.to_string(),oreg1[0].to_string())?;
+                            let oreg2 = val.right.as_ref().unwrap().LEIRnasm(vec![Register::RAX, Register::RBX, Register::RCX], f, program, build, &local_vars, stack_size, loc)?;
+                            writeln!(f, "   cmp {}, {}",tmp.to_string(),oreg2[0].to_string())?;
+                            writeln!(f, "   jle .WHILE_SCOPE_END_{}",inst_count)?;
+                        },
+                        Op::GTEQ => {
+                            let oreg1 = val.left.as_ref().unwrap().LEIRnasm(vec![Register::RAX, Register::RBX, Register::RCX], f, program, build, &local_vars, stack_size, loc)?;
+                            let tmp = Register::RSI.to_byte_size(oreg1[0].size());
+                            writeln!(f, "   mov {}, {}",tmp.to_string(),oreg1[0].to_string())?;
+                            let oreg2 = val.right.as_ref().unwrap().LEIRnasm(vec![Register::RAX, Register::RBX, Register::RCX], f, program, build, &local_vars, stack_size, loc)?;
+                            writeln!(f, "   cmp {}, {}",tmp.to_string(),oreg2[0].to_string())?;
+                            writeln!(f, "   jl .WHILE_SCOPE_END_{}",inst_count)?;
+                        },
+                        Op::LT   => {
+                            let oreg1 = val.left.as_ref().unwrap().LEIRnasm(vec![Register::RAX, Register::RBX, Register::RCX], f, program, build, &local_vars, stack_size, loc)?;
+                            let tmp = Register::RSI.to_byte_size(oreg1[0].size());
+                            writeln!(f, "   mov {}, {}",tmp.to_string(),oreg1[0].to_string())?;
+                            let oreg2 = val.right.as_ref().unwrap().LEIRnasm(vec![Register::RAX, Register::RBX, Register::RCX], f, program, build, &local_vars, stack_size, loc)?;
+                            writeln!(f, "   cmp {}, {}",tmp.to_string(),oreg2[0].to_string())?;
+                            writeln!(f, "   jge .WHILE_SCOPE_END_{}",inst_count)?;
+                        },
+                        Op::LTEQ => {
+                            let oreg1 = val.left.as_ref().unwrap().LEIRnasm(vec![Register::RAX, Register::RBX, Register::RCX], f, program, build, &local_vars, stack_size, loc)?;
+                            let tmp = Register::RSI.to_byte_size(oreg1[0].size());
+                            writeln!(f, "   mov {}, {}",tmp.to_string(),oreg1[0].to_string())?;
+                            let oreg2 = val.right.as_ref().unwrap().LEIRnasm(vec![Register::RAX, Register::RBX, Register::RCX], f, program, build, &local_vars, stack_size, loc)?;
+                            writeln!(f, "   cmp {}, {}",tmp.to_string(),oreg2[0].to_string())?;
+                            writeln!(f, "   jg .WHILE_SCOPE_END_{}",inst_count)?;
+                        },
+                        Op::NOT  => todo!(),
+                        _ => panic!("Unreachable")
+                    }
+                }
+                
+                // writeln!(f, "   jmp .WHILE_SCOPE_END_{}",i)?;
+                // writeln!(f, "   .IF_SCOPE_{}:",i)?;
+                let binst = inst_count.clone();
+                nasm_x86_64_handle_scope(f, build, program, TCScopeType::NORMAL(&s), local_vars.clone(), stack_size,func_stack_begin,inst_count)?;
+                writeln!(f, "   jmp .WHILE_SCOPE_{}" ,binst)?;
+                writeln!(f, "   .WHILE_SCOPE_END_{}:",binst)?;
+                
+            }
             Instruction::EXPAND_ELSE_SCOPE(_) => {
                 // com_error!(loc,"Error: this should never happen!"w);
             },
+            
             //TODO: Re-enble these
             _ => todo!("Re-enable these:")
             // Instruction::MORETHAN(ofp1, ofp2) => {
@@ -4258,6 +4480,7 @@ fn nasm_x86_64_handle_scope(f: &mut File, build: &BuildProgram, program: &CmdPro
             //     writeln!(f,"   sete al")?;
             // },
         }
+        *inst_count += 1;
     }
     if !scope.is_func() {
         // let mut varSize: usize = 0;
@@ -4268,7 +4491,17 @@ fn nasm_x86_64_handle_scope(f: &mut File, build: &BuildProgram, program: &CmdPro
         //     writeln!(f, "   add rsp, {}",varSize)?;
         // }
         let dif = stack_size-stack_size_org;
-        writeln!(f, "   add rsp, {}",dif)?;
+        if dif != 0 {
+            writeln!(f, "   add rsp, {}",dif)?;
+        }
+    }
+    else if scope.unwrap_func() != "main" {
+        //println!("Got to here for {}!",scope.unwrap_func());
+        let dif = stack_size-stack_size_org;
+        if dif != 0 {
+            writeln!(f, "   add rsp, {}",dif)?;
+        }
+        writeln!(f, "   ret")?;
     }
     Ok(())
 }
@@ -4358,7 +4591,8 @@ fn to_nasm_x86_64(build: &mut BuildProgram, program: &CmdProgram) -> io::Result<
         else {
             writeln!(&mut f, "{}{}:",program.architecture.func_prefix,function_name)?;
         }
-        nasm_x86_64_handle_scope(&mut f, build, program, TCScopeType::FUNCTION(function_name.clone()),HashMap::new(),0)?;
+        let mut inst_count = 0;
+        nasm_x86_64_handle_scope(&mut f, build, program, TCScopeType::FUNCTION(function_name.clone()),HashMap::new(),0,0,&mut inst_count)?;
         if function_name == "main" {
             let mut argsize: usize = 0;
             for (_,local) in function.locals.iter() {
@@ -4527,9 +4761,10 @@ fn type_check_scope(build: &BuildProgram, program: &CmdProgram, scope: TCScopeTy
             Instruction::SCOPEBEGIN          => {},
             Instruction::SCOPEEND            => {},
             Instruction::INTERRUPT(_)        => {},
-            Instruction::EXPAND_SCOPE(s)      => if type_check_scope(build, program, TCScopeType::NORMAL(&s), currentLocals) { hasFoundRet = true},
-            Instruction::EXPAND_IF_SCOPE(s)   => if type_check_scope(build, program, TCScopeType::NORMAL(&s), currentLocals) { hasFoundRet = true}, //TODO: Typecheck condition
-            Instruction::EXPAND_ELSE_SCOPE(s) => if type_check_scope(build, program, TCScopeType::NORMAL(&s), currentLocals) { hasFoundRet = true},
+            Instruction::EXPAND_SCOPE(s)       => if type_check_scope(build, program, TCScopeType::NORMAL(&s), currentLocals) { hasFoundRet = true},
+            Instruction::EXPAND_IF_SCOPE(s)    => if type_check_scope(build, program, TCScopeType::NORMAL(&s), currentLocals) { hasFoundRet = true}, //TODO: Typecheck condition
+            Instruction::EXPAND_ELSE_SCOPE(s)  => if type_check_scope(build, program, TCScopeType::NORMAL(&s), currentLocals) { hasFoundRet = true},
+            Instruction::EXPAND_WHILE_SCOPE(s) => if type_check_scope(build, program, TCScopeType::NORMAL(&s), currentLocals) { hasFoundRet = true},
             //TODO: add typechecking for this:
             Instruction::MORETHAN(_, _)       => {},
             Instruction::LESSTHAN(_, _)       => {},
@@ -4537,6 +4772,7 @@ fn type_check_scope(build: &BuildProgram, program: &CmdProgram, scope: TCScopeTy
             Instruction::LESSTHANEQUALS(_, _) => {},
             Instruction::NOTEQUALS(_, _)      => {},
             Instruction::EQUALS(_, _)         => {},
+            
             _ => todo!("Unreachable")
         }
     }
@@ -4804,7 +5040,9 @@ fn main() {
     Intrinsics.insert("return".to_string(),IntrinsicType::RET);
     Intrinsics.insert("if".to_string(), IntrinsicType::IF);
     Intrinsics.insert("else".to_string(), IntrinsicType::ELSE);
+    Intrinsics.insert("while".to_string(), IntrinsicType::WHILE);
     Intrinsics.insert("cast".to_string(), IntrinsicType::CAST);
+    
 
     let mut Definitions: HashMap<String,VarType> = HashMap::new();
     Definitions.insert("int".to_string(), VarType::INT);
@@ -4906,11 +5144,12 @@ fn main() {
 - [x] TODO: Add 'result' as a part of OfP for calling the function and getting its result
 - [x] TODO: Add more examples like OpenGL examples, native Windows examples with linking to kernel.dll etc.
 
-- [ ] TODO: Implement while loops
+- [x] TODO: Implement while loops
 
 - [ ] TODO: Update all of readme and add more documentation
 - [ ] TODO: Add more useful examples
 - [ ] TODO: Add some quality of life things such as __FILE__ __LINE__
+- [ ] TODO: Update README.md flags
 - [ ] TODO: Push to master
 
 - [ ] TODO: Make it so that get_body returns None if scope has not been opened yet

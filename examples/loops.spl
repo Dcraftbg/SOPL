@@ -1,0 +1,9 @@
+extern "C" printf(*char, int);
+func main(){
+    let i: int;
+    i = 0;
+    while i < 5 {
+        printf("%d> Hello World!\n"c,i);
+        i+=1;
+    }
+}

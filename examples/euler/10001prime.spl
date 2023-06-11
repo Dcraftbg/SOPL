@@ -1,0 +1,16 @@
+const prime_l = 6;
+extern "C" exit(int);
+extern "C" puts(*char);
+func TODO(msg: *char){
+    puts("TODO:"c);
+    puts(msg);
+    exit(1);
+}
+func main(){
+    TODO("implement this problem cuz im too lazy rn!"c);
+    let i: int;
+    i = 0;
+    while i < prime_l {
+
+    }
+}

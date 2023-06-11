@@ -1,8 +1,10 @@
 **(Latest patch versions in github history and at the top of Change Log)**
 
-Newest Version: [0.12.1A](#0121a)
+Newest Version: [0.12.3A](#0123a)
 # Manual:
-  - [0.12.1A](#0121a)
+  - [0.12.3A](#0123a) 
+    - [0.12.2A](#0122a) 
+    - [0.12.1A](#0121a)
     - [0.12A](#012a)
   - [0.11.12A](#01112a)
     - [0.11.11A](#01111a)
@@ -37,6 +39,14 @@ Newest Version: [0.12.1A](#0121a)
   - [0.2A](#02a)
   - [0.1A](#01a)
 # Change Log
+ ## 0.12.3A
+   - Fixed minor bugs to do with 64 bit division and multiplication
+   - Added examples for euler problems.
+ ## 0.12.2A
+   - Added while loops
+   - Added the ability to have expressions inside while loop conditions
+   - Added the ability to have expressions inside if loop conditions
+   - Added 'euler' folder for future euler problem examples
  ## 0.12.1A 
    - Added 'result' as part of OfP
    - Fixed bugs and minor issues

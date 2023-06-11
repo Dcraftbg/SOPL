@@ -1,0 +1,24 @@
+extern "C" printf(*char, long : long);
+func main(){
+    let valOne: int;
+    let valTwo: int;
+    let sum: int;
+    let i: int;
+    valOne = 1;
+    valTwo = 2;
+    sum = 2;
+    i = 0;
+    while valOne+valTwo < 4000000 {
+        let tmp: int;
+        tmp = valOne;
+        valOne = valTwo;
+        let t: int;
+        t = tmp+valTwo;
+        if t % 2 == 0 {
+            sum += t;
+        }
+        valTwo = t;
+        i += 1;
+    }
+    printf("Sum: %d\n"c,sum);
+}
