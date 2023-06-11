@@ -1,0 +1,9 @@
+extern "C" MessageBoxA(int, *char, *char, ptr);
+dll_import "kernel.dll" ExitProcess(int);
+const MB_OK: long = 0x00000000l;
+const NULL: long = 0;
+const nullptr: ptr = cast<ptr>(NULL);
+func main(){
+    MessageBoxA(MB_OK,"Hello"c,"Hello World!"c, nullptr);
+    ExitProcess(0);
+}

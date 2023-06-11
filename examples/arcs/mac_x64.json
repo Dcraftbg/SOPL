@@ -1,18 +1,18 @@
 {
     "bits": 64,
-    "os": "linux",
+    "os":"mac",
     "options": {
-         "argumentPassing": {
-            "num_ptrs": ["RDI","RSI","RDX","RCX","R8","R9"],
+        "argumentPassing": {
+            "num_ptrs": ["RCX","RDX","R8","R9"],
             "floats": ["XMM0","XMM1","XMM2","XMM3"],
             "returns": ["RAX"],
             "on_overflow_stack": true,
-            "shadow_space": 16
+            "shadow_space": 0
         }
     },
     "obj-extension": "o",
     "flags": {
-        "nasm": ["-f","elf64"]
+        "nasm": ["-f","macho64"]
     },
     "func_prefix": "",
     "cextern_prefix": ""

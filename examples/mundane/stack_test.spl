@@ -1,6 +1,0 @@
-extern "C" printf(ptr, long : int);
-func main() {
-    5l
-    printf("%ld\n"c, top);
-    pop
-}

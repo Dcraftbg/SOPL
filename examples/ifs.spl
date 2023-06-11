@@ -1,11 +1,16 @@
-extern "C" puts(ptr : int)
-func main() { 
-    RBX = 5
-    R8 = 5
-    if RBX R8 == {
-        puts("Hello World!"c)
+extern "C" puts(*char : int);
+extern "C" printf(*char, bool : int);
+func main(){
+    let a: int
+    let b: int
+    let c: bool;
+    a = 5;
+    b = 5;
+    c = a==b;
+    if c {
+        printf("Al: %x\n"c,c);
     }
     else {
-        puts("Goodbye World!"c)
+        puts("Bye!!!"c);
     }
 }

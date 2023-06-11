@@ -7,7 +7,13 @@
             "floats": ["XMM0","XMM1","XMM2","XMM3"],
             "returns": ["RAX"],
             "on_overflow_stack": true,
-            "shadow_space": 40
+            "shadow_space": 32
         }
-    }
+    },
+    "obj-extension": "obj",
+    "flags": {
+        "nasm": ["-f","win64"]
+    },
+    "func_prefix": "",
+    "cextern_prefix": ""
 }

@@ -1,0 +1,20 @@
+extern "C" printf(*char, int : int);
+func main() {
+    let i: int;
+    let sum: int;
+    i = 0;
+    sum = 0;
+    while i < 1000 {
+        //printf("Iter: %d\n"c,i);
+        if i % 3 == 0 {
+            sum += i;
+        }
+        else {
+            if i % 5 == 0 {
+                sum += i;
+            }
+        }
+        i += 1;
+    }
+    printf("Sum: %d\n"c, sum);
+}

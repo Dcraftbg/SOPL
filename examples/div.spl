@@ -3,11 +3,9 @@ extern "C" printf(ptr, long : int);
 func main() {
     let a: long;
     let b: long;
-    RBX = 4
-    RCX = 2
-    RBX RCX /
-    a = RBX
-    b = RCX
+    a = 8;
+    b = 4;
+    a /= b;
     printf("Division: %ld\n"c, a)
     printf("Mod: %ld\n"c, b)
 

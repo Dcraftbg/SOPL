@@ -1,0 +1,9 @@
+const a: ptr = "Hello World!"c;
+//const a = 5; // <- this is gonna cause in issue
+//const a = "Hello!"c; //<- // this isn't gonna cause an issue
+const NULL: long = 0;
+const nullptr: ptr = cast<ptr>(NULL);
+extern "C" puts(ptr : long);
+func main(){
+    puts(a);
+}

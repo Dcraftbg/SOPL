@@ -1,0 +1,11 @@
+extern "C" puts(ptr : int);
+func main(){
+    let a: *char;
+    a = "Hello World!"c;
+    {
+        let b: *char;
+        b = a;
+        puts(a);
+        puts(b);
+    }
+}

@@ -1,8 +1,7 @@
-include "../src/C/stdio.spl"
+include "../../src/C/stdio.spl"
 func main(){
 	let f: ptr;
-	fopen("examples/hello.txt"c, "w")
-	f = RAX
+	f = fopen("examples/int/hello.txt"c, "w"c);
 	fwrite("Hello"c,5,1,f)
 	fclose(f)
 }

@@ -1,8 +1,24 @@
-**(Latest patch versions in github history)**
+**(Latest patch versions in github history and at the top of Change Log)**
 
-Newest Version: [0.11.1A](#0111a)
+Newest Version: [0.12.3A](#0123a)
 # Manual:
-  - [0.11A](#011a)
+  - [0.12.3A](#0123a) 
+    - [0.12.2A](#0122a) 
+    - [0.12.1A](#0121a)
+    - [0.12A](#012a)
+  - [0.11.12A](#01112a)
+    - [0.11.11A](#01111a)
+    - [0.11.10A](#01110a)
+    - [0.11.9A](#0119a)
+    - [0.11.8A](#0118a)
+    - [0.11.7A](#0117a)
+    - [0.11.6A](#0116a)
+    - [0.11.5A](#0115a)
+    - [0.11.4A](#0114a)
+    - [0.11.3A](#0113a)
+    - [0.11.2A](#0112a)
+    - [0.11.1A](#0111a)
+    - [0.11A](#011a)
   - [0.10.1A](#0101a)
     - [0.10A](#010a)
   - [0.9.2A](#092a)
@@ -23,6 +39,79 @@ Newest Version: [0.11.1A](#0111a)
   - [0.2A](#02a)
   - [0.1A](#01a)
 # Change Log
+ ## 0.12.3A
+   - Fixed minor bugs to do with 64 bit division and multiplication
+   - Added examples for euler problems.
+ ## 0.12.2A
+   - Added while loops
+   - Added the ability to have expressions inside while loop conditions
+   - Added the ability to have expressions inside if loop conditions
+   - Added 'euler' folder for future euler problem examples
+ ## 0.12.1A 
+   - Added 'result' as part of OfP
+   - Fixed bugs and minor issues
+   - Updated examples to now include 'result' instead of = RAX
+   - Made 'return' actually return a value from a function now (you are forced to return if you specify return value!)
+   - Removed return stack - it was never really something that was planned to stick around, but was more like a temporary patch for returning back when we were migrating over to C x86 standards
+   - More examples comming soon :D
+
+ ## 0.12A 
+   - Added +=, -=, *=, /= as SETOperations
+   - Added evaluation (updated examples)
+   - Added expressions
+   - Added expression evaluation
+   - Fixed ifs and added condition (conditions still don't get typechecked nor can they be evaluated with expressions (yet) - only with ofps: constants,local variables and registers)
+   
+ ## 0.11.12A
+   - Moved +, -, *, / to a new Token type 'Operand'
+ ## 0.11.11A
+   - Added TEMPORARY if statements
+   - Added else statements
+ ## 0.11.10A
+   - Added boolean operations
+   - Fixed testing
+ ## 0.11.9A
+   - Added local variables to scopes
+   - Implemented the rest of the float32 registers
+   - Added ability to assign strings (only cstrings currently), to variables
+   - Also fixed bug related to ^ where strings wouldn't be counted as 'used' if assigned to variable
+ ## 0.11.8A
+   - Fixed architecture examples
+   - Added obj-extension for architectures
+   - Added flags for architectures
+   - Added DLL importing (currently only works as extern)
+   - Added DLL exporting (currently only works as global)
+   - Removed auto-exporting of functions (you need to do dll_export to make them global now)
+ ## 0.11.7A
+   - Fixed a few bugs to do with string UUID overloading
+   - Added pointers with types (*char, **int, etc.)
+   - Added macros for type checking
+
+ ## 0.11.6A
+   - Changed local variables to now be on the stack
+   - Merged parameters and local variables
+   - Made big changes in terms of how things are handled
+   - Preparing for the introduction of if else elif scopes
+   - Removed OfP::PARAM and replaced it with Localvariable
+ ## 0.11.5A
+   - Changed flags to be less frustrating and more flexible (checkout [README](README.md#flags-and-versions))
+   - Soft disabled return stack (for the upcomming revamp of returning)
+   - removed -noRaxWarn
+   - Added build to usage (It was added before but I forgot to add it to usage, sorry :|)
+ ## 0.11.4A 
+   - Slowly transitioning towards the new modern syntax
+   - Added a few windows 'headers'
+   - Added types for constant definitions
+   - Added constant overwritting
+   - Made constant overwritting be allowed only if they are the same type (its pretty unreasonable to overwrite something with a different type unless its local which is still yet to be implemented)
+   - Removed a lot of 'comment out' comments
+   - Moved a lot of the TODO comments at the end of the file for easier tracking
+ ## 0.11.3A
+   - After a lot of consideration I have decided to remove the stack oriented out of sopl
+ ## 0.11.2A
+   - Changed a lot of the main source code for easier use
+   - Added testing 
+   - Fixed examples
  ## 0.11.1A 
    - Fixed function parameters (still not done with returning)
    - Added typechecking for externals and functions

@@ -1,0 +1,31 @@
+extern "C" printf(*char, long : int);
+extern "C" puts(*char);
+func primeFactMax(num: long : long){
+    let i: long;
+    i = 2l;
+    //puts("Here!"c);
+    //printf("Number: %lld\n"c,num);
+    //printf("I: %lld\n"c,i);
+    while num%i != 0l {
+        i += 1l;
+    }
+    //printf("Final i: %lld\n"c,i);
+    while num%i == 0l {
+        //printf("Num: %lld\n"c,num);
+        if i == num {
+            return i;
+        }
+        num = num/i;
+        while num%i != 0l {
+            i += 1l;
+        }
+    }
+    return i;
+}
+func main(){
+    let result: long;
+    puts("Began"c);
+    //600851475143l is way too huge and gets absolutely destroyed
+    result = primeFactMax(600851475143l);
+    printf("Result: %lld\n"c,result);
+}

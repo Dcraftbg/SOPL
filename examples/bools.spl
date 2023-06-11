@@ -1,0 +1,12 @@
+extern "C" printf(*char , int , int, bool : int);
+func main(){
+    let a: bool;
+    let b: int;
+    let c: int;
+    b = 5;
+    c = 4;
+    a = b == c;
+    printf("b=%d, c=%d b==c: %x\n"c,b,c,a);
+    a = b >= c;
+    printf("b=%d, c=%d b>=c: %x\n"c,b,c,a);
+}

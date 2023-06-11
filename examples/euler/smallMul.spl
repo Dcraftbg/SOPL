@@ -1,0 +1,25 @@
+extern "C" printf(*char, int);
+extern "C" exit(int);
+func main(){
+    //its really stupid but it works :D
+    let num: int;
+    num = 1;
+    while 1 {
+        let i: int;
+        let c: bool;
+        i = 0;
+        c = 1;
+        while i <= 20 {
+            i += 1;
+            if num%i != 0 {
+                i = 21;
+                num+=1;
+                c = 0;
+            }
+        }
+        if c {
+            printf("Found it: %d\n"c,num);
+            exit(0)
+        }
+    }
+}

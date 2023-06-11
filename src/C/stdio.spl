@@ -1,4 +1,6 @@
 //TODO: introduce typing notations for all of these externals
+
+//TODO: Implement variadic arguments
 extern "C" printf;
 extern "C" scanf;
 extern "C" fprintf;
@@ -17,25 +19,25 @@ extern "C" tmpnam;
 extern "C" tmpfile;
 extern "C" rename;
 extern "C" remove;
-extern "C" fopen;
-extern "C" fclose;
+extern "C" fopen(ptr);
+extern "C" fclose(ptr);
 extern "C" fflush;
 extern "C" setbuf;
 extern "C" setvbuf;
 extern "C" freopen;
-extern "C" fgetc;
-extern "C" fputc;
-extern "C" fgets;
-extern "C" fputs;
+extern "C" fgetc(ptr : int);
+extern "C" fputc(int, ptr : int);
+extern "C" fgets(*char, int, ptr : *char);
+extern "C" fputs(*char, ptr);
 extern "C" getc;
 extern "C" gets;
-extern "C" getchar;
-extern "C" putchar;
+extern "C" getchar(: int);
+extern "C" putchar(int : int);
 extern "C" putc(char, ptr: int);
-extern "C" puts(ptr : int);
+extern "C" puts(*char : int);
 extern "C" ungetc;
 extern "C" fread;
-extern "C" fwrite;
+extern "C" fwrite(ptr, long, long, ptr);
 extern "C" rewind;
 extern "C" fgetpos;
 extern "C" fseek;
@@ -46,13 +48,40 @@ extern "C" feof;
 extern "C" perror;
 extern "C" clearerr;
 
-const EOF = -1;
+
 const SEEK_CUR = 1;
 const SEEK_END = 2;
 const SEEK_SET = 0;
-const stdin  = 0;
-const stdout = 1;
-const stderr = 2;
+
+const STDIN_FILENO = 0;
+const STDOUT_FILENO = 1;
+const STDERR_FILENO = 2;
+const FILENAME_MAX = 260;
+const FOPEN_MAX = 20;
+const _SYS_OPEN = 20;
+const TMP_MAX = 32767;
+const NULL = 0;
+const nullptr = cast<ptr>(NULL);
+const EOF = -1;
+extern "C" __acrt_iob_func(int : ptr);
+//TODO:
+//macro stdin  __acrt_iob_func(STDIN_FILENO) end
+//macro stdout __acrt_iob_func(STDOUT_FILENO) end
+//macro stderr __acrt_iob_func(STDERR_FILENO) end
+
+// const _IOFBF = 0x0000;
+// const _IOLBF = 0x0040;
+// const _IONBF = 0x0004;
+
+
+
+// const EOF = -1;
+// const SEEK_CUR = 1;
+// const SEEK_END = 2;
+// const SEEK_SET = 0;
+// const stdin  = 0;
+// const stdout = 1;
+// const stderr = 2;
 
 // Make sure to add an issue with information on what constants you think should be added and proof of them existing in stdio.h
 // TODO: Implement cif conditions to add Platform specific things. 

@@ -1,8 +1,11 @@
 //TODO: fix tests with printf, since printf no longer works
 
-extern "C" printf(ptr, int : int);
+extern "C" printf(*char, int : int);
 func main(argc: int,argv: ptr) {
-    argc push
-    printf("Amount of arguments: %d\n"c, top);
-    EAX pop
+    // RAX = argc1
+    // RAX 1 +
+    // RAX 8 *
+    // argc1 = RAX
+    // argc1 = (argc + 1) * 8
+    printf("Amount of arguments: %d\n"c, argc);
 }

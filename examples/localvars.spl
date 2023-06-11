@@ -2,13 +2,13 @@ extern "C" printf(ptr, long : int);
 
 func hello() {
     let z: long
-    z = 5l
+    z = 5l;
 }
 func main() {
-    let x: long
     let y: long
-    x = 4l
-    y = 4l
-    x y +
-    printf("Hi %ld"c, x);
+    let x: long
+    x = 5l;
+    y = 4l;
+    x += y;
+    printf("Hi %ld\n"c, x);
 }

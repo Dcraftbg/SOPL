@@ -1,18 +1,23 @@
-extern "C" printf;
-extern "C" exit;
-func getVersons( : long, long) {
-    RCX = 5
-    RBX = 4
-    rs RCX push
-    rs RBX push
-}
-func add(a: long, b: long : long) {
-    a push
-    "A:   %ld\n"c printf EAX pop
-    b push
-    "B:   %ld\n"c printf EAX pop
-    RCX pop
-    RBX pop
-    RBX RCX +
-    rs RBX push
-}
+extern "C" printf(*char, long : int);
+// //extern "C" exit(int);
+// func getVersons( : long, long) {
+//     RCX = 5
+//     RBX = 4
+//     rs RCX push
+//     rs RBX push
+// }
+// func add(a: long, b: long) {
+//     a push
+//     printf("A:   %ld\n"c, top);
+//     b push
+//     printf("B:   %ld\n"c, top);
+
+//     // a push
+//     // "A:   %ld\n"c printf EAX pop
+//     // b push
+//     // "B:   %ld\n"c printf EAX pop
+//     RAX pop
+//     RBX pop
+//     RAX RBX +
+//     //rs RAX push
+// }

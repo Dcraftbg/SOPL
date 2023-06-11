@@ -5,10 +5,12 @@
 #![allow(unused_imports)]
 #![allow(unreachable_patterns)]
 
-use core::num;
-use std::{env, process::{exit, Command, Stdio}, path::{Path, PathBuf}, ffi::OsStr, str::{FromStr, Chars}, collections::{HashMap, HashSet}, hash::Hash, fs::{File, self}, io::{Read, Write, self}, fmt::format, borrow::{BorrowMut, Borrow}, clone, time::{SystemTime, Instant}, rc::Rc, iter::Peekable, cell::{RefCell, Ref, RefMut}, ops::{Deref, DerefMut}, vec, sync::Arc, os, f32::consts::E};
+use core::{num, panic};
+use std::{env, process::{exit, Command, Stdio}, path::{Path, PathBuf}, ffi::OsStr, str::{FromStr, Chars}, collections::{HashMap, HashSet}, hash::Hash, fs::{File, self}, io::{Read, Write, self}, fmt::format, borrow::{BorrowMut, Borrow}, clone, time::{SystemTime, Instant}, rc::Rc, iter::Peekable, cell::{RefCell, Ref, RefMut}, ops::{Deref, DerefMut}, vec, sync::Arc, os, f32::consts::E, any::Any};
+use linked_hash_map::LinkedHashMap;
 use serde_json::Value;
 use uuid::Uuid; 
+mod cfor;
 
 
 
@@ -76,14 +78,6 @@ macro_rules! par_error {
         exit(1);
     });
 }
-macro_rules! lpar_error {
-    ($location:expr, $($arg:tt)*) => ({
-        let message = format!($($arg)*);
-        eprintln!("(P) [ERROR] {}: {}", $location.loc_display(), message);
-        exit(1);
-    });
-}
-
 macro_rules! par_assert {
     ($token:expr, $condition:expr, $($arg:tt)*) => ({
         if !$condition {
@@ -93,28 +87,11 @@ macro_rules! par_assert {
         }
     });
 }
-macro_rules! lpar_assert {
-    ($location:expr, $condition:expr, $($arg:tt)*) => ({
-        if !$condition {
-            let message = format!($($arg)*);
-            eprintln!("(P) [ERROR] {}: {}", $location.loc_display(), message);
-            exit(1);
-        }
-    });
-}
 macro_rules! par_expect {
     ($location:expr, $expector:expr, $($arg:tt)*) => ({
-
+        
         let message = format!($($arg)*);
         let message = format!("(P) [ERROR] {}: {}", $location.loc_display(), message);
-        $expector.expect(&message)
-    });
-}
-macro_rules! com_expect {
-    ($location:expr, $expector:expr, $($arg:tt)*) => ({
-
-        let message = format!($($arg)*);
-        let message = format!("(C) [ERROR] {}: {}", $location.loc_display(), message);
         $expector.expect(&message)
     });
 }
@@ -131,6 +108,14 @@ macro_rules! par_warn {
     });
 }
 
+macro_rules! com_expect {
+    ($location:expr, $expector:expr, $($arg:tt)*) => ({
+
+        let message = format!($($arg)*);
+        let message = format!("(C) [ERROR] {}: {}", $location.loc_display(), message);
+        $expector.expect(&message)
+    });
+}
 macro_rules! com_error {
     ($location:expr, $($arg:tt)*) => ({
         let message = format!($($arg)*);
@@ -160,6 +145,42 @@ macro_rules! com_assert {
     });
 }
 
+macro_rules! typ_error {
+    ($token:expr, $($arg:tt)*) => ({
+        let message = format!($($arg)*);
+        eprintln!("(T) [ERROR] {}: {}", $token.loc_display(), message);
+        exit(1);
+    });
+}
+macro_rules! typ_assert {
+    ($token:expr, $condition:expr, $($arg:tt)*) => ({
+        if !$condition {
+            let message = format!($($arg)*);
+            eprintln!("(T) [ERROR] {}: {}", $token.loc_display(), message);
+            exit(1);
+        }
+    });
+}
+macro_rules! typ_expect {
+    ($location:expr, $expector:expr, $($arg:tt)*) => ({
+        
+        let message = format!($($arg)*);
+        let message = format!("(T) [ERROR] {}: {}", $location.loc_display(), message);
+        $expector.expect(&message)
+    });
+}
+macro_rules! typ_info {
+    ($token:expr, $($arg:tt)*) => ({
+        let message = format!($($arg)*);
+        println!("(T) [INFO] {}: {}", $token.loc_display(), message);
+    });
+}
+macro_rules! typ_warn {
+    ($token:expr, $($arg:tt)*) => ({
+        let message = format!($($arg)*);
+        println!("(T) [WARN] {}: {}", $token.loc_display(), message);
+    });
+}
 
 fn is_symbolic(c: char) -> bool {
     c.is_alphabetic() || c.is_alphanumeric() || c == '_' || c=='-'
@@ -240,25 +261,36 @@ impl ArcOps {
     
 }
 #[derive(Debug,Clone)]
+struct ArcFlags {
+    nasm: Vec<String>
+}
+impl ArcFlags {
+    fn new() -> Self {
+        Self { nasm: Vec::new() }
+    }
+}
+#[derive(Debug,Clone)]
 struct Architecture {
     bits: u32,
     platform: String,
     options: ArcOps,
     func_prefix: String,
     cextern_prefix: String,
+    obj_extension: String,
+    flags: ArcFlags
 }
 impl Architecture {
     fn new() -> Self {
-        Self { bits: 32, platform: String::new(),options: ArcOps::new(), func_prefix: String::new(), cextern_prefix: String::new() }
+        Self { bits: 32, platform: String::new(),options: ArcOps::new(), func_prefix: String::new(), cextern_prefix: String::new(), obj_extension: "o".to_owned(), flags: ArcFlags::new() }
     }
 }
 #[derive(Debug, Clone)]
 struct CmdProgram {
     path: String,
     opath: String,
-    typ: String,
+    target: String,
     should_build: bool,
-    warn_rax_usage: bool,
+    should_run: bool,
     use_type_checking: bool,
     print_unused_warns  : bool,
     // Sub sets
@@ -269,13 +301,11 @@ struct CmdProgram {
 
     remove_unused_functions: bool,
     in_mode: OptimizationMode,
-    //build_architecture: String,
     architecture: Architecture,
-    call_stack_size: usize,
 }
 impl CmdProgram {
     fn new() -> Self {
-        Self { path: String::new(), opath: String::new(), should_build: false, typ: String::new(), warn_rax_usage: true, call_stack_size: 64000, in_mode: OptimizationMode::DEBUG, use_type_checking: true, print_unused_warns: true,  remove_unused_functions: false, print_unused_funcs: true, print_unused_externs: true, print_unused_strings: true, architecture: Architecture::new() }
+        Self { path: String::new(), opath: String::new(), should_build: false, should_run: false, target: "nasm_x86_64".to_string(), in_mode: OptimizationMode::DEBUG, use_type_checking: true, print_unused_warns: false,  remove_unused_functions: false, print_unused_funcs: false, print_unused_externs: false, print_unused_strings: false, architecture: Architecture::new() }
     }
 }
 #[repr(u32)]
@@ -283,8 +313,9 @@ impl CmdProgram {
 
 enum IntrinsicType {
     Extern = 0,
+    DLL_IMPORT,
+    DLL_EXPORT,
     Func,
-    RS,
     Let,
     CONSTANT,
     OPENPAREN,
@@ -295,29 +326,45 @@ enum IntrinsicType {
     OPENCURLY,
     CLOSECURLY,
     INTERRUPT,
-    // REGISTER OPERATIONS
-    POP,
-    PUSH,
-    SET,
 
     // REGISTER MATH
-    ADD,
-    SUB,
-    MUL,
-    DIV,
-    // BOOLEAN OPERATIONS
-    EQ,
+    // ADD,
+    // SUB,
+    // MUL,
+    // DIV,
     RET,
     INCLUDE,
     IF,
     ELSE,
+    WHILE,
     
     TOP,
+    CAST,
+    // BOOLEAN OPERATIONS
+    // EQUALS,
+    // MORETHAN,
+    // LESSTHAN,
+    // MORETHANEQ,
+    // LESSTHANEQ,
+    // NOTEQUALS,
 }
 #[derive(Debug,Clone,PartialEq)]
 enum PtrTyp {
     VOID,
     TYP(Box<VarType>),
+}
+impl PtrTyp {
+    fn size(&self, program: &CmdProgram) -> usize {
+        match self {
+            Self::VOID => (program.architecture.bits / 8) as usize,
+            Self::TYP(typ) => typ.get_size(program)
+        }
+    }
+}
+#[derive(Clone, Debug, PartialEq)]
+struct Ptr {
+    typ: PtrTyp,
+    inner_ref: usize,
 }
 impl PtrTyp {
     fn to_string(&self) -> String {
@@ -330,13 +377,6 @@ impl PtrTyp {
     }
 }
 
-enum FuncParam {
-    TOP,
-    LOCAL(String),
-    REGISTER(Register),
-    CONSTVAL(), 
-
-}
 impl IntrinsicType {
     fn to_string(&self,isplural: bool) -> String{
         match self {
@@ -364,36 +404,17 @@ impl IntrinsicType {
             IntrinsicType::CLOSECURLY => {
                 if isplural {"Close Curly".to_string()} else {"Close Curly".to_string()}
             }
-            IntrinsicType::POP => {
-                if isplural {"Pop".to_string()} else {"Pop".to_string()}
-            }
-            IntrinsicType::PUSH => {
-                if isplural {"Push".to_string()} else {"Push".to_string()}
-            }
-            IntrinsicType::SET => {
-                if isplural {"Move registers".to_string()} else {"Move register".to_string()}
-            }
-            IntrinsicType::ADD => {
-                if isplural {"Add".to_string()} else {"Add".to_string()}
-            },
-            IntrinsicType::SUB => {
-                if isplural {"Sub".to_string()} else {"Sub".to_string()}
-            }
-            IntrinsicType::MUL => {
-                if isplural {"Mul".to_string()} else {"Mul".to_string()}
-            }
+           
             IntrinsicType::RET => {
                 if isplural {"Ret".to_string()} else {"Ret".to_string()}
             },
             IntrinsicType::INCLUDE => {
                 if isplural {"Includes".to_string()} else {"Include".to_string()}
-            }
+            },
             IntrinsicType::IF => {
                 if isplural {"Ifs".to_string()} else {"If".to_string()}
-            }
-            IntrinsicType::EQ => {
-                if isplural {"Equals".to_string()} else {"Equal".to_string()}
             },
+            
             IntrinsicType::CONSTANT => {
                 if isplural {"Constants".to_string()} else {"Constant".to_string()}
             },
@@ -403,25 +424,563 @@ impl IntrinsicType {
             IntrinsicType::ELSE => {
                 if isplural {"Else".to_string()} else {"Else".to_string()}
             },
-            IntrinsicType::DIV => {
-                if isplural {"Div".to_string()} else {"Div".to_string()}
-            },
             IntrinsicType::Let => {
                 if isplural {"Let".to_string()} else {"Let".to_string()}
             },
             IntrinsicType::INTERRUPT => {
                 if isplural {"Interrupts".to_string()} else {"Interrupt".to_string()}
             },
-            IntrinsicType::RS => {
-                if isplural {"Return Stacks".to_string()} else {"Return Stack".to_string()}
-            },
             IntrinsicType::TOP => {
-                if isplural {"Tops".to_string()} else {"top".to_string()}
+                if isplural {"Tops".to_string()} else {"Top".to_string()}
+            },
+            IntrinsicType::CAST => {
+                if isplural {"Casts".to_string()} else {"Cast".to_string()}
+            },
+            IntrinsicType::DLL_IMPORT => {
+                if isplural {"Dll Imports".to_string()} else {"Dll Import".to_string().to_string()}
+            },
+            IntrinsicType::DLL_EXPORT => {
+                if isplural {"Dll Exports".to_string()} else {"Dll Export".to_string().to_string()}
+            },
+            IntrinsicType::WHILE => {
+                if isplural {"While".to_string()} else {"While".to_string().to_string()}
             },
         }
     }
 }
-// TODO: implement booleans
+#[derive(Debug,PartialEq,Clone)]
+#[repr(u8)]
+enum SetOp {
+    SET,
+    PLUSSET,
+    MINUSSET,
+    MULSET,
+    DIVSET,
+}
+impl SetOp {
+    fn from_str(s: &str) -> Option<Self> {
+        match s {
+            "="  => Some(Self::SET),
+            "+=" => Some(Self::PLUSSET),
+            "+=" => Some(Self::MINUSSET),
+            "*=" => Some(Self::MULSET),
+            "/=" => Some(Self::DIVSET),
+            _ => None
+        }
+    }
+    fn to_string(&self) -> &str {
+        match self {
+            Self::SET    => "=",
+            Self::PLUSSET => "+=",
+            Self::MINUSSET => "+=",
+            Self::MULSET => "*=",
+            Self::DIVSET => "/="
+        }
+    }
+}
+#[derive(Debug,PartialEq,Clone)]
+#[repr(u8)]
+enum Op {
+    NONE = 0,
+    PLUS,
+    MINUS,
+    DIV,
+    MUL,
+    REMAINDER,
+    EQ,
+    NEQ,
+    GT,
+    GTEQ,
+    LT,
+    LTEQ,
+    NOT,
+}
+impl Op {
+    fn from_str(s: &str) -> Option<Self> {
+        match s {
+            "+" => Some(Op::PLUS),
+            "-" => Some(Op::MINUS),
+            "/" => Some(Op::DIV),
+            "%" => Some(Op::REMAINDER),
+            "*" => Some(Op::MUL),
+            "=="=> Some(Op::EQ),
+            "!="=> Some(Op::NEQ),
+            ">" => Some(Op::GT),
+            ">="=> Some(Op::GTEQ),
+            "<" => Some(Op::LT),
+            "<="=> Some(Op::LTEQ),
+            "!" => Some(Op::NOT),
+            _ => None
+        }
+    }
+    fn to_string(&self) -> &str {
+        match self {
+            Op::NONE  => "None",
+            Op::PLUS  => "+" ,
+            Op::MINUS => "-" ,
+            Op::DIV   => "/" ,
+            Op::MUL   => "*" ,
+            Op::EQ    => "==",
+            Op::NEQ   => "!=",
+            Op::GT    => ">" ,
+            Op::GTEQ  => ">=",
+            Op::LT    => "<" ,
+            Op::LTEQ  => "<=",
+            Op::NOT   => "!" ,
+            Op::REMAINDER => "%",
+        }
+    }
+    fn get_priority(&self) -> usize {
+        match self {
+            Self::NOT =>  0,
+            Self::EQ   | Self::NEQ | Self::GT | Self::LT | Self::GTEQ | Self::LTEQ => 1,
+            Self::PLUS | Self::MINUS                                               => 2,
+            Self::MUL  | Self::DIV | Self::REMAINDER                               => 3,
+            Self::NONE  => panic!("This should not occur"),
+        }
+    }
+    fn is_boolean(&self) -> bool {
+        match self {
+            Self::EQ   | Self::NEQ | Self::GT | Self::LT | Self::GTEQ | Self::LTEQ => true,
+            _ => false
+        }
+    }
+}
+#[derive(Debug)]
+enum Expression {
+    val(OfP),
+    expr(Box<ExprTree>)
+}
+impl Expression {
+    fn unwrap_val(&self) -> &OfP {
+        if let Expression::val(v) = self {
+            v
+        }
+        else {
+            panic!("ERROR: Cannot unwrap on non val type!");
+        }
+    }
+    fn unwrap_expr(&self) -> &Box<ExprTree> {
+        if let Expression::expr(v) = self {
+            v
+        }
+        else {
+            panic!("ERROR: Cannot unwrap on non expr type!");
+        }
+    }
+    fn is_expr(&self) -> bool {
+        match self {
+            Self::expr(_) => true,
+            _ => false
+        }
+    }
+    fn is_ofp(&self) -> bool {
+        match self {
+            Self::val(_) => true,
+            _ => false
+        }
+    }
+    fn result_of(&self,program: &CmdProgram,build: &BuildProgram,local_vars: &HashMap<String, LocalVariable>) -> Option<VarType> {
+        todo!()
+        // match self {
+        //     Self::val(v) => {
+        //         v.var_type(program, build, local_vars)?
+        //     }
+        // }
+    }
+}
+impl Expression {
+    fn LEIRnasm(&self,regs: Vec<Register>,f: &mut File, program: &CmdProgram,build: &BuildProgram,local_vars: &HashMap<String, LocalVariable>,stack_size: usize,loc: &ProgramLocation) -> std::io::Result<Vec<Register>>{
+        match self {
+            Expression::val(v) => {
+               v.LOIRGNasm(regs, f, program, build, local_vars, stack_size, loc)
+            },
+            Expression::expr(e) => {
+                //todo!("ERROR: this should stop here");
+                e.eval_nasm(regs,f,program,build,local_vars,stack_size,loc)
+            },
+        }
+    }
+}
+#[derive(Debug)]
+struct ExprTree {
+    left:  Option<Expression>,
+    right: Option<Expression>,
+    op: Op
+}
+impl ExprTree {
+    fn eval_nasm(&self,regs: Vec<Register>,f: &mut File,program: &CmdProgram,build: &BuildProgram,local_vars: &HashMap<String, LocalVariable>,stack_size: usize,loc: &ProgramLocation) -> std::io::Result<Vec<Register>>{
+        #[allow(unused_assignments)]
+        let mut o: Vec<Register> = Vec::new();
+        match self.op {
+            Op::NONE  => com_error!(loc,"Error: Cannot evaluate NONE operation!"),
+            Op::PLUS  => {
+                let left = com_expect!(loc,self.left.as_ref(),"Error: Cannot evaluate Op '{}' without left parameter",Op::PLUS .to_string());
+                if left.is_ofp() {
+                    com_assert!(loc,regs.len() > 1, "TODO: Handle multi-parameter loading for expressions!");
+                    let right       = com_expect!(loc,self.right.as_ref(),"Error: Cannot evaluate Op '{}' without left parameter",Op::PLUS .to_string());
+                    let rightregs1= right.LEIRnasm(regs.to_vec(), f, program, build, local_vars, stack_size, loc)?;
+                    let leftregs1 = left.LEIRnasm(regs[1..].to_vec(), f, program, build, local_vars, stack_size, loc)?;
+                    com_assert!(loc,rightregs1.len() == 1, "TODO: Handle multi-parameter loading for expressions!");
+                    writeln!(f, "   add {}, {}",leftregs1[0].to_string(),rightregs1[0].to_string())?;
+                    o = leftregs1;
+                }
+                else {
+                    let leftregs1 = left.LEIRnasm(regs.to_vec(), f, program, build, local_vars, stack_size, loc)?;
+                    com_assert!(loc,regs.len() > 1, "TODO: Handle multi-parameter loading for expressions!");
+                    let right       = com_expect!(loc,self.right.as_ref(),"Error: Cannot evaluate Op '{}' without left parameter",Op::PLUS.to_string());
+                    let rightregs1= right.LEIRnasm(regs[1..].to_vec(), f, program, build, local_vars, stack_size, loc)?;
+                    com_assert!(loc,rightregs1.len() == 1, "TODO: Handle multi-parameter loading for expressions!");
+                    writeln!(f, "   add {}, {}",leftregs1[0].to_string(),rightregs1[0].to_string())?;
+                    o = leftregs1;
+                }
+            },
+            Op::MINUS => {
+                let left = com_expect!(loc,self.left.as_ref(),"Error: Cannot evaluate Op '{}' without left parameter",Op::PLUS .to_string());
+                if left.is_ofp() {
+                    com_assert!(loc,regs.len() > 1, "TODO: Handle multi-parameter loading for expressions!");
+                    let right       = com_expect!(loc,self.right.as_ref(),"Error: Cannot evaluate Op '{}' without left parameter",Op::PLUS .to_string());
+                    let rightregs1= right.LEIRnasm(regs.to_vec(), f, program, build, local_vars, stack_size, loc)?;
+                    let leftregs1 = left.LEIRnasm(regs[1..].to_vec(), f, program, build, local_vars, stack_size, loc)?;
+                    com_assert!(loc,rightregs1.len() == 1, "TODO: Handle multi-parameter loading for expressions!");
+                    writeln!(f, "   sub {}, {}",leftregs1[0].to_string(),rightregs1[0].to_string())?;
+                    o = leftregs1;
+                }
+                else {
+                    let leftregs1 = left.LEIRnasm(regs.to_vec(), f, program, build, local_vars, stack_size, loc)?;
+                    com_assert!(loc,regs.len() > 1, "TODO: Handle multi-parameter loading for expressions!");
+                    let right       = com_expect!(loc,self.right.as_ref(),"Error: Cannot evaluate Op '{}' without left parameter",Op::PLUS.to_string());
+                    let rightregs1= right.LEIRnasm(regs[1..].to_vec(), f, program, build, local_vars, stack_size, loc)?;
+                    com_assert!(loc,rightregs1.len() == 1, "TODO: Handle multi-parameter loading for expressions!");
+                    writeln!(f, "   sub {}, {}",leftregs1[0].to_string(),rightregs1[0].to_string())?;
+                    o = leftregs1;
+                }
+
+            },
+            Op::DIV   => {
+                com_assert!(loc,regs[0].to_byte_size(8) == Register::RAX,"Error: Cannot do division with output register different from RAX");
+                let left = com_expect!(loc,self.left.as_ref(),"Error: Cannot evaluate Op '{}' without left parameter",Op::DIV  .to_string());
+                if left.is_ofp() {
+                    let leftregs1 = left.LEIRnasm(regs.clone(), f, program, build, local_vars, stack_size, loc)?;
+                    com_assert!(loc,leftregs1.len() == 1, "TODO: Handle multi-parameter loading for expressions!");
+                    let right = com_expect!(loc,self.right.as_ref(),"Error: Cannot evaluate Op '{}' without left parameter",Op::DIV  .to_string());
+                    let rightregs1 = right.LEIRnasm(regs[1..].to_vec(), f, program, build, local_vars, stack_size, loc)?;
+                    com_assert!(loc,rightregs1.len() == 1, "TODO: Handle multi-parameter loading for expressions!");
+                    //writeln!(f, "   xor rdx, rdx")?;
+                    writeln!(f, "   cqo")?;
+                    writeln!(f, "   idiv {}",rightregs1[0].to_string())?;
+                    o = leftregs1;
+                }
+                else {
+                    let right = com_expect!(loc,self.right.as_ref(),"Error: Cannot evaluate Op '{}' without left parameter",Op::DIV  .to_string());
+                    let rightregs1 = right.LEIRnasm(regs.to_vec(), f, program, build, local_vars, stack_size, loc)?;
+                    let leftregs1 = left.LEIRnasm(regs[1..].to_vec(), f, program, build, local_vars, stack_size, loc)?;
+                    com_assert!(loc,leftregs1.len() == 1, "TODO: Handle multi-parameter loading for expressions!");
+                    com_assert!(loc,rightregs1.len() == 1, "TODO: Handle multi-parameter loading for expressions!");
+                    //writeln!(f, "   xor rdx, rdx")?;
+                    writeln!(f, "   cqo")?;
+                    writeln!(f, "   idiv {}",rightregs1[0].to_string())?;
+                    o = leftregs1;
+                }
+            },
+            Op::REMAINDER => {
+                com_assert!(loc,regs[0].to_byte_size(8) == Register::RAX,"Error: Cannot do division with output register different from RAX");
+                let left = com_expect!(loc,self.left.as_ref(),"Error: Cannot evaluate Op '{}' without left parameter",Op::DIV.to_string());
+                if left.is_ofp() {
+                    let leftregs1 = left.LEIRnasm(regs.clone(), f, program, build, local_vars, stack_size, loc)?;
+                    com_assert!(loc,leftregs1.len() == 1, "TODO: Handle multi-parameter loading for expressions!");
+                    let right = com_expect!(loc,self.right.as_ref(),"Error: Cannot evaluate Op '{}' without left parameter",Op::DIV.to_string());
+                    let rightregs1 = right.LEIRnasm(regs[1..].to_vec(), f, program, build, local_vars, stack_size, loc)?;
+                    com_assert!(loc,rightregs1.len() == 1, "TODO: Handle multi-parameter loading for expressions!");
+                    writeln!(f, "   cqo")?;
+                    writeln!(f, "   idiv {}",rightregs1[0].to_string())?;     
+                    o = vec![Register::RDX.to_byte_size(rightregs1[0].size())]               
+                }
+                else {
+                    let right = com_expect!(loc,self.right.as_ref(),"Error: Cannot evaluate Op '{}' without left parameter",Op::DIV.to_string());
+                    let rightregs1 = right.LEIRnasm(regs.to_vec(), f, program, build, local_vars, stack_size, loc)?;
+                    let leftregs1 = left.LEIRnasm(regs[1..].to_vec(), f, program, build, local_vars, stack_size, loc)?;
+                    com_assert!(loc,leftregs1.len() == 1, "TODO: Handle multi-parameter loading for expressions!");
+                    com_assert!(loc,rightregs1.len() == 1, "TODO: Handle multi-parameter loading for expressions!");
+                    writeln!(f, "   cqo")?;
+                    writeln!(f, "   idiv {}",rightregs1[0].to_string())?;
+                    o = vec![Register::RDX.to_byte_size(rightregs1[0].size())]
+                }
+                
+            },
+            Op::MUL   => {
+                com_assert!(loc,regs[0].to_byte_size(8) == Register::RAX,"Error: Cannot do division with output register different from RAX");
+                let left = com_expect!(loc,self.left.as_ref(),"Error: Cannot evaluate Op '{}' without left parameter",Op::DIV  .to_string());
+                if left.is_ofp() {
+                    let leftregs1 = left.LEIRnasm(regs.clone(), f, program, build, local_vars, stack_size, loc)?;
+                    com_assert!(loc,leftregs1.len() == 1, "TODO: Handle multi-parameter loading for expressions!");
+                    let right = com_expect!(loc,self.right.as_ref(),"Error: Cannot evaluate Op '{}' without left parameter",Op::DIV  .to_string());
+                    let rightregs1 = right.LEIRnasm(regs[1..].to_vec(), f, program, build, local_vars, stack_size, loc)?;
+                    com_assert!(loc,rightregs1.len() == 1, "TODO: Handle multi-parameter loading for expressions!");
+                    //writeln!(f, "   xor rdx, rdx")?;
+                    writeln!(f, "   cqo")?;
+                    writeln!(f, "   imul {}",rightregs1[0].to_string())?;
+                    o = leftregs1;
+                }
+                else {
+                    let right = com_expect!(loc,self.right.as_ref(),"Error: Cannot evaluate Op '{}' without left parameter",Op::DIV  .to_string());
+                    let rightregs1 = right.LEIRnasm(regs.to_vec(), f, program, build, local_vars, stack_size, loc)?;
+                    let leftregs1 = left.LEIRnasm(regs[1..].to_vec(), f, program, build, local_vars, stack_size, loc)?;
+                    com_assert!(loc,leftregs1.len() == 1, "TODO: Handle multi-parameter loading for expressions!");
+                    com_assert!(loc,rightregs1.len() == 1, "TODO: Handle multi-parameter loading for expressions!");
+                    //writeln!(f, "   xor rdx, rdx")?;
+                    writeln!(f, "   cqo")?;
+                    writeln!(f, "   imul {}",rightregs1[0].to_string())?;
+                    o = leftregs1;
+                }
+
+            },
+            Op::EQ    => {
+                let left = com_expect!(loc,self.left.as_ref(),"Error: Cannot evaluate Op '{}' without left parameter",Op::EQ   .to_string());
+                let leftregs1 = left.LEIRnasm(regs.clone(), f, program, build, local_vars, stack_size, loc)?;
+                com_assert!(loc,leftregs1.len() == 1, "TODO: Handle multi-parameter loading for expressions!");
+                let right = com_expect!(loc,self.right.as_ref(),"Error: Cannot evaluate Op '{}' without left parameter",Op::EQ   .to_string());
+                let rightregs1 = right.LEIRnasm(regs[1..].to_vec(), f, program, build, local_vars, stack_size, loc)?;
+                com_assert!(loc,rightregs1.len() == 1, "TODO: Handle multi-parameter loading for expressions!");
+                writeln!(f, "   cmp {}, {}",leftregs1[0].to_string(),rightregs1[0].to_string())?;
+                writeln!(f, "   sete {}",leftregs1[0].to_byte_size(1).to_string())?;
+                o = vec![leftregs1[0].to_byte_size(1)];
+            },
+            Op::NEQ   => {
+                let left = com_expect!(loc,self.left.as_ref(),"Error: Cannot evaluate Op '{}' without left parameter",Op::NEQ  .to_string());
+                let leftregs1 = left.LEIRnasm(regs.clone(), f, program, build, local_vars, stack_size, loc)?;
+                com_assert!(loc,leftregs1.len() == 1, "TODO: Handle multi-parameter loading for expressions!");
+                let right = com_expect!(loc,self.right.as_ref(),"Error: Cannot evaluate Op '{}' without left parameter",Op::NEQ  .to_string());
+                let rightregs1 = right.LEIRnasm(regs[1..].to_vec(), f, program, build, local_vars, stack_size, loc)?;
+                com_assert!(loc,rightregs1.len() == 1, "TODO: Handle multi-parameter loading for expressions!");
+                writeln!(f, "   cmp {}, {}",leftregs1[0].to_string(),rightregs1[0].to_string())?;
+                writeln!(f, "   setne {}",leftregs1[0].to_byte_size(1).to_string())?;
+                o = vec![leftregs1[0].to_byte_size(1)];
+            },
+            Op::GT    => {
+                let left = com_expect!(loc,self.left.as_ref(),"Error: Cannot evaluate Op '{}' without left parameter",Op::GT   .to_string());
+                let leftregs1 = left.LEIRnasm(regs.clone(), f, program, build, local_vars, stack_size, loc)?;
+                com_assert!(loc,leftregs1.len() == 1, "TODO: Handle multi-parameter loading for expressions!");
+                let right = com_expect!(loc,self.right.as_ref(),"Error: Cannot evaluate Op '{}' without left parameter",Op::GT   .to_string());
+                let rightregs1 = right.LEIRnasm(regs[1..].to_vec(), f, program, build, local_vars, stack_size, loc)?;
+                com_assert!(loc,rightregs1.len() == 1, "TODO: Handle multi-parameter loading for expressions!");
+                writeln!(f, "   cmp {}, {}",leftregs1[0].to_string(),rightregs1[0].to_string())?;
+                writeln!(f, "   setg {}",leftregs1[0].to_byte_size(1).to_string())?;
+                o = vec![leftregs1[0].to_byte_size(1)];
+
+            },
+            Op::GTEQ  => {
+                let left = com_expect!(loc,self.left.as_ref(),"Error: Cannot evaluate Op '{}' without left parameter",Op::GTEQ .to_string());
+                let leftregs1 = left.LEIRnasm(regs.clone(), f, program, build, local_vars, stack_size, loc)?;
+                com_assert!(loc,leftregs1.len() == 1, "TODO: Handle multi-parameter loading for expressions!");
+                let right = com_expect!(loc,self.right.as_ref(),"Error: Cannot evaluate Op '{}' without left parameter",Op::GTEQ .to_string());
+                let rightregs1 = right.LEIRnasm(regs[1..].to_vec(), f, program, build, local_vars, stack_size, loc)?;
+                com_assert!(loc,rightregs1.len() == 1, "TODO: Handle multi-parameter loading for expressions!");
+                writeln!(f, "   cmp {}, {}",leftregs1[0].to_string(),rightregs1[0].to_string())?;
+                writeln!(f, "   setge {}",leftregs1[0].to_byte_size(1).to_string())?;
+                o = vec![leftregs1[0].to_byte_size(1)];
+
+            },
+            Op::LT    => {
+                let left = com_expect!(loc,self.left.as_ref(),"Error: Cannot evaluate Op '{}' without left parameter",Op::LT   .to_string());
+                let leftregs1 = left.LEIRnasm(regs.clone(), f, program, build, local_vars, stack_size, loc)?;
+                com_assert!(loc,leftregs1.len() == 1, "TODO: Handle multi-parameter loading for expressions!");
+                let right = com_expect!(loc,self.right.as_ref(),"Error: Cannot evaluate Op '{}' without left parameter",Op::LT   .to_string());
+                let rightregs1 = right.LEIRnasm(regs[1..].to_vec(), f, program, build, local_vars, stack_size, loc)?;
+                com_assert!(loc,rightregs1.len() == 1, "TODO: Handle multi-parameter loading for expressions!");
+                writeln!(f, "   cmp {}, {}",leftregs1[0].to_string(),rightregs1[0].to_string())?;
+                writeln!(f, "   setl {}",leftregs1[0].to_byte_size(1).to_string())?;
+                o = vec![leftregs1[0].to_byte_size(1)];
+
+            },
+            Op::LTEQ  => {
+                let left = com_expect!(loc,self.left.as_ref(),"Error: Cannot evaluate Op '{}' without left parameter",Op::LTEQ .to_string());
+                let leftregs1 = left.LEIRnasm(regs.clone(), f, program, build, local_vars, stack_size, loc)?;
+                com_assert!(loc,leftregs1.len() == 1, "TODO: Handle multi-parameter loading for expressions!");
+                let right = com_expect!(loc,self.right.as_ref(),"Error: Cannot evaluate Op '{}' without left parameter",Op::LTEQ .to_string());
+                let rightregs1 = right.LEIRnasm(regs[1..].to_vec(), f, program, build, local_vars, stack_size, loc)?;
+                com_assert!(loc,rightregs1.len() == 1, "TODO: Handle multi-parameter loading for expressions!");
+                writeln!(f, "   cmp {}, {}",leftregs1[0].to_string(),rightregs1[0].to_string())?;
+                writeln!(f, "   setle {}",leftregs1[0].to_byte_size(1).to_string())?;
+                o = vec![leftregs1[0].to_byte_size(1)];
+
+            },
+            Op::NOT   => {
+                todo!("Not is not yet implemented");
+                // let left = com_expect!(loc,self.left.as_ref(),"Error: Cannot evaluate Op '{}' without left parameter",Op::NOT  .to_string());
+                // let leftregs1 = left.LEIRnasm(regs.clone(), f, program, build, local_vars, stack_size, loc)?;
+                // com_assert!(loc,leftregs1.len() == 1, "TODO: Handle multi-parameter loading for expressions!");
+                // let right = com_expect!(loc,self.right.as_ref(),"Error: Cannot evaluate Op '{}' without left parameter",Op::NOT  .to_string());
+                // let rightregs1 = right.LEIRnasm(regs[1..].to_vec(), f, program, build, local_vars, stack_size, loc)?;
+                // com_assert!(loc,rightregs1.len() == 1, "TODO: Handle multi-parameter loading for expressions!");
+                // writeln!(f, "   add {}, {}",leftregs1[0].to_string(),rightregs1[0].to_string())?;
+                // o = leftregs1;
+
+            },
+            
+        }
+        //println!("Output regs: {:?}",o);
+        Ok(o)
+        //todo!("ERROR: this should stop here")
+    }
+    fn new() -> Self {
+        Self { left: None, right: None, op: Op::NONE }
+    }
+}
+fn tokens_to_expression(body: &[Token],build: &mut BuildProgram, program: &CmdProgram,locals: &Vec<Locals>) -> Expression {
+    //println!("TOP: {:?}\nLen: {}",body,body.len());
+    if body.len() == 0 {
+        panic!("Error: Cannot evaluate empty body");
+    }
+    if body.len() == 1 {
+        return Expression::val(par_expect!(&body[0],OfP::from_token(&body[0], build, program, locals),"Error: Expected Ofp but found {}",&body[0].typ.to_string(false)));
+    }
+    if let TokenType::Function(f) = &body[0].typ {
+        let mut i2 = 0;
+        let cbody = {
+            while i2 < body.len() && body[i2].typ != TokenType::IntrinsicType(IntrinsicType::CLOSEPAREN){
+                i2+=1
+            }
+            let res = &body[1..i2];
+            res
+        };
+        if body.len() == i2+1 {
+            return Expression::val(OfP::RESULT(f.clone(), parse_argument_contract_from_body(cbody, build, locals, &body[0].location)));
+        }
+    }
+    if let TokenType::WordType(f) = &body[0].typ {
+        if build.externals.contains_key(f) {
+            let mut i2 = 0;
+            let cbody = {
+                while i2 < body.len() && body[i2].typ != TokenType::IntrinsicType(IntrinsicType::CLOSEPAREN){
+                    i2+=1
+                }
+                let res = &body[1..i2];
+                res
+            };
+            if body.len() == i2+1 {
+                return Expression::val(OfP::RESULT(f.clone(), parse_argument_contract_from_body(cbody, build, locals, &body[0].location)));
+            }   
+        }
+    }
+    //panic!("If you get here it is probably going to error since its inside an infinite loop!");
+    let mut currentETree: ExprTree = ExprTree::new();
+    let mut i: usize = 0;
+    let mut hasFoundOp = false;
+    //println!("------------");
+    //println!("Body: {:?}",body);
+    while i < body.len() {
+        let token = &body[i];
+        //println!("--------");
+        //println!("Gotten: token {:?}\nNext: {:?}",token,body.get(i+1));
+        i += 1;
+        //println!("And now at i: {:?}",body.get(i));
+        //println!("--------");
+        if let Some(val) = OfP::from_token(token, build, program, locals) {
+            par_assert!(token,currentETree.left.is_none() || (hasFoundOp && currentETree.right.is_none()),"Error: Cannot have multiple Ofp values consecutively!");
+            if currentETree.left.is_none() {
+                currentETree.left = Some(Expression::val(val))
+            }
+            else if currentETree.right.is_none() && hasFoundOp {
+                currentETree.right = Some(Expression::val(val))
+            }
+            else {
+                par_error!(token, "Error: Cannot assign value of an expression where both are the sides are fufilled or an operator was not provided before the right side!");
+            }
+        }
+        else if let TokenType::Function(f) = &token.typ {
+
+            par_assert!(token,currentETree.left.is_none() || (hasFoundOp && currentETree.right.is_none()),"Error: Cannot have multiple Ofp values consecutively!");
+            let cbody = {
+                let mut i2 = i;
+                while i2 < body.len() && body[i2].typ != TokenType::IntrinsicType(IntrinsicType::CLOSEPAREN){
+                    i2+=1
+                }
+                let res = &body[i..i2];
+                i += i2;
+                res
+            };
+            
+            if currentETree.left.is_none() {
+                currentETree.left = Some(Expression::val(OfP::RESULT(f.to_owned(), parse_argument_contract_from_body(cbody, build, locals, &token.location))))
+            }
+            else if currentETree.right.is_none() && hasFoundOp {
+                currentETree.right = Some(Expression::val(OfP::RESULT(f.to_owned(), parse_argument_contract_from_body(cbody, build, locals, &token.location))))
+            }
+            else {
+                par_error!(token, "Error: Cannot assign value of an expression where both are the sides are fufilled or an operator was not provided before the right side!");
+            }
+        }
+        else if let TokenType::Operation(op) = &token.typ {
+            if *op == Op::NOT {
+                par_assert!(token, currentETree.left.is_none(), "Error: Cannot have NOT with a left side already defined!");
+            }
+            else {
+                par_assert!(token, currentETree.left.is_some(), "Error: Cannot have an Operator different from NOT without a left side!");
+            }
+            currentETree.op = op.clone();
+            let mut opo = &Op::NONE;
+            let priority = op.get_priority();
+            let mut i2 = i;
+            if body.len() < i+1 {
+                continue;
+            }
+            for exprTok in &body[i..] {
+                //println!("exprTok: {:?} at {}",exprTok,i2);
+                if OfP::from_token(exprTok, build, program, locals).is_some() {}
+                else if let TokenType::Operation(op2) = &exprTok.typ {
+                    //println!("----------\nAt token {:?}\nGotten op: {} with priority: {} and my priority: {}\nwith my op: {}\n----------",exprTok,op2.to_string(),op2.get_priority(),priority,currentETree.op.to_string());
+                    if op2.get_priority() <= priority {            
+                        opo = op2;
+                        //println!("Ending at {} {:?}",i2, body[i2-1]);
+                        break;
+                    }
+                }
+                else {
+                    par_error!(token, "Error: unknown token type in expression: {}",token.typ.to_string(false))        
+                }
+                i2 += 1;
+            }
+            //println!("------------------------");
+            //println!("End of iteration: {}",i2);
+            //println!("Ended at: {:?}",body[i2-1]);
+            //println!("Result: {:?}",&body[i..i2]);
+            //println!("------------------------");
+            currentETree.right = Some(tokens_to_expression(&body[i..i2],build,program,locals));
+            if i2 == body.len() {}
+            else {
+                let buf = Expression::expr(Box::new(currentETree));
+                currentETree = ExprTree::new();
+                currentETree.left = Some(buf);
+                currentETree.op = opo.to_owned();
+                hasFoundOp = true
+            }
+            i = i2
+        }
+        else if let TokenType::WordType(f) = &body[0].typ {
+            if build.externals.contains_key(f) {
+                let mut i2 = 0;
+                let cbody = {
+                    while i2 < body.len() && body[i2].typ != TokenType::IntrinsicType(IntrinsicType::CLOSEPAREN){
+                        i2+=1
+                    }
+                    let res = &body[1..i2];
+                    res
+                };
+                if body.len() == i2+1 {
+                    return Expression::val(OfP::RESULT(f.clone(), parse_argument_contract_from_body(cbody, build, locals, &body[0].location)));
+                }   
+            }
+        }
+        else {
+            par_error!(token, "Error: unknown token type in expression: {}",token.typ.to_string(false))
+        }
+        
+    }
+    //println!("Output expression tree: {:#?}",currentETree);
+    //println!("------------");
+    Expression::expr(Box::new(currentETree))
+}
 #[derive(Debug,PartialEq,Clone)]
 enum TokenType {
     WordType      (String),
@@ -431,9 +990,11 @@ enum TokenType {
     Function      (String),
     StringType    (String),
     CStringType   (String),
-    CharType      (String),
+    CharType      (char),
     Number32      (i32),
-    Number64      (i64)
+    Number64      (i64),
+    Operation     (Op),
+    SETOperation  (SetOp)
 }
 
 impl TokenType {
@@ -468,7 +1029,13 @@ impl TokenType {
             },
             TokenType::Register(reg) => {
                 if isplural {format!("Registers").to_string()} else {format!("Register {}",reg.to_string()).to_string()}
-            }
+            },
+            TokenType::Operation(op) => {
+                if isplural {format!("Operations").to_string()} else {format!("Operation {}",op.to_string()).to_string()}
+            },
+            TokenType::SETOperation(sop) => {
+                if isplural {format!("Set Operations").to_string()} else {format!("Set Operation {}",sop.to_string()).to_string()}
+            },
 
         }
     }
@@ -492,6 +1059,24 @@ struct Token {
 impl Token {
     fn loc_display(&self) -> String {
         self.location.loc_display()
+    }
+    fn is_word(&self) -> bool {
+        match self.typ {
+            TokenType::WordType(_) => true,
+            _ => false
+        }
+    }
+    fn unwrap_word(&self) -> Option<&String> {
+        match &self.typ {
+            TokenType::WordType(data) => Some(data),
+            _ => None
+        }
+    }
+    fn unwrap_string(&self) -> Option<&String> {
+        match &self.typ {
+            TokenType::StringType(data) => Some(data),
+            _ => None
+        }
     }
 }
 struct Lexer<'a> {
@@ -562,7 +1147,7 @@ impl<'a> Lexer<'a> {
     fn pop_symbol(&mut self) -> Option<String> {
         let mut o = String::new();
         let mut c = self.cchar_s()?;
-        if !c.is_alphabetic() {
+        if !c.is_alphabetic() && c != '_' {
             return None;
         }
         while self.is_not_empty() && c.is_alphanumeric() || c=='_' || c=='-' {
@@ -587,32 +1172,36 @@ impl<'a> Lexer<'a> {
         }
         None
     }
+
+
+
+    fn next_line(&mut self) -> Option<Vec<Token>> {
+        self.trim_left();
+        let mut o: Vec<Token> = Vec::new();
+        while let Some(t) = self.next(){
+            o.push(t);
+            if self.source[self.cursor]  == '\n' {
+                break;
+            }
+        }
+        Some(o)
+    }
 }
 impl Iterator for Lexer<'_> {
     type Item = Token;
     fn next(&mut self) -> Option<Self::Item> {
-        //println!("Source: {:?}",self.source.as_str());
         self.trim_left();
         let mut outstr: String = Default::default();
         if self.is_not_empty() {
             let mut c = self.cchar();
-            //println!("Source after: {:?}",self.source.as_str());
             match c {
                 '"' => {
                     let mut shouldIgnoreNext: bool = false;
                     self.cursor += 1;
+                    self.currentLocation.character += 1;
                     c = self.cchar();
-                    // REMEMBER TO UPDATE LOCATION CHAR AFTER
-                    /*
-                    shouldIgnoreNext:     c != '\"'
-                    1                  0              1
-                    1                  1              1
-                    0                  1              1
-                    0                  0              0
-                    */
                     while self.is_not_empty() && (shouldIgnoreNext || c != '\"'){
                         c = self.cchar_s()?;
-                        //println!("Adding: {}, shouldIgnoreNext: {}",c.escape_default(),shouldIgnoreNext);
                         if shouldIgnoreNext {
                             shouldIgnoreNext = false
                         }
@@ -624,12 +1213,8 @@ impl Iterator for Lexer<'_> {
                     }
                     outstr.pop();
                     self.currentLocation.character += 2+outstr.len() as i32;
-                    //println!("Output string: \"{}\"",outstr);
-                    //println!("Cchar: {}",self.cchar());
                     if self.is_not_empty() {
                         let outstr = unescape(&outstr);
-                        //self.cursor += 1;
-                        //println!("C: {}",self.cchar());
                         if self.cchar() == 'c' {
                             self.cursor += 1;
                             self.currentLocation.character += 1;
@@ -641,42 +1226,47 @@ impl Iterator for Lexer<'_> {
                     }
                 }
                 '\'' => {
-                    todo!("CHARS ARE NOT YET IMPLEMENTED AND SHOULDN'T BE USED!");
-                    let mut shouldIgnoreNext: bool = true;
+                    let mut c_char = self.cchar_s()?;
                     self.cursor += 1;
                     self.currentLocation.character += 1;
-                    while self.is_not_empty() && (self.source.get(self.cursor).unwrap() != &'\'' && shouldIgnoreNext){
-                        let c = self.source.get(self.cursor).unwrap();
-                        if shouldIgnoreNext {
-                            shouldIgnoreNext = false
-                        }
-                        if c == &'\\' {
-                            shouldIgnoreNext = true
-                        }
-                        else {
-                            outstr.push(self.source.get(self.cursor).unwrap().clone());
-                        }
-                        self.cursor+=1;
+                    if c_char == '\\'{
+                        c_char = match self.cchar_s()? {
+                            'r' => {
+                                '\r'
+                            }
+                            't' => {
+                                '\t'
+                            }
+                            'n' => {
+                                '\n'
+                            }
+                            v => {
+                              v  
+                            }
+                        };
+                        self.cursor += 1;
                         self.currentLocation.character += 1;
                     }
-                    if outstr.len() > 1 {
-                        eprintln!("Error: undefined char type! \'{}\'\n[NOTE] Consider changing to string\n",outstr);
-                        exit(1);
-                    }
-                    return Some(Token { typ: TokenType::CharType(outstr), location: self.currentLocation.clone() });
+                    assert_eq!(self.cchar_s()?, '\'', "Error:{}: Unclosed char token! Expected ' but found {}",self.currentLocation.loc_display(),self.cchar_s()?);
+                    self.cursor += 1;
+                    self.currentLocation.character += 1;
+                    return Some(Token { typ: TokenType::CharType(c_char), location: self.currentLocation.clone() });
                 }
                 '/' => {
-                    //println!("Source: {:?}",self.source);
-                    //println!("Cursor: {}",self.cursor);
                     self.cursor += 1;
+                    self.currentLocation.character += 1;
                     if let Some(nc) = self.cchar_s() {
-                        //println!("Nc: \'{}\'",nc);
                         if nc == '/' {
                             self.drop_line();
                             return self.next();
                         }
+                        else if nc == '=' {
+                            self.cursor += 1;
+                            self.currentLocation.character += 1;
+                            return Some(Token { typ: TokenType::SETOperation(SetOp::DIVSET), location: self.currentLocation.clone() });
+                        }
                         else {
-                            return Some(Token { typ: TokenType::IntrinsicType(IntrinsicType::DIV), location: self.currentLocation.clone() });
+                            return Some(Token { typ: TokenType::Operation(Op::DIV), location: self.currentLocation.clone() });
                         }
                     }
                     else {
@@ -689,16 +1279,7 @@ impl Iterator for Lexer<'_> {
                     if !self.is_not_empty() {
                         return None;
                     }
-                    if c.is_alphabetic() {
-                        // outstr.push(c);
-                        // self.cursor += 1;
-                        // self.currentLocation.character += 1;
-                        // while self.is_not_empty() && (self.cchar() != '(' && self.cchar() != ')' && self.cchar() != '[' && self.cchar()  != ']' && self.cchar() != ';') && !self.cchar().is_alphanumeric() && !self.cchar().is_whitespace() {
-                        //     outstr.push(self.source.chars().nth(self.cursor).unwrap());
-                        //     self.cursor+=1;
-                        //     self.currentLocation.character += 1;
-                        // }
-
+                    if c.is_alphabetic() || c == '_' {
                         let outstr = self.pop_symbol()?;
                         if let Some(o) = self.Intrinsics.get(&outstr) {
                             return Some(Token { typ: TokenType::IntrinsicType(o.clone()), location: self.currentLocation.clone() });
@@ -709,6 +1290,12 @@ impl Iterator for Lexer<'_> {
                         else if let Some(reg) = Register::from_string(&outstr) {
                             return Some(Token { typ: TokenType::Register(reg), location: self.currentLocation.clone() })
                         }
+                        else if let Some(op) = Op::from_str(&outstr) {
+                            return Some(Token { typ: TokenType::Operation(op), location: self.currentLocation.clone() })
+                        }
+                        else if let Some(op) = SetOp::from_str(&outstr) {
+                            return Some(Token { typ: TokenType::SETOperation(op), location: self.currentLocation.clone() })
+                        }
                         else if self.CurrentFuncs.contains(&outstr) {
                             return Some(Token { typ: TokenType::Function(outstr), location: self.currentLocation.clone() })
                         }
@@ -717,17 +1304,64 @@ impl Iterator for Lexer<'_> {
                         }
                     }
                     else if (c == '-' && self.cchar_offset(1)?.is_numeric()) || c.is_numeric(){
+                        if c=='0' && self.cchar_offset(1).is_some() && self.cchar_offset(1).unwrap() == 'x' {
+                            self.cursor += 2;
+                            self.currentLocation.character += 2;
+                            while self.is_not_empty() && c.is_ascii_hexdigit() {
+                                c = self.cchar_s()?;
+                                if c == '_' {
+                                    
+                                    self.cursor+=1;
+                                    c = self.cchar_s()?;
+                                    continue;
+                                }
+                                self.cursor += 1;
+                                outstr.push(c);
+                            }
+                            outstr.pop();
+                            self.cursor -= 1;
+                            self.currentLocation.character += outstr.len() as i32;
+                            if let Some(nc) = self.cchar_s() {
+                                if nc == 'l' {
+                                    self.cursor += 1;
+                                    self.currentLocation.character += 1;
+                                    if let Ok(val) =  i64::from_str_radix(&outstr, 16) {
+                                        return Some(Token {location: self.currentLocation.clone(), typ: TokenType::Number64(val)});
+                                    }
+                                    else {
+                                        todo!("Error message for this")
+                                    }
+                                }
+                                else {
+                                    if let Ok(val) = i32::from_str_radix(&outstr, 16) {
+                                        return Some(Token {location: self.currentLocation.clone(), typ: TokenType::Number32(val)});
+                                    }   
+                                    else {
+                                        todo!("Error message for this: {}: \"{}\"",self.currentLocation.loc_display(),outstr);
+                                    } 
+                                }
+                            }
+                            else {
+                                if let Ok(val) =i32::from_str_radix(&outstr, 16) {
+                                    return Some(Token {location: self.currentLocation.clone(), typ: TokenType::Number32(val)});
+                                }
+                                else if let Ok(val) = i64::from_str_radix(&outstr, 16) {
+                                    return Some(Token {location: self.currentLocation.clone(), typ: TokenType::Number64(val)});
+                                }
+                                else {
+                                    panic!("Unknown number combo: {}",outstr);
+                                }
+                            }
+                        }
                         if c=='-' {
                             outstr.push(c);
                             self.cursor += 1;
+                            self.currentLocation.character += 1;
                             c = self.cchar_s()?;
                         }
                         while self.is_not_empty() && c.is_numeric() {
                             c = self.cchar_s()?;
-                            //println!("l.is_numeric(): {}",'l'.is_numeric());
-                            //println!("Adding char: '{}', self.is_not_empty() && c.is_numeric(): {}",c,self.is_not_empty() && c.is_numeric() );
                             if c == '_' {
-                                //println!("having to do _");
                                 self.cursor+=1;
                                 c = self.cchar_s()?;
                                 continue;
@@ -735,7 +1369,6 @@ impl Iterator for Lexer<'_> {
                             self.cursor += 1;
                             outstr.push(c);
                         }
-                        //println!("Current outstr: \"{}\"",outstr);
                         outstr.pop();
                         self.cursor -= 1;
                         self.currentLocation.character += outstr.len() as i32;
@@ -771,25 +1404,63 @@ impl Iterator for Lexer<'_> {
                             }
                         }
                     }
-                    else if c == ';' || c==')' || c=='(' || c=='{' || c=='}' || c=='[' || c==']' || c == ','{
+                    else if c == ';' || c==')' || c=='(' || c=='{' || c=='}' || c=='[' || c==']' || c == ',' {
                         self.cursor += 1;
                         self.currentLocation.character += 1;
                         return Some(Token {typ: TokenType::IntrinsicType(self.Intrinsics.get(&c.to_string()).expect("Unhandled intrinsic :(").clone()), location: self.currentLocation.clone()});
                     }
+                    else if c == '*' && self.cchar_offset(1).is_some(){
+                        let mut already_alphabetic = false;
+                        while self.is_not_empty() && (c == '*' && !already_alphabetic) || c.is_alphabetic() {
+                            c = self.cchar_s()?;
+                            self.cursor += 1;
+                            outstr.push(c);
+                            if c.is_alphabetic() {
+                                already_alphabetic = true
+                            }
+                        }
+                        outstr.pop();
+                        self.cursor -= 1;
+                        self.currentLocation.character += outstr.len() as i32;
+                        if outstr == "*" {
+                            return Some(Token { typ: TokenType::Operation(Op::MUL), location: self.currentLocation.clone() });
+                        }
+                        else {
+                            let osize = outstr.chars().take_while(|&c| c == '*').count();
+                            let otyp = &outstr[osize..];
+                            if let Some(def) = self.Definitions.get(otyp) {
+                                return Some(Token { typ: TokenType::Definition(VarType::PTR(Ptr{typ: PtrTyp::TYP(Box::new(def.clone())), inner_ref: osize-1})), location: self.currentLocation.clone() });
+                            } else if otyp == "void" {
+                                return Some(Token { typ: TokenType::Definition(VarType::PTR(Ptr{typ: PtrTyp::VOID, inner_ref: osize-1})), location: self.currentLocation.clone() });
+                            }
+                            else {
+                                //TODO: Maybe a*b could be an issue V Fix this
+                                //todo!("Handle situation of unknown pointer! Make it return a Mul and reset back the cursor!");
+                                self.cursor -= outstr.len()-1;
+                                self.currentLocation.character -= (outstr.len()-1) as i32;
+                                //println!("Current char: {}\nNext char: {}",self.cchar(),self.source[self.cursor+1]);
+                                return Some(Token { typ: TokenType::Operation(Op::MUL), location: self.currentLocation.clone() });
+                            }
+                        }
+                    }
                     else {
-                        
                         while self.is_not_empty() && !c.is_alphabetic() && !c.is_numeric() && !c.is_whitespace() && c != ';' && c!=')' && c!='(' && c!='{' && c!='}' && c!='[' && c!=']'{
                             c = self.cchar_s()?;
                             self.cursor += 1;
                             outstr.push(c);
                         }
                         outstr.pop();
-                        //self.cursor -= 1;
-                        //println!("Debug: {}",self.cchar());
+                        self.cursor -= 1;
                         self.currentLocation.character += outstr.len() as i32;
-                        //TODO: implement pointers
+                        
                         if let Some(intrinsic) = self.Intrinsics.get(&outstr) {
                             return Some(Token { typ: TokenType::IntrinsicType(intrinsic.clone()), location: self.currentLocation.clone() })
+                        }
+                        else if let Some(op) = Op::from_str(&outstr) {
+                            return Some(Token { typ: TokenType::Operation(op), location: self.currentLocation.clone() })
+                        }
+                        else if let Some(op) = SetOp::from_str(&outstr) {
+                            return Some(Token { typ: TokenType::SETOperation(op), location: self.currentLocation.clone() })
                         }
                         else if self.CurrentFuncs.contains(&outstr) {
                             return Some(Token { typ: TokenType::Function(outstr), location: self.currentLocation.clone() })
@@ -839,7 +1510,6 @@ impl ExternalType {
         }
     }
 }
-
 #[repr(u32)]
 #[derive(Clone, Copy,Debug, PartialEq)]
 enum Register {
@@ -859,6 +1529,8 @@ enum Register {
     EDX,
     ESP,
     EBP,
+    ESI,
+    EDI,
     // 16 bit
     AX,
     BX,
@@ -866,11 +1538,15 @@ enum Register {
     DX,
     SP,
     BP,
+    SI,
+    DI,
     // 8 bit low
     AL,
     BL,
     CL,
     DL,
+    SIL,
+    DIL,
     // 8 bit high
     AH,
     BH,
@@ -888,13 +1564,16 @@ enum Register {
     R13,
     R14,
     R15,
-    //TODO: Implement the rest of the floating point arithmetic registers
-    //Floating point arithmetics
+    
+    //Floating point 32 arithmetics
     XMM0,
     XMM1,
     XMM2,
     XMM3,
-    
+    XMM4,
+    XMM5,
+    XMM6,
+    XMM7,
     R8D,
     
 }
@@ -942,6 +1621,16 @@ impl Register {
             Register::XMM1 => "xmm1".to_string(),
             Register::XMM2 => "xmm2".to_string(),
             Register::XMM3 => "xmm3".to_string(),
+            Register::XMM4 => "xmm4".to_string(),
+            Register::XMM5 => "xmm5".to_string(),
+            Register::XMM6 => "xmm6".to_string(),
+            Register::XMM7 => "xmm7".to_string(),
+            Register::ESI => "esi".to_string(),
+            Register::EDI => "edi".to_string(),
+            Register::SI  => "si".to_string(),
+            Register::DI  => "di".to_string(),
+            Register::SIL => "sil".to_string(),
+            Register::DIL => "dil".to_string(),
         }
     }
     fn from_string(stri: &String) -> Option<Self> {
@@ -999,18 +1688,24 @@ impl Register {
             Register::RDX => 8,
             Register::RSP => 8,
             Register::RBP => 8,
+            Register::RSI => 8,
+            Register::RDI => 8,
             Register::EAX => 4,
             Register::EBX => 4,
             Register::ECX => 4,
             Register::EDX => 4,
             Register::ESP => 4,
             Register::EBP => 4,
+            Register::ESI => 4,
+            Register::EDI => 4,
             Register::AX  => 2,
             Register::BX  => 2,
             Register::CX  => 2,
             Register::DX  => 2,
             Register::SP  => 2,
             Register::BP  => 2,
+            Register::SI  => 2,
+            Register::DI  => 2,
             Register::AL  => 1,
             Register::BL  => 1,
             Register::CL  => 1,
@@ -1019,6 +1714,8 @@ impl Register {
             Register::BH  => 1,
             Register::CH  => 1,
             Register::DH  => 1,
+            Register::SIL => 1,
+            Register::DIL => 1,
             Register::R8 => 8,
             Register::R8D => 4,
             Register::RSI => 8,
@@ -1030,10 +1727,14 @@ impl Register {
             Register::R13 => 8,
             Register::R14 => 8,
             Register::R15 => 8,
-            Register::XMM0 => 8,
-            Register::XMM1 => 8,
-            Register::XMM2 => 8,
-            Register::XMM3 => 8,
+            Register::XMM0 => 4,
+            Register::XMM1 => 4,
+            Register::XMM2 => 4,
+            Register::XMM3 => 4,
+            Register::XMM4 => 4,
+            Register::XMM5 => 4,
+            Register::XMM6 => 4,
+            Register::XMM7 => 4,
         }
     }
     fn to_byte_size(&self, size: usize) -> Self {
@@ -1052,16 +1753,12 @@ impl Register {
                 Register::RDX | Register::EDX  | Register::DX | Register::DH | Register::DL => {
                     return Register::RDX;
                 }
-                Register::RSP | Register::ESP  | Register::SP => {
-                    return Register::RSP;
-                }
-                Register::RBP | Register::EBP  | Register::BP => {
-                    return Register::RBP;
-                }
+                Register::RSP | Register::ESP  | Register::SP => return Register::RSP,
+                Register::RBP | Register::EBP  | Register::BP => Register::RBP,
+                Register::RSI | Register::ESI | Register::SI  | Register::SIL => Register::RSI,
+                Register::RDI | Register::EDI | Register::DI  | Register::DIL => Register::RDI,
                 Register::R8  => todo!(),
                 Register::R8D => todo!(),
-                Register::RSI => todo!(),
-                Register::RDI => todo!(),
                 Register::R9 => todo!(),
                 Register::R10 => todo!(),
                 Register::R11 => todo!(),
@@ -1073,6 +1770,10 @@ impl Register {
                 Register::XMM1 => todo!(),
                 Register::XMM2 => todo!(),
                 Register::XMM3 => todo!(),
+                Register::XMM4 => todo!(),
+                Register::XMM5 => todo!(),
+                Register::XMM6 => todo!(),
+                Register::XMM7 => todo!(),
               }  
             },
             4 => {
@@ -1095,10 +1796,12 @@ impl Register {
                     Register::RBP | Register::EBP  | Register::BP => {
                         return Register::EBP;
                     }
+                    Register::RSI | Register::ESI | Register::SI  | Register::SIL => Register::ESI,
+
+                    Register::RDI | Register::EDI | Register::DI  | Register::DIL => Register::EDI,
+
                     Register::R8 => todo!(),
                     Register::R8D => todo!(),
-                    Register::RSI => todo!(),
-                    Register::RDI => todo!(),
                     Register::R9 => todo!(),
                     Register::R10 => todo!(),
                     Register::R11 => todo!(),
@@ -1110,6 +1813,10 @@ impl Register {
                     Register::XMM1 => todo!(),
                     Register::XMM2 => todo!(),
                     Register::XMM3 => todo!(),
+                    Register::XMM4 => todo!(),
+                    Register::XMM5 => todo!(),
+                    Register::XMM6 => todo!(),
+                    Register::XMM7 => todo!(),
                   }  
             },
             2 => {
@@ -1132,10 +1839,12 @@ impl Register {
                     Register::RBP | Register::EBP  | Register::BP => {
                         return Register::BP;
                     }
+                    Register::RSI | Register::ESI | Register::SI  | Register::SIL => Register::SI,
+
+                    Register::RDI | Register::EDI | Register::DI  | Register::DIL => Register::DI,
+
                     Register::R8 => todo!(),
                     Register::R8D => todo!(),
-                    Register::RSI => todo!(),
-                    Register::RDI => todo!(),
                     Register::R9 => todo!(),
                     Register::R10 => todo!(),
                     Register::R11 => todo!(),
@@ -1147,6 +1856,10 @@ impl Register {
                     Register::XMM1 => todo!(),
                     Register::XMM2 => todo!(),
                     Register::XMM3 => todo!(),
+                    Register::XMM4 => todo!(),
+                    Register::XMM5 => todo!(),
+                    Register::XMM6 => todo!(),
+                    Register::XMM7 => todo!(),
                   }  
             },
             1 => {
@@ -1169,10 +1882,11 @@ impl Register {
                     Register::RBP | Register::EBP  | Register::BP => {
                         todo!("Handle rbp error case");
                     }
+                    Register::RSI | Register::ESI | Register::SI | Register::SIL  => Register::SIL,
+                    Register::RDI | Register::EDI | Register::DI  | Register::DIL => Register::DIL,
+
                     Register::R8 => todo!(),
                     Register::R8D => todo!(),
-                    Register::RSI => todo!(),
-                    Register::RDI => todo!(),
                     Register::R9 => todo!(),
                     Register::R10 => todo!(),
                     Register::R11 => todo!(),
@@ -1184,6 +1898,10 @@ impl Register {
                     Register::XMM1 => todo!(),
                     Register::XMM2 => todo!(),
                     Register::XMM3 => todo!(),
+                    Register::XMM4 => todo!(),
+                    Register::XMM5 => todo!(),
+                    Register::XMM6 => todo!(),
+                    Register::XMM7 => todo!(),
                   }  
             },
             _ => {
@@ -1197,19 +1915,18 @@ impl Register {
                 VarType::LONG
             },
             Register::RSP | Register::RBP => {
-                //TODO: introduce VarType::PTR64
-                VarType::PTR(PtrTyp::VOID)
+                VarType::PTR(Ptr { typ: PtrTyp::VOID, inner_ref: 0 })
             },
-            Register::EAX | Register::EBX | Register::ECX | Register::EDX => {
+            Register::EAX | Register::EBX | Register::ECX | Register::EDX | Register::ESI | Register::EDI => {
                 VarType::INT
             },
             Register::ESP | Register::EBP => {
-                VarType::PTR(PtrTyp::VOID)
+                VarType::PTR(Ptr { typ: PtrTyp::VOID, inner_ref: 0})
             }
-            Register::AX |Register::BX |Register::CX |Register::DX |Register::SP |Register::BP => {
+            Register::AX |Register::BX |Register::CX |Register::DX |Register::SP |Register::BP | Register::SI | Register::DI => {
                 VarType::SHORT
             }
-            Register::AL |Register::BL |Register::CL |Register::DL |Register::AH |Register::BH |Register::CH |Register::DH => {
+            Register::AL |Register::BL |Register::CL |Register::DL |Register::AH |Register::BH |Register::CH |Register::DH | Register::DIL | Register::SIL => {
                 VarType::CHAR
             }
             Register::R8 |Register::R9 | Register::R10  | Register::R11  | Register::R12  | Register::R13  | Register::R14  | Register::R15 => {
@@ -1222,6 +1939,10 @@ impl Register {
             Register::XMM1 => todo!("floats"),
             Register::XMM2 => todo!("floats"),
             Register::XMM3 => todo!("floats"),
+            Register::XMM4 => todo!("floats"),
+            Register::XMM5 => todo!("floats"),
+            Register::XMM6 => todo!("floats"),
+            Register::XMM7 => todo!("floats"),
         }
     }
 }
@@ -1248,7 +1969,6 @@ fn size_to_nasm_type(size: usize) -> String {
 }
 #[derive(Debug,PartialEq,Clone)]
 enum CallArgType {
-    TOP(Option<VarType>),
     LOCALVAR(String),
     REGISTER(Register),
     CONSTANT(RawConstValueType)
@@ -1259,21 +1979,16 @@ struct CallArg {
     loc: ProgramLocation
 }
 impl CallArg {
-    fn from_token(build: &mut BuildProgram, tok: &Token, currentLocals: Option<&Locals>) -> Option<Self> {
+    fn from_token(build: &mut BuildProgram, tok: &Token, currentLocals: &Vec<Locals>) -> Option<Self> {
         match &tok.typ {
             TokenType::WordType(word) => {
-                if currentLocals.is_some() && currentLocals.unwrap().contains_key(word) {
+                if contains_local(currentLocals, word) {
                     return Some(Self { typ: CallArgType::LOCALVAR(word.clone()), loc: tok.location.clone() });
                 }
                 else if build.constdefs.contains_key(word){
                     return Some(Self { typ: CallArgType::CONSTANT(build.constdefs.get(word).unwrap().typ.clone()), loc: tok.location.clone() })
                 }
-                None
-            },
-            TokenType::IntrinsicType(typ) => {
-                if *typ == IntrinsicType::TOP {
-                    return Some(Self { typ: CallArgType::TOP(None), loc: tok.location.clone() });
-                }
+
                 None
             },
             TokenType::StringType(val) => {
@@ -1295,11 +2010,10 @@ impl CallArg {
             },
             _ => {
                 None
-                //par_error!(tok,  "Error: Unexpected token type {} in argument contract!",tok.typ.to_string(false));
             }
         }
     }
-    fn match_any(contract1: &Vec<Self>, contract: &AnyContract) -> bool {
+    fn match_any(_contract1: &Vec<Self>, _contract: &AnyContract) -> bool {
         true
     }
 }
@@ -1308,45 +2022,168 @@ type CallArgs = Vec<CallArg>;
 #[derive(Debug)]
 enum OfP {
     REGISTER (Register),
-    PARAM    (String),
+    //PARAM    (String),
     LOCALVAR (String),
-    RAW      (i64),
-    STR      (Uuid, ProgramStringType)
+    CONST    (RawConstValueType),
+    RESULT   (String,CallArgs)
+    // RAW      (i64),
+    // STR      (Uuid, ProgramStringType)
     // etc.
+}
+impl OfP { 
+    fn var_type(&self, build: &BuildProgram, local_vars: &HashMap<String, LocalVariable>) -> Option<VarType> {
+        match self {
+            Self::REGISTER(reg) => Some(reg.to_var_type()),
+            Self::CONST(v) => Some(v.to_type(build)[0].clone()),
+            Self::LOCALVAR(v) => Some(local_vars.get(v).unwrap().typ.clone()),
+            Self::RESULT(f, _) => build.functions.get(f).unwrap().contract.Outputs.get(0).cloned()
+        }
+    }
+    fn LOIRGNasm(&self, regs: Vec<Register>, f: &mut File, program: &CmdProgram,build: &BuildProgram, local_vars: &HashMap<String, LocalVariable>, mut stack_size: usize, loc: &ProgramLocation) -> std::io::Result<Vec<Register>>{
+        let mut out: Vec<Register> = Vec::with_capacity(regs.len());
+        match self {
+            OfP::REGISTER(reg2) => {
+                let reg = &regs[0].to_byte_size(reg2.size());
+                writeln!(f, "   mov {}, {}",reg.to_string(),reg2.to_string())?;
+                out.push(reg.clone());
+            },
+            OfP::LOCALVAR(val) => {
+                //println!("Got to here!");
+                let lvar = local_vars.get(val).unwrap();
+                let osize = lvar.typ.get_size(program);
+                let reg = &regs[0].to_byte_size(osize);
+                if stack_size-lvar.operand == 0 {
+                    writeln!(f, "   mov {}, {} [rsp]",reg.to_string(),size_to_nasm_type(osize))?;
+                }
+                else {
+                    writeln!(f, "   mov {}, {} [rsp+{}]",reg.to_string(),size_to_nasm_type(osize),stack_size-lvar.operand)?;
+                }
+                out.push(reg.clone());
+            },
+            OfP::CONST(val) => {
+                match val {
+                    RawConstValueType::INT(val) => {
+                        let reg = &regs[0].to_byte_size(4);
+                        writeln!(f, "   mov {}, {}",reg.to_string(),val)?;
+                        out.push(reg.clone());
+                    },
+                    RawConstValueType::LONG(val) => {
+                        let reg = &regs[0].to_byte_size(8);
+                        writeln!(f, "   mov {}, {}",reg.to_string(),val)?;
+                        out.push(reg.clone());
+                    },
+                    RawConstValueType::STR(val) => {
+                        let str = build.stringdefs.get(val).unwrap();
+                        match str.Typ {
+                            ProgramStringType::STR => {
+                                com_assert!(loc,regs.len() > 1, "Error: Cannot load Ofp into register!");
+                                let reg = &regs[0];
+                                let reg1 = &regs[1];
+                                writeln!(f, "   lea {}, [rel _STRING_{}_]",reg.to_string(),val.to_string().replace("-", ""))?;
+                                writeln!(f, "   mov {}, {}",reg1.to_string(),build.stringdefs.get(val).unwrap().Data.len())?;
+                                out.push(reg.clone()); 
+                                out.push(reg1.clone()); 
+                            },
+                            ProgramStringType::CSTR => {
+                                let reg = &regs[0];
+                                writeln!(f, "   lea {}, [rel _STRING_{}_]",reg.to_string(),val.to_string().replace("-", ""))?;
+                                out.push(reg.clone()); 
+                            },
+                        }
+                    },
+                    RawConstValueType::PTR(_,val) => {
+                        let reg = &regs[0].to_byte_size(8);
+                        writeln!(f, "    mov {}, {}",reg.to_string(),val)?;
+                        out.push(reg.clone());
+                    },
+                }
+            },
+            OfP::RESULT(func, args) => {
+                //println!("Trying to get contract of {}: {:?} with build:\n {:#?}",func,build.get_contract_of_symbol(func),build.externals);
+                nasm_x86_64_prep_args(program, build, f, build.get_contract_of_symbol(func).unwrap().clone(), args, &mut stack_size, loc.clone(), &local_vars)?;
+                writeln!(f, "   call {}{}",program.architecture.func_prefix,func)?;
+                if let Some(ops) = program.architecture.options.argumentPassing.custom_get() {
+                    if ops.shadow_space > 0 {
+                        writeln!(f, "   add rsp, {}",ops.shadow_space)?;
+                    }
+                }
+                let reg = &regs[0].to_byte_size(build.get_contract_of_symbol(func).unwrap().Outputs.get(0).unwrap_or(&VarType::LONG).get_size(program));
+                if reg.to_byte_size(8) != Register::RAX {
+                    let oreg = Register::RAX.to_byte_size(reg.size());
+                    writeln!(f, "   mov {}, {}",reg.to_string(),oreg.to_string())?;
+                }
+                out.push(reg.clone());
+            },
+        }
+        Ok(out)
+    }
+    fn from_token(token: &Token, build: &mut BuildProgram, _: &CmdProgram, locals: &Vec<Locals>) -> Option<Self> {
+        match &token.typ {
+            TokenType::WordType(data)  => {
+                if contains_local(locals, data){
+                    return Some(Self::LOCALVAR(data.clone()))
+                }
+                else if build.constdefs.contains_key(data) {
+                    return Some(Self::CONST(build.constdefs.get(data).unwrap().typ.clone()))
+                }
+                None
+            },
+            TokenType::Register(reg) => Some(Self::REGISTER(reg.clone())),
+            TokenType::StringType(val) => Some(Self::CONST(RawConstValueType::STR(build.insert_unique_str(ProgramString { Typ: ProgramStringType::STR, Data:  val.clone()})))),
+            TokenType::CStringType(val)=> Some(Self::CONST(RawConstValueType::STR(build.insert_unique_str(ProgramString { Typ: ProgramStringType::CSTR, Data: val.clone() })))),
+            TokenType::Number32(val)      => Some(Self::CONST(RawConstValueType::INT(val.clone()))),
+            TokenType::Number64(val)      => Some(Self::CONST(RawConstValueType::LONG(val.clone()))),
+            _ => None
+        }
+    }
 
 }
 #[derive(Debug)]
 enum Instruction {
-    RSPUSH  (OfP),
-    PUSH    (OfP),
+    //PUSH    (OfP),
     DEFVAR  (String),
-    MOV     (OfP, OfP),
-    POP     (OfP),
-    CALLRAW (String, CallArgs),
-    ADD     (OfP, OfP),
-    SUB     (OfP, OfP),
-    MUL     (OfP, OfP),
-    DIV     (OfP, OfP),
-    EQUALS  (OfP, OfP),
+    MOV     (OfP, Expression),
+    //POP     (OfP),
+    ADDSET     (OfP, Expression),
+    SUBSET     (OfP, Expression),
+    MULSET     (OfP, Expression),
+    DIVSET     (OfP, Expression),
     CALL    (String, CallArgs),
+    CALLRAW (String, CallArgs),
     FNBEGIN (),
-    RET     (),
+    RET     (Expression),
     SCOPEBEGIN,
     SCOPEEND,
-
+    
     // CONDITIONAL_JUMP(usize),
     // JUMP(usize),
     INTERRUPT(i64),
+    
+    EXPAND_SCOPE       (NormalScope),
+    EXPAND_IF_SCOPE    (NormalScope),
+    EXPAND_WHILE_SCOPE (NormalScope),
+    EXPAND_ELSE_SCOPE  (NormalScope),
 
-    EXPAND_SCOPE(NormalScope),
-    EXPAND_IF_SCOPE(NormalScope),
-    EXPAND_ELSE_SCOPE(NormalScope),
+    EQUALS          (Expression, Expression),
+    MORETHAN        (Expression, Expression),
+    LESSTHAN        (Expression, Expression),
+    MORETHANEQUALS  (Expression, Expression),
+    LESSTHANEQUALS  (Expression, Expression),
+    NOTEQUALS       (Expression, Expression),
 }
 
 #[derive(Debug,Clone,PartialEq)]
 enum ProgramStringType {
     STR,
     CSTR
+}
+impl ProgramStringType {
+    fn sizeof(&self, bits: u32) -> usize {
+        match self {
+            Self::CSTR => if bits == 64 {8} else {4}
+            Self::STR => if bits == 64 {16} else {12}
+        }
+    }
 }
 #[derive(Debug,Clone,PartialEq)]
 struct ProgramString {
@@ -1358,7 +2195,7 @@ struct LocalVariable {
     typ: VarType,
     operand: usize
 }
-type Locals = HashMap<String, LocalVariable>;
+type Locals = LinkedHashMap<String, VarType>; //The issue is here because we use a normal hashmap instead of a linked one
 #[derive(Debug)]
 struct Function {
     contract: FunctionContract,
@@ -1372,15 +2209,67 @@ struct Function {
 enum ConstValueType {
     INT(i32),
     LONG(i64),
-    STR(String),
-    PTR(PtrTyp),
+    STR(String, ProgramStringType),
+    PTR(Ptr, i64),
 }
+
 #[derive(Debug,PartialEq,Clone)]
 struct ConstValue {
     typ: ConstValueType,
     loc: ProgramLocation
 }
 impl ConstValueType {
+    fn weak_cast(&self, typ: &VarType) -> Option<ConstValueType> {
+        match self {
+            ConstValueType::INT(data) => {
+                match typ {
+                    VarType::CHAR => None,
+                    VarType::SHORT => None,
+                    VarType::BOOLEAN => None,
+                    VarType::INT => Some(self.clone()),
+                    VarType::LONG => Some(ConstValueType::LONG(data.clone() as i64)),
+                    VarType::PTR(typ) => Some(ConstValueType::PTR(typ.clone(), data.clone() as i64)),
+                    VarType::CUSTOM(_) => None,
+                }
+            },
+            ConstValueType::LONG(data) => {
+                match typ {
+                    VarType::CHAR => None,
+                    VarType::SHORT => None,
+                    VarType::BOOLEAN => None,
+                    VarType::INT => {
+                        if *data <= i32::MAX as i64 {
+                            Some(ConstValueType::INT(data.clone() as i32))
+                        }
+                        else {
+                            None
+                        }
+                    },
+                    VarType::LONG => Some(self.clone()),
+                    VarType::PTR(typ) => Some(ConstValueType::PTR(typ.clone(), data.clone() as i64)),
+                    VarType::CUSTOM(_) => None,
+                }
+            },
+            ConstValueType::STR(_, _) => None,
+            ConstValueType::PTR(_, _) => {None}
+        }
+    }
+    fn to_var_type(&self) -> Option<VarType> {
+        match self {
+            ConstValueType::INT(_) => Some(VarType::INT),
+            ConstValueType::LONG(_) => Some(VarType::LONG),
+            ConstValueType::STR(_, typ) => if *typ == ProgramStringType::CSTR { Some(VarType::PTR(Ptr{ typ: PtrTyp::TYP(Box::new(VarType::CHAR)), inner_ref: 0})) } else { None },
+            ConstValueType::PTR(typ, _) => Some(VarType::PTR(typ.clone())),
+        }
+    }
+    fn is_eq_vartype(&self, vartyp: &VarType) -> bool {
+        match self {
+            ConstValueType::INT(_) => vartyp.weak_eq(&VarType::INT),
+            ConstValueType::LONG(_) => vartyp.weak_eq(&VarType::LONG),
+            ConstValueType::STR(_, typ) => if *typ == ProgramStringType::CSTR { vartyp.weak_eq(&VarType::PTR(Ptr {typ: PtrTyp::TYP(Box::new(VarType::CHAR)), inner_ref: 0})) } else {false},
+            ConstValueType::PTR(typ, _) => vartyp.weak_eq(&VarType::PTR(typ.clone())),
+        }
+    }
     fn mul(&self, Other: &ConstValueType) -> Result<ConstValueType,String> {
         match self {
             ConstValueType::INT(val) => {
@@ -1391,10 +2280,10 @@ impl ConstValueType {
                     ConstValueType::LONG(nval) => {
                         return Ok(ConstValueType::LONG((*val as i64)*nval));
                     }
-                    ConstValueType::STR(_nval) => {
+                    ConstValueType::STR(_nval, _) => {
                         return Err("Error: Unexpected - operation on int and string".to_string());
                     },
-                    ConstValueType::PTR(_) => { todo!("ConstValueType::PTR")}
+                    ConstValueType::PTR(_,_) => { todo!("ConstValueType::PTR")}
                 }
             }
             ConstValueType::LONG(val) => {
@@ -1405,21 +2294,21 @@ impl ConstValueType {
                     ConstValueType::LONG(nval) => {
                         return Ok(ConstValueType::LONG(val*nval));
                     }
-                    ConstValueType::STR(_nval) => {
+                    ConstValueType::STR(_nval, _) => {
                         return Err("Error: Unexpected * operation on long and string".to_string());
                     },
-                    ConstValueType::PTR(_) => { todo!("ConstValueType::PTR")}
+                    ConstValueType::PTR(_,_) => { todo!("ConstValueType::PTR")}
  
                 }
             }
-            ConstValueType::STR(_) => {
+            ConstValueType::STR(_, _) => {
                 match Other {
                     _ => {
                         return Err("Error: Cannot do * operation on a string".to_string());
                     }
                 }
             },
-            ConstValueType::PTR(_) => {todo!("ConstValueType::PTR")}
+            ConstValueType::PTR(_,_) => {todo!("ConstValueType::PTR")}
         }
     }
     fn sub(&self, Other: &ConstValueType) -> Result<ConstValueType,String> {
@@ -1432,10 +2321,10 @@ impl ConstValueType {
                     ConstValueType::LONG(nval) => {
                         return Ok(ConstValueType::LONG((*val as i64)-nval));
                     }
-                    ConstValueType::STR(_nval) => {
+                    ConstValueType::STR(_nval, _) => {
                         return Err("Error: Unexpected - operation on int and string".to_string());
                     },
-                    ConstValueType::PTR(_) => { todo!("ConstValueType::PTR")}
+                    ConstValueType::PTR(_,_) => { todo!("ConstValueType::PTR")}
  
                 }
             }
@@ -1447,21 +2336,21 @@ impl ConstValueType {
                     ConstValueType::LONG(nval) => {
                         return Ok(ConstValueType::LONG(val-nval));
                     }
-                    ConstValueType::STR(_nval) => {
+                    ConstValueType::STR(_nval, _) => {
                         return Err("Error: Unexpected - operation on long and string".to_string());
                     },
-                    ConstValueType::PTR(_) => { todo!("ConstValueType::PTR")}
+                    ConstValueType::PTR(_,_) => { todo!("ConstValueType::PTR")}
  
                 }
             }
-            ConstValueType::STR(_) => {
+            ConstValueType::STR(_, _) => {
                 match Other {
                     _ => {
                         return Err("Error: Cannot do - operation on a string".to_string());
                     }
                 }
             },
-            ConstValueType::PTR(_) => { todo!("ConstValueType::PTR")}
+            ConstValueType::PTR(_,_) => { todo!("ConstValueType::PTR")}
              
         }
     }
@@ -1475,10 +2364,10 @@ impl ConstValueType {
                     ConstValueType::LONG(nval) => {
                         return Ok(ConstValueType::LONG((*val as i64)+nval));
                     }
-                    ConstValueType::STR(nval) => {
-                        return Ok(ConstValueType::STR(val.to_string()+nval));
+                    ConstValueType::STR(nval, typ) => {
+                        return Ok(ConstValueType::STR(val.to_string()+nval, typ.clone()));
                     },
-                    ConstValueType::PTR(_) => { todo!("ConstValueType::PTR")}
+                    ConstValueType::PTR(_,_) => { todo!("ConstValueType::PTR")}
  
                 }
             }
@@ -1490,30 +2379,30 @@ impl ConstValueType {
                     ConstValueType::LONG(nval) => {
                         return Ok(ConstValueType::LONG(val+nval));
                     }
-                    ConstValueType::STR(nval) => {
-                        return Ok(ConstValueType::STR(val.to_string()+nval));
+                    ConstValueType::STR(nval, typ) => {
+                        return Ok(ConstValueType::STR(val.to_string()+nval, typ.clone()));
                     },
-                    ConstValueType::PTR(_) => { todo!("ConstValueType::PTR")}
+                    ConstValueType::PTR(_,_) => { todo!("ConstValueType::PTR")}
  
                 }
             }
-            ConstValueType::STR(val) => {
+            ConstValueType::STR(val,typ) => {
                 match Other {
                     ConstValueType::INT(nval) => {
-                        return Ok(ConstValueType::STR(val.clone()+&nval.to_string()));
+                        return Ok(ConstValueType::STR(val.clone()+&nval.to_string(), typ.clone()));
                     }
                     ConstValueType::LONG(nval) => {
-                        return Ok(ConstValueType::STR(val.clone()+&nval.to_string()));
+                        return Ok(ConstValueType::STR(val.clone()+&nval.to_string(), typ.clone()));
                     }
-                    ConstValueType::STR(nval) => {
+                    ConstValueType::STR(nval,_) => {
                         let out = val.clone()+nval;
-                        return Ok(ConstValueType::STR(out));
+                        return Ok(ConstValueType::STR(out,typ.clone()));
                     },
-                    ConstValueType::PTR(_) => { todo!("ConstValueType::PTR")}
+                    ConstValueType::PTR(_,_) => { todo!("ConstValueType::PTR")}
                      
                 }
             },
-            ConstValueType::PTR(_) => { todo!("ConstValueType::PTR")}
+            ConstValueType::PTR(_,_) => { todo!("ConstValueType::PTR")}
              
         }
     }
@@ -1524,7 +2413,7 @@ enum RawConstValueType{
     INT(i32),
     LONG(i64),
     STR(Uuid),
-    PTR(PtrTyp)
+    PTR(Ptr, i64)
 }
 impl RawConstValueType {
     fn to_type(&self, build: &BuildProgram) -> Vec<VarType> {
@@ -1538,13 +2427,21 @@ impl RawConstValueType {
             RawConstValueType::STR(UUID) => {
                 let val = build.stringdefs.get(UUID).unwrap();
                 match val.Typ {
-                    ProgramStringType::STR =>  vec![VarType::PTR(PtrTyp::TYP(Box::new(VarType::CHAR))), VarType::LONG],
-                    ProgramStringType::CSTR => vec![VarType::PTR(PtrTyp::TYP(Box::new(VarType::CHAR)))],
+                    ProgramStringType::STR =>  vec![VarType::PTR(Ptr { typ: PtrTyp::TYP(Box::new(VarType::CHAR)), inner_ref: 0}), VarType::LONG],
+                    ProgramStringType::CSTR => vec![VarType::PTR(Ptr { typ: PtrTyp::TYP(Box::new(VarType::CHAR)), inner_ref: 0})],
                 }
             },
-            RawConstValueType::PTR(typ) => {
+            RawConstValueType::PTR(typ, _) => {
                 vec![VarType::PTR(typ.clone())]
             },
+        }
+    }
+    fn get_num_data(&self) -> i64 {
+        match self {
+            RawConstValueType::INT(val) => val.clone() as i64,
+            RawConstValueType::LONG(val) => val.clone(),
+            RawConstValueType::STR(_) => todo!(),
+            RawConstValueType::PTR(_,val) => val.clone(),
         }
     }
 }
@@ -1555,11 +2452,22 @@ struct RawConstValue {
 }
 type RawConstants = HashMap<String, RawConstValue>;
 #[derive(Debug)]
+struct DLL_import {
+    from: String,
+    contract: AnyContract
+}
+#[derive(Debug)]
+struct DLL_export {
+    contract: AnyContract
+}
+#[derive(Debug)]
 struct BuildProgram {
     externals:    HashMap<String,External>,
     functions:    HashMap<String, Function>,
     stringdefs:   HashMap<Uuid,ProgramString>,
-    constdefs:    HashMap<String, RawConstValue>
+    constdefs:    HashMap<String, RawConstValue>,
+    dll_imports:  HashMap<String, DLL_import>,
+    dll_exports:  HashMap<String, DLL_export>
 }
 impl BuildProgram {
     fn insert_unique_str(&mut self, str: ProgramString) -> Uuid {
@@ -1567,11 +2475,23 @@ impl BuildProgram {
         while self.stringdefs.contains_key(&UUID) {
             UUID = Uuid::new_v4();
         }
-        //println!("Before: {:#?}, \nUUID: {}\n",self.stringdefs,UUID);
         self.stringdefs.insert(UUID.clone(), str);
-        //println!("After: {:#?}, \nUUID: {}",self.stringdefs,UUID);
-        //println!("At: {:#?}",self.stringdefs.get(&UUID));
         UUID
+    }
+    fn contains_symbol(&self, str: &String) -> bool {
+        self.constdefs.contains_key(str) || self.dll_imports.contains_key(str) || self.externals.contains_key(str) || self.functions.contains_key(str)
+    }
+    fn get_contract_of_symbol(&self, str: &String) -> Option<AnyContract> {
+        if let Some(ext) = self.externals.get(str) {
+            return ext.contract.clone()
+        }
+        else if let Some(dll_import) = self.dll_imports.get(str) {
+            return Some(dll_import.contract.clone())
+        }
+        else if let Some(func) = self.functions.get(str) {
+            return Some(func.contract.to_any_contract())
+        }
+        None
     }
 }
 
@@ -1582,7 +2502,7 @@ enum VarType {
     BOOLEAN,
     INT,
     LONG,
-    PTR(PtrTyp),
+    PTR(Ptr),
     CUSTOM(Uuid)   
 }
 impl VarType {
@@ -1604,8 +2524,7 @@ impl VarType {
                 if isplural {"longs".to_string()} else {"long".to_string()}
             }
             VarType::PTR(typ) => {
-                //TODO: implement typ.to_string()!
-                if isplural {"pointers".to_string()} else {format!("pointer<{}>",typ.to_string()).to_string()}
+                if isplural {"pointers".to_string()} else {format!("pointer<{}{}>","*".repeat(typ.inner_ref+1),typ.typ.to_string()).to_string()}
             }
             VarType::CUSTOM(_) => {
                 todo!("Implement custom")
@@ -1614,11 +2533,11 @@ impl VarType {
     }
     fn get_size(&self, program: &CmdProgram) -> usize{
         match self {
-            VarType::CHAR => 1,
-            VarType::SHORT => 2,
+            VarType::CHAR    => 1,
+            VarType::SHORT   => 2,
             VarType::BOOLEAN => 1,
-            VarType::INT => 4,
-            VarType::LONG => 8,
+            VarType::INT     => 4,
+            VarType::LONG    => 8,
             VarType::PTR(_) => {
                 match program.architecture.bits{
                     32 => 4,
@@ -1630,10 +2549,20 @@ impl VarType {
         }
     }
     fn weak_eq(&self, other: &Self) -> bool {
+        //println!("Comparing: {} and {}",self.to_string(false),other.to_string(false));
         match self {
-            Self::PTR(_) => {
+            Self::PTR(typ) => {
                 match other {
-                    VarType::PTR(_) => true,
+                    VarType::PTR(otyp) => {
+                        if (typ.typ == PtrTyp::VOID) && typ.inner_ref == otyp.inner_ref { true }
+                        else {typ==otyp && typ.inner_ref == otyp.inner_ref} 
+                    },
+                    _ => false
+                }
+            }
+            Self::INT | Self::LONG=> {
+                match other {
+                    Self::INT | Self::LONG | Self::SHORT => true,
                     _ => false
                 }
             }
@@ -1641,71 +2570,24 @@ impl VarType {
         }
     }
 }
-// #[derive(Debug)]
-// enum ScopeType {
-//     FUNC,
-//     IF,
-//     EMPTY,
-//     ELSE,
-// }
-// impl ScopeType {
-//     fn to_string(&self, isplural: bool) -> &str {
-//         if isplural {
-//             match self {
-//                 ScopeType::FUNC  => "functions",
-//                 ScopeType::IF    => "ifs",
-//                 ScopeType::EMPTY => "empties",
-//                 ScopeType::ELSE  => "elses",
-//             }
-//         }
-//         else {
-//             match self {
-//                 ScopeType::FUNC  => "function",
-//                 ScopeType::IF    => "if",
-//                 ScopeType::EMPTY => "empty",
-//                 ScopeType::ELSE  => "else",
-//             }
-//         }
-//     }
-// }
-// #[derive(Debug)]
-// struct ScopeOpener {
-//     cinstruct_size: usize,
-//     hasBeenOpened: bool,
-//     typ:   ScopeType
-// }
-/*
-#[derive(Debug)]
-struct Function {
-    contract: FunctionContract,
-    locals: HashMap<String,LocalVariable>,
-    location: ProgramLocation,
-    body: Vec<(ProgramLocation,Instruction)>,
-}
-*/
-// #[derive(Debug)]
-// struct Scope {
-//     typ:  ScopeType,
-//     inst: InstBodyType,
-//     locals: LocalBodyType,
-//     contract: Option<FunctionContract>,
-//     hasBeenOpened: bool,
-//     //funcs: Option<Vec<Function>>,  
-// }
 type ScopeBody = Vec<(ProgramLocation,Instruction)>;
-type ContractInputs = HashMap<String, usize>;
+type ContractInputs = LinkedHashMap<String, VarType>;
 type ContractInputPool = Vec<VarType>;
 #[derive(Debug, Clone)]
 struct FunctionContract {
     Inputs: ContractInputs,
-    InputPool: ContractInputPool,
     Outputs: Vec<VarType>
 }
 impl FunctionContract {
     fn to_any_contract(&self) -> AnyContract {
-        AnyContract { InputPool: self.InputPool.clone(), Outputs: self.Outputs.clone() }
+        AnyContract { InputPool: {
+            let mut o: Vec<VarType> = Vec::with_capacity(self.Inputs.len());
+            for (_,val) in self.Inputs.iter() {
+                o.push(val.clone());
+            }
+            o
+        }, Outputs: self.Outputs.clone() }
     }
-
 }
 #[derive(Debug, Clone)]
 struct AnyContract {    
@@ -1714,32 +2596,22 @@ struct AnyContract {
 }
 #[derive(Debug)]
 enum NormalScopeType {
-    IF,
+    IF(Expression),
     ELSE,
+    WHILE(Expression),
     EMPTY
 }
-// impl NormalScopeType {
-//    
-//     fn to_scope_type(&self) -> ScopeType {
-//         match self {
-//             NormalScopeType::IF => ScopeType::IF,
-//             NormalScopeType::ELSE => ScopeType::ELSE,
-//             NormalScopeType::EMPTY => ScopeType::EMPTY,
-//         }
-//     }
-// }
+
 #[derive(Debug)]
 struct NormalScope {
     typ: NormalScopeType,
     body: ScopeBody,
+    locals: Locals
 }
 
 #[derive(Debug)]
 struct FunctionScope<'a> {
     func: &'a mut Function
-    // body: &'a mut ScopeBody,
-    // locals: &'a mut Locals,
-    // contract: &'a mut FunctionContract
 }
 #[derive(Debug)]
 enum ScopeType {
@@ -1759,7 +2631,7 @@ impl ScopeType {
                 Some(&func.body)
             },
             Self::NORMAL(scope) => {
-                Some(&scope.body)
+                Some(&scope.body)                
             },
         }
     }
@@ -1813,7 +2685,6 @@ impl ScopeType {
     fn locals_is_some(&self) -> bool {
         match self {
             Self::FUNCTION(_,_) => true,
-            //TODO: Implement local variables for normal scopes
             Self::NORMAL(_) => false,
         }
     }
@@ -1830,17 +2701,18 @@ impl ScopeType {
             }
             ScopeType::NORMAL(normal)=> {
                 match normal.typ {
-                    NormalScopeType::IF =>    if isplural {"ifs"}     else {"if"},
-                    NormalScopeType::ELSE =>  if isplural {"elses"}   else {"else"},
-                    NormalScopeType::EMPTY => if isplural {"empties"} else {"empty"},
+                    NormalScopeType::IF(_)    => if isplural {"ifs"}     else {"if"},
+                    NormalScopeType::ELSE     => if isplural {"elses"}   else {"else"},
+                    NormalScopeType::EMPTY    => if isplural {"empties"} else {"empty"},
+                    NormalScopeType::WHILE(_) => if isplural {"while"}else {"while"},
                 }
             },
         }
     }
 }
 impl Scope {
-    fn body_unwrap(&self)         -> Option<&ScopeBody>                    {self.typ.body_unwrap()}
-    fn body_unwrap_mut(&mut self) -> Option<&mut ScopeBody>                {self.typ.body_unwrap_mut()}
+    fn body_unwrap(&self)         -> Option<&ScopeBody>                    {if self.hasBeenOpened { self.typ.body_unwrap()} else { None }}
+    fn body_unwrap_mut(&mut self) -> Option<&mut ScopeBody>                {if self.hasBeenOpened { self.typ.body_unwrap_mut()} else { None }}
     fn locals_unwrap(&self)          -> Option<& Locals>                   {self.typ.locals_unwrap()}
     fn locals_unwrap_mut(&mut self)  -> Option<&mut Locals>                {self.typ.locals_unwrap_mut()}
     fn contract_unwrap(&self)        -> Option<&FunctionContract>          {self.typ.contract_unwrap()}
@@ -1849,30 +2721,50 @@ impl Scope {
     fn contract_is_some(&self)       -> bool                               {self.typ.contract_is_some()}
 }
 
-fn eval_const_def(lexer: &mut Lexer, build: &mut BuildProgram) -> ConstValue {
+fn eval_const_def(lexer: &mut Lexer, build: &mut BuildProgram, until: TokenType) -> ConstValue {    
     let mut varStack: Vec<ConstValueType> = vec![];
     let orgLoc = lexer.currentLocation.clone();
     while let Some(token) = lexer.next() {
+        if token.typ == until {
+            break;
+        }
         match token.typ {
-            TokenType::IntrinsicType(typ) => {
-                match typ {
-                    IntrinsicType::ADD => {
+            TokenType::Operation(ref op) => {
+                match op {
+                    Op::PLUS => {
                         let valTwo = par_expect!(token.location,varStack.pop(),"Stack underflow in constant definition");
                         let valOne = par_expect!(token.location,varStack.pop(),"Stack underflow in constant definition");
                         varStack.push(par_expect!(token.location,valOne.add(&valTwo),"Error: Failed to add the constant values together"));
                     }
-                    IntrinsicType::SUB => {
+                    Op::MINUS => {
                         let valTwo = par_expect!(token.location,varStack.pop(),"Stack underflow in constant definition");
                         let valOne = par_expect!(token.location,varStack.pop(),"Stack underflow in constant definition");
                         varStack.push(par_expect!(token.location,valOne.sub(&valTwo),"Error: Failed to add the constant values together"));
                     }
-                    IntrinsicType::MUL => {
+                    Op::MUL => {
                         let valTwo = par_expect!(token.location,varStack.pop(),"Stack underflow in constant definition");
                         let valOne = par_expect!(token.location,varStack.pop(),"Stack underflow in constant definition");
                         varStack.push(par_expect!(token.location,valOne.mul(&valTwo),"Error: Failed to add the constant values together"));
                     }
-                    IntrinsicType::DOTCOMA => {
-                        break;
+                    _ => {
+                        par_error!(token, "Error: Unexpected op {} in constant definition!",op.to_string());
+                    }
+                }
+            }
+            TokenType::IntrinsicType(typ) => {
+                match typ {
+                    IntrinsicType::CAST => {
+                        let ntok = par_expect!(lexer.currentLocation, lexer.next(), "Error: abruptly ran out of tokens for constant definition cast!");
+                        par_assert!(ntok, ntok.typ == TokenType::Operation(Op::LT),"Error: unexpected token type {} in cast! INVALID SYNTAX",ntok.typ.to_string(false));
+                        let ntok = par_expect!(lexer.currentLocation, lexer.next(), "Error: abruptly ran out of tokens for constant definition cast!");
+                        let typ = if let TokenType::Definition(typ) = ntok.typ { typ } else {par_error!(ntok, "Error: expected definition but found {}",ntok.typ.to_string(false))};
+                        let ntok = par_expect!(lexer.currentLocation, lexer.next(), "Error: abruptly ran out of tokens for constant definition cast!");
+                        par_assert!(ntok, ntok.typ == TokenType::Operation(Op::GT),"Error: unexpected token type {} in cast! INVALID SYNTAX",ntok.typ.to_string(false));
+                        let ntok = par_expect!(lexer.currentLocation, lexer.next(), "Error: abruptly ran out of tokens for constant definition cast!");
+                        par_assert!(ntok, ntok.typ == TokenType::IntrinsicType(IntrinsicType::OPENPAREN),"Error: unexpected token type {} in cast! INVALID SYNTAX",ntok.typ.to_string(false));
+                        let val = eval_const_def(lexer, build,TokenType::IntrinsicType(IntrinsicType::CLOSEPAREN));
+                        let val = par_expect!(val.loc,val.typ.weak_cast(&typ),"Error: Cannot cast to type {}",typ.to_string(false));
+                        varStack.push(val);
                     }
                     _ => {
                         par_error!(token, "Unexpected Intrinsic: {}\nConstant definitions can only work with ADD,SUB,MUL intrinsics ",typ.to_string(false));
@@ -1889,15 +2781,16 @@ fn eval_const_def(lexer: &mut Lexer, build: &mut BuildProgram) -> ConstValue {
                         varStack.push(ConstValueType::LONG(val));
                     }
                     RawConstValueType::STR(ref UUID)       => {
-                        varStack.push(ConstValueType::STR(build.stringdefs.get(UUID).unwrap().Data.clone()));
+                        let d = build.stringdefs.get(UUID).unwrap();
+                        varStack.push(ConstValueType::STR(d.Data.clone(),d.Typ.clone()));
                     }
-                    RawConstValueType::PTR(ref ptr) => {
-                        varStack.push(ConstValueType::PTR(ptr.clone()));
+                    RawConstValueType::PTR(ref ptr, val) => {
+                        varStack.push(ConstValueType::PTR(ptr.clone(), val));
                     }
                 }
             }
             TokenType::StringType(word) => {
-                varStack.push(ConstValueType::STR(word))
+                varStack.push(ConstValueType::STR(word, ProgramStringType::STR))
             }
             TokenType::Number32(num) => {
                 varStack.push(ConstValueType::INT(num));
@@ -1905,18 +2798,52 @@ fn eval_const_def(lexer: &mut Lexer, build: &mut BuildProgram) -> ConstValue {
             TokenType::Number64(num) => {
                 varStack.push(ConstValueType::LONG(num));
             }
+            TokenType::CStringType(word) => {
+                varStack.push(ConstValueType::STR(word, ProgramStringType::CSTR))
+            }
+
             _ => {
                 par_error!(token,"Unexpected token type in const declaration {}",token.typ.to_string(false));
             }
         }
     }
     
-    lpar_assert!(lexer.currentLocation,varStack.len() == 1,"Error: Lazy constant stack handling! You need to correctly handle your constants");
-    ConstValue {typ: varStack.pop().unwrap(), loc: orgLoc}
+    par_assert!(lexer.currentLocation,varStack.len() == 1,"Error: Lazy constant stack handling! You need to correctly handle your constants");
+    let top = varStack.pop().unwrap();
+    
+    ConstValue {typ: top, loc: orgLoc}
 }
-fn parse_argument_contract(lexer: &mut Lexer, build: &mut BuildProgram, currentLocals: Option<&Locals>) -> CallArgs {
-    //println!("Hello?!?!?!?!?!?!?!?");
-    //println!("Current locals: {:#?}", currentLocals);
+fn parse_argument_contract_from_body(body: &[Token], build: &mut BuildProgram,currentLocals: &Vec<Locals>,loc: &ProgramLocation) -> CallArgs {
+    let mut out: CallArgs = CallArgs::new();
+    let mut expectNextSY = false;
+    let mut lexer = body.iter();
+    par_assert!(loc, par_expect!(loc,lexer.next(), "Error: abruptly ran out of tokens in argument contract definition").typ == TokenType::IntrinsicType(IntrinsicType::OPENPAREN), "Error: argument contract must begin with (");
+    while let Some(token) = lexer.next() {
+        match token.typ {
+            TokenType::IntrinsicType(Typ) => {
+                match Typ {
+                    IntrinsicType::COMA => {
+                        par_assert!(token.location,expectNextSY, "undefined coma placed inside argument contract! Comas only seperate Input parameters");
+                        expectNextSY = false;
+                    }
+                    IntrinsicType::CLOSEPAREN => {
+                        return out},
+                    IntrinsicType::TOP => {
+                        expectNextSY = true;
+                        out.push(par_expect!(token, CallArg::from_token(build,&token, currentLocals),"Unexpected Token Type in argument Contract. Expected Definition but found: {}",token.typ.to_string(false)));
+                    }
+                    other => par_error!(token, "Unexpected intrinsic in argument contract! {}",other.to_string(false))
+                }
+            }
+            _ => {
+                out.push(par_expect!(token, CallArg::from_token(build,&token, currentLocals),"Unexpected Token Type in argument Contract. Expected Definition but found: {}",token.typ.to_string(false)));
+                expectNextSY = true;
+            }
+        }
+    }
+    out
+}
+fn parse_argument_contract(lexer: &mut Lexer, build: &mut BuildProgram, currentLocals: &Vec<Locals>) -> CallArgs {
     let mut out: CallArgs = CallArgs::new();
     let mut expectNextSY = false;
     par_assert!(lexer.currentLocation, par_expect!(lexer.currentLocation,lexer.next(), "Error: abruptly ran out of tokens in argument contract definition").typ == TokenType::IntrinsicType(IntrinsicType::OPENPAREN), "Error: argument contract must begin with (");
@@ -1929,7 +2856,6 @@ fn parse_argument_contract(lexer: &mut Lexer, build: &mut BuildProgram, currentL
                         expectNextSY = false;
                     }
                     IntrinsicType::CLOSEPAREN => {
-                        //println!("Output args: {:?}",out);
                         return out},
                     IntrinsicType::TOP => {
                         expectNextSY = true;
@@ -1938,19 +2864,12 @@ fn parse_argument_contract(lexer: &mut Lexer, build: &mut BuildProgram, currentL
                     other => par_error!(token, "Unexpected intrinsic in argument contract! {}",other.to_string(false))
                 }
             }
-            /*
-            top,
-            localvar,
-            constant_name,
-            */    
             _ => {
                 out.push(par_expect!(token, CallArg::from_token(build,&token, currentLocals),"Unexpected Token Type in argument Contract. Expected Definition but found: {}",token.typ.to_string(false)));
                 expectNextSY = true;
-                //println!("WTF DUDE JUST PRINT IT FOR FUCK SAKE: {:?}",CallArg::from_token(build,&token, currentLocals).unwrap());
             }
         }
     }
-    //println!("HELLO?!??!?!?!\n\n\nOutput args: {:?}",out);
     out
 }
 /*
@@ -1959,21 +2878,8 @@ IT DOES NOT CONSUME THE FIRST (
 */
 fn parse_any_contract(lexer: &mut Lexer) -> AnyContract {
     let mut out = AnyContract { InputPool: vec![], Outputs: vec![] };
-    // let first = lexer.next();
-    // let first = par_expect!(lexer.currentLocation,first,"abruptly ran out of tokens in any contract");
     let mut expectNextSY = false;
     let mut is_input = true;
-    // match first.typ {
-    //     TokenType::IntrinsicType(typ) => {
-    //         match typ {
-    //             IntrinsicType::OPENPAREN => {},
-    //             Other => {
-    //                 par_error!(first,"INVALID TOKEN FOR PARSING, Expected an Open paren but found other {}",Other.to_string(false));
-    //             }
-    //         }
-    //     }
-    //     Other => {assert!(false, "INVALID TOKEN FOR PARSING, Expected an Open paren intrinsic but found: {}",Other.to_string(false));}
-    // }
     while let Some(token) = lexer.next() {
         match token.typ {
             TokenType::IntrinsicType(Typ) => {
@@ -2009,13 +2915,13 @@ fn parse_any_contract(lexer: &mut Lexer) -> AnyContract {
     out
 }
 fn parse_function_contract(lexer: &mut Lexer) -> FunctionContract {
-    let mut out = FunctionContract {Inputs: HashMap::new(), InputPool: vec![], Outputs: vec![]};
+    let mut out = FunctionContract {Inputs: LinkedHashMap::new(), Outputs: vec![]};
     let mut is_input = true;
     let first = lexer.next();
     let first = par_expect!(lexer.currentLocation,first,"abruptly ran out of tokens in function contract");
     let mut expectNextSY = false;
     match first.typ {
-        TokenType::IntrinsicType(typ) => {
+        TokenType::IntrinsicType(ref typ) => {
             match typ {
                 IntrinsicType::OPENPAREN => {},
                 Other => {
@@ -2023,14 +2929,14 @@ fn parse_function_contract(lexer: &mut Lexer) -> FunctionContract {
                 }
             }
         }
-        Other => {assert!(false, "INVALID TOKEN FOR PARSING, Expected an Open paren intrinsic but found: {}",Other.to_string(false));}
+        _ => {par_error!(first, "INVALID TOKEN FOR PARSING, Expected an Open paren intrinsic but found: {}",first.typ.to_string(false));}
     }
     while let Some(token) = lexer.next() {
         match token.typ {
             TokenType::IntrinsicType(Typ) => {
                 match Typ {
                     IntrinsicType::COMA => {
-                        assert!(expectNextSY, "undefined coma placed inside function contract! Comas only seperate Input or Output parameters");
+                        par_assert!(token, expectNextSY, "undefined coma placed inside function contract! Comas only seperate Input or Output parameters");
                         expectNextSY = false;
                     }
                     IntrinsicType::CLOSEPAREN => return out,
@@ -2050,9 +2956,7 @@ fn parse_function_contract(lexer: &mut Lexer) -> FunctionContract {
                 match f.typ {
                     TokenType::Definition(Def) => {
                         expectNextSY = true;    
-                        out.Inputs.insert(Word, out.InputPool.len());
-                        out.InputPool.push(Def);
-                        //out.Inputs.push((Word,Def))
+                        out.Inputs.insert(Word, Def);
                     }
                     _ => {
                         par_error!(f, "Error: Unexpected token type in parameter definition");
@@ -2078,806 +2982,758 @@ fn getTopMut(scopeStack: &mut ScopeStack) -> Option<&mut Scope> {
     let len = scopeStack.len();
     scopeStack.get_mut(len-1)
 }
-fn parse_tokens_to_build(lexer: &mut Lexer, program: &mut CmdProgram) -> BuildProgram {
-    let mut build: BuildProgram = BuildProgram { externals: HashMap::new(), functions: HashMap::new(),stringdefs: HashMap::new(), constdefs: HashMap::new()};
-    let mut scopeStack: ScopeStack = vec![];
-    //let mut lexer.CurrentFuncs: &HashSet<String> = &lexer.CurrentFuncs;
-    //let mut currentLocals: Locals = HashSet::new();
-    //^ preparing for IFS and others that inherit their locals
-    //let mut currentFunction: Option<String> = None;
-    //let mut ctime: Instant= Instant::now();
-    //let tokens: Vec<Token> = lexer.collect();
-    
-    while let Some(token) = lexer.next() {
-        //time_func!()
-        // let t = Instant::now();
-        // println!("From last next: {:?}",t-ctime);
-        // ctime = t;
-        match token.typ {
-            TokenType::WordType(ref word) => {
-                par_assert!(token,scopeStack.len() > 0, "Undefined Word Call outside of entry point! '{}'",word);
-                let currentScope = getTopMut(&mut scopeStack).unwrap();
-                par_assert!(token,currentScope.body_is_some(), "Error: can not insert word operation at the top level of a {} as it does not support instructions",currentScope.typ.to_string(false));
-                
-                let mut isvalid = false;
-                if let Some(external) = build.externals.get(word) {
-                    isvalid = true;
-                    let external2: External = external.clone();
-                    let contract = parse_argument_contract(lexer, &mut build, currentScope.locals_unwrap());
-                    let body = currentScope.body_unwrap_mut().unwrap();
-                    body.push((token.location.clone(),Instruction::CALLRAW(external2.typ.prefix(&program).clone()+word+&external2.typ.suffix(), contract)));
+fn get_local<'a>(currentLocals: &'a Vec<Locals>, name: &String) -> Option<&'a VarType> {
+    for e in currentLocals {
+        if let Some(v) = e.get(name) {
+            return Some(v);
+        }
+    }
+    None
+}
+fn contains_local<'a>(currentLocals: &'a Vec<Locals>, name: &String) -> bool {
+    for e in currentLocals {
+        if e.contains_key(name) {
+            return true   
+        }
+    }
+    false
+}
+fn parse_token_to_build_inst(token: Token,lexer: &mut Lexer, program: &mut CmdProgram, build: &mut BuildProgram, scopeStack: &mut ScopeStack, currentLocals: &mut Vec<Locals>){
+    match token.typ {
+        TokenType::WordType(ref word) => {
+            par_assert!(token,scopeStack.len() > 0, "Undefined Word Call outside of entry point! '{}'",word);
+            let currentScope = getTopMut(scopeStack).unwrap();
+            par_assert!(token,currentScope.body_is_some(), "Error: can not insert word operation at the top level of a {} as it does not support instructions",currentScope.typ.to_string(false));
+            if build.externals.contains_key(word) {
+                let contract = parse_argument_contract(lexer, build, currentLocals);
+                let body = currentScope.body_unwrap_mut().unwrap();
+                body.push((token.location.clone(),Instruction::CALLRAW(word.clone(), contract)));
+                return;
+            } else if build.dll_imports.contains_key(word) {
+                let contract = parse_argument_contract(lexer, build, currentLocals);
+                let body = currentScope.body_unwrap_mut().unwrap();
+                body.push((token.location.clone(),Instruction::CALLRAW(word.clone(), contract)));
+                return;
+            }
+            let ofp1 = par_expect!(token, OfP::from_token(&token, build, program,currentLocals), "Unknown word type: {}!",word);
+            let Op = par_expect!(lexer.currentLocation,lexer.next(),"Unexpected variable operation or another variable!");
+            //todo!("TODO: retire this");
+            if let TokenType::SETOperation(op) = Op.typ {
+                let expr_body: Vec<Token> = lexer.map_while(|t| if t.typ != TokenType::IntrinsicType(IntrinsicType::DOTCOMA) {Some(t)} else { None }).collect();
+                let expr = tokens_to_expression(&expr_body, build, program, &currentLocals);
+                let body = currentScope.body_unwrap_mut().unwrap();
+                match &op {
+                    SetOp::SET      => {
+                        body.push((token.location.clone(),Instruction::MOV(ofp1, expr)))
+                    },
+                    SetOp::PLUSSET  => {
+                        body.push((token.location.clone(),Instruction::ADDSET(ofp1, expr)))
+                    },
+                    SetOp::MINUSSET => {
+                        body.push((token.location.clone(),Instruction::SUBSET(ofp1, expr)))
+                    },
+                    SetOp::MULSET   => {
+                        body.push((token.location.clone(),Instruction::MULSET(ofp1, expr)))
+                    },
+                    SetOp::DIVSET   => {
+                        body.push((token.location.clone(),Instruction::DIVSET(ofp1, expr)))
+                    },
                 }
-                if !isvalid && currentScope.locals_is_some() {
-                    
-                    isvalid = currentScope.locals_unwrap_mut().unwrap().contains_key(word);
-                    
-                    if isvalid {
-                        let regOp = par_expect!(lexer.currentLocation,lexer.next(),"Unexpected variable operation or another variable!");
-                        
-                        match regOp.typ {
-                            TokenType::IntrinsicType(Typ) => {
-                                match Typ {
-                                    IntrinsicType::POP => {
-                                        let body = currentScope.body_unwrap_mut().unwrap();
-                                        // TODO: There might be some optimzation to do with references of strings instead of actual strings
-                                        body.push((regOp.location,Instruction::POP(OfP::LOCALVAR(word.clone()))));
-                                    },
-                                    IntrinsicType::PUSH => {
-                                        let body = currentScope.body_unwrap_mut().unwrap();
-                                        // TODO: There might be some optimzation to do with references of strings instead of actual strings
-                                        body.push((regOp.location,Instruction::PUSH(OfP::LOCALVAR(word.clone()))));
-                                    },
-                                    IntrinsicType::SET => {
-                                        let operand = par_expect!(lexer.currentLocation,lexer.next(),"Expected another variable, a constant integer or a (string: not yet implemented)!");
-                                        match operand.typ {
-                                            TokenType::Register(reg) => {
-                                                par_assert!(operand,reg.size() == currentScope.locals_unwrap().unwrap().get(word).unwrap().typ.get_size(program), "Register assigned to differently sized variable, Variable size: {}, Register size: {}",reg.size(),currentScope.locals_unwrap_mut().unwrap().get(word).unwrap().typ.get_size(program));
-                                                // TODO: There might be some optimzation to do with references of strings instead of actual strings
-                                                let body = currentScope.body_unwrap_mut().unwrap();
-                                                body.push((operand.location,Instruction::MOV(OfP::LOCALVAR(word.clone()), OfP::REGISTER(reg))))
-                                            }
-                                            TokenType::WordType(ref other) => {
-                                                
-                                                if currentScope.locals_unwrap().unwrap().contains_key(other) {
-                                                    // TODO: There might be some optimzation to do with references of strings instead of actual strings
-                                                    let body = currentScope.body_unwrap_mut().unwrap();
-                                                    body.push((operand.location,Instruction::MOV(OfP::LOCALVAR(word.clone()), OfP::LOCALVAR(other.clone()))))
-                                                }
-                                                else if currentScope.contract_is_some() && currentScope.contract_unwrap().unwrap().Inputs.contains_key(other) {
-                                                    let body = currentScope.body_unwrap_mut().unwrap();
-                                                    body.push((operand.location,Instruction::MOV(OfP::LOCALVAR(word.clone()), OfP::PARAM(other.clone()))))
-                                                }
-                                                else {
-                                                    par_error!(operand,"Could not find variable or register {}",other);
-                                                }
-                                            },
-                                            TokenType::StringType(_) => todo!("Implement strings with local variables"),
-                                            TokenType::Number32(val) => {
-                                                let body = currentScope.body_unwrap_mut().unwrap();
-                                                // TODO: There might be some optimzation to do with references of strings instead of actual strings
-                                                body.push((operand.location,Instruction::MOV(OfP::LOCALVAR(word.clone()), OfP::RAW(val as i64))))
-                                            },
-                                            TokenType::Number64(val) => {
-                                                let body = currentScope.body_unwrap_mut().unwrap();
-                                                // TODO: There might be some optimzation to do with references of strings instead of actual strings
-                                                body.push((operand.location,Instruction::MOV(OfP::LOCALVAR(word.clone()), OfP::RAW(val))))
-                                            },
-                                            _ => {
-                                                par_error!(operand,"Unexpected operand for = intrinsic! Expected either a constant integer, another variable or a (string: not yet implemented) but found {}",operand.typ.to_string(false))
-                                            }
-                                        }
-                                    },
-                                    _ => {
-                                        par_error!(regOp,"Error: Unexpected intrinsic type for a local variable! Expected POP/PUSH/SET or another local variable but found {}",Typ.to_string(false))
-                                    }
-                                }
-                            },
-                            TokenType::WordType(Word) => {
-                                if currentScope.locals_unwrap_mut().unwrap().contains_key(&Word) {
-                                    
-                                    let regOp = lexer.next().expect(&format!("(P) [ERROR] {}:{}:{}: Unexpected register operation!",token.location.clone().file,&token.location.clone().linenumber,&token.location.clone().character));
-                                    match regOp.typ {
-                                        TokenType::IntrinsicType(typ) => {
-                                            
-                                            match typ {
-                                                IntrinsicType::ADD => {
-                                                    let body = currentScope.body_unwrap_mut().unwrap();
-                                                    body.push((token.location.clone(),Instruction::ADD(OfP::LOCALVAR(word.clone()), OfP::LOCALVAR(Word.clone()))))
-                                                }
-                                                IntrinsicType::SUB => {
-                                                    let body = currentScope.body_unwrap_mut().unwrap();
-                                                    body.push((token.location.clone(),Instruction::SUB(OfP::LOCALVAR(word.clone()), OfP::LOCALVAR(Word.clone()))))
-                                                }
-                                                IntrinsicType::MUL => {
-                                                    let body = currentScope.body_unwrap_mut().unwrap();
-                                                    body.push((token.location.clone(),Instruction::MUL(OfP::LOCALVAR(word.clone()), OfP::LOCALVAR(Word.clone()))))
-                                                }
-                                                IntrinsicType::EQ => {
-                                                    let body = currentScope.body_unwrap_mut().unwrap();
-                                                    body.push((token.location.clone(),Instruction::EQUALS(OfP::LOCALVAR(word.clone()), OfP::LOCALVAR(Word.clone()))))
-                                                }
-                                                IntrinsicType::DIV => {
-                                                    let body = currentScope.body_unwrap_mut().unwrap();
-                                                    body.push((token.location.clone(),Instruction::DIV(OfP::LOCALVAR(word.clone()), OfP::LOCALVAR(Word.clone()))))
-                                                }
-                                                other => par_error!(token, "Unexpected Intrinsic! Expected Register Intrinsic but found {}",other.to_string(false))
-                                            }
-                                        }
-                                        other => {
-                                            par_error!(token, "Unexpected token type: Expected Intrinsic but found {}",other.to_string(false));
-                                        }
-                                    }
+            } 
+            else {
+                par_error!(Op,"Error: Unexpected token {} after ofp!",Op.typ.to_string(false))
+            }
+            // match &Op.typ {
+            //     TokenType::Operation(op) => {
+            //         match op {
+            //             Op::EQ => {
+            //                 let ofp2_t = par_expect!(lexer.currentLocation,lexer.next(),"Unexpected variable operation or another variable!");
+            //                 let ofp2 = par_expect!(token, OfP::from_token(&ofp2_t, build, program,currentLocals), "Unknown word type: {}!",ofp2_t.typ.to_string(false));
+            //                 currentScope.body_unwrap_mut().unwrap().push((Op.location.clone(), Instruction::EQUALS(Expression::val(ofp1), Expression::val(ofp2))))
+            //             }
+            //             Op::SET => {
+            //                 let ofp2_t = par_expect!(lexer.currentLocation,lexer.next(),"Unexpected variable operation or another variable!");
+            //                 let ofp2 = par_expect!(token, OfP::from_token(&ofp2_t, build, program,currentLocals), "Unknown word type: {}!",ofp2_t.typ.to_string(false));
+            //                 currentScope.body_unwrap_mut().unwrap().push((Op.location.clone(), Instruction::MOV(ofp1, Expression::val(ofp2))))
+            //             }
+            //             Op::NEQ => {
+            //                 let ofp2_t = par_expect!(lexer.currentLocation,lexer.next(),"Unexpected variable operation or another variable!");
+            //                 let ofp2 = par_expect!(token, OfP::from_token(&ofp2_t, build, program,currentLocals), "Unknown word type: {}!",ofp2_t.typ.to_string(false));
+            //                 currentScope.body_unwrap_mut().unwrap().push((Op.location.clone(), Instruction::NOTEQUALS(Expression::val(ofp1), Expression::val(ofp2))))
+            //             }
+            //             Op::LT => {
+            //                 let ofp2_t = par_expect!(lexer.currentLocation,lexer.next(),"Unexpected variable operation or another variable!");
+            //                 let ofp2 = par_expect!(token, OfP::from_token(&ofp2_t, build, program,currentLocals), "Unknown word type: {}!",ofp2_t.typ.to_string(false));
+            //                 currentScope.body_unwrap_mut().unwrap().push((Op.location.clone(), Instruction::LESSTHAN(Expression::val(ofp1), Expression::val(ofp2))))
+            //             }
+            //             Op::GT => {
+            //                 let ofp2_t = par_expect!(lexer.currentLocation,lexer.next(),"Unexpected variable operation or another variable!");
+            //                 let ofp2 = par_expect!(token, OfP::from_token(&ofp2_t, build, program,currentLocals), "Unknown word type: {}!",ofp2_t.typ.to_string(false));
+            //                 currentScope.body_unwrap_mut().unwrap().push((Op.location.clone(), Instruction::MORETHAN(Expression::val(ofp1), Expression::val(ofp2))))
+            //             }
+            //             Op::LTEQ => {
+            //                 let ofp2_t = par_expect!(lexer.currentLocation,lexer.next(),"Unexpected variable operation or another variable!");
+            //                 let ofp2 = par_expect!(token, OfP::from_token(&ofp2_t, build, program,currentLocals), "Unknown word type: {}!",ofp2_t.typ.to_string(false));
+            //                 currentScope.body_unwrap_mut().unwrap().push((Op.location.clone(), Instruction::LESSTHANEQUALS(Expression::val(ofp1), Expression::val(ofp2))))
+            //             }
+            //             Op::GTEQ => {
+            //                 let ofp2_t = par_expect!(lexer.currentLocation,lexer.next(),"Unexpected variable operation or another variable!");
+            //                 let ofp2 = par_expect!(token, OfP::from_token(&ofp2_t, build, program,currentLocals), "Unknown word type: {}!",ofp2_t.typ.to_string(false));
+            //                 currentScope.body_unwrap_mut().unwrap().push((Op.location.clone(), Instruction::MORETHANEQUALS(Expression::val(ofp1), Expression::val(ofp2))))
+            //             }
+            //             _ => {
+            //                 par_error!(Op, "Error: Unexpected operation in set: {}",op.to_string());
+            //             }
+            //         }
+            //     }
+            //     _ => {
+            //         let ofp2 = par_expect!(token, OfP::from_token(&Op, build, program,currentLocals), "Unexpected token type: {} after ofp!",Op.typ.to_string(false));
+            //         let Op = par_expect!(lexer.currentLocation,lexer.next(),"Unexpected variable operation or another variable!");
+            //         match &Op.typ {
+            //             TokenType::Operation(op) => {
+            //                 match op {
+            //                     Op::PLUS => currentScope.body_unwrap_mut().unwrap().push((Op.location.clone(), Instruction::ADDSET(ofp1,Expression::val(ofp2)))),
+            //                     Op::MINUS=> currentScope.body_unwrap_mut().unwrap().push((Op.location.clone(), Instruction::SUBSET(ofp1,Expression::val(ofp2)))),
+            //                     Op::MUL => currentScope.body_unwrap_mut().unwrap().push ((Op.location.clone(), Instruction::MULSET(ofp1,Expression::val(ofp2)))),
+            //                     Op::DIV => currentScope.body_unwrap_mut().unwrap().push ((Op.location.clone(), Instruction::DIVSET(ofp1,Expression::val(ofp2)))),
+            //                     _ => {
+            //                         par_error!(Op, "Unexpected intrinsic {} after ofp",Op.typ.to_string(false))
+            //                     }
+            //                 }
+            //             },
+            //             _ => {
+            //                 par_error!(Op, "Unexpected token type {} after ofp",Op.typ.to_string(false))
+            //             }
+            //         }
+            //     }
+            // }
+        }
+        TokenType::IntrinsicType(Type) => {
+            match Type {
+                IntrinsicType::Extern => {
+                    let externType = lexer.next();
+                    let externType = par_expect!(lexer.currentLocation,externType,"Error: Unexpected abtrupt end of tokens in extern");
+                    match externType.typ {
+                        TokenType::WordType(Word) => {
+                            par_assert!(lexer.currentLocation, !build.contains_symbol(&Word), "Error: Redifinition of existing symbol {}",Word);
+                            let mut contract: Option<AnyContract> = None;
+                            
+                            if let Some(tok) = lexer.peekable().peek() {
+                                if tok.typ == TokenType::IntrinsicType(IntrinsicType::OPENPAREN) {
+                                    let tok = tok.clone();
+                                    contract = Some(parse_any_contract(lexer));
+                                    par_assert!(tok, tok.typ==TokenType::IntrinsicType(IntrinsicType::DOTCOMA),"Error: Expected dotcoma at the end of extern definition!");
                                 }
                                 else{
-                                    par_error!(token, "unknown word {} found after Variable operation",Word);
+                                    par_assert!(tok, tok.typ==TokenType::IntrinsicType(IntrinsicType::DOTCOMA),"Error: Expected dotcoma at the end of extern definition!");
                                 }
                             }
-                            _ => {
-                                par_error!(regOp,"Error: Unexpected token type for a local variable! Expected Intrinsic or another local but found {}",regOp.typ.to_string(false))
-                            }
+                            build.externals.insert(Word,External { typ: ExternalType::RawExternal, loc: externType.location.clone(), contract});
                         }
-                    }
-                }
-                if !isvalid  {
-                    isvalid = build.constdefs.contains_key(word);
-                    if isvalid {
-                        let cons = build.constdefs.get(word).unwrap();
-                        match cons.typ {
-                            RawConstValueType::INT(ref val) => {
-                                let body = currentScope.body_unwrap_mut().unwrap();
-                                body.push((token.location.clone(),Instruction::MOV(OfP::REGISTER(Register::RAX), OfP::RAW(*val as i64))));
-                                body.push((token.location.clone(),Instruction::PUSH(OfP::REGISTER(Register::RAX))));
-                            }
-                            RawConstValueType::LONG(ref val) => {
-                                let body = currentScope.body_unwrap_mut().unwrap();
-                                body.push((token.location.clone(),Instruction::MOV(OfP::REGISTER(Register::RAX), OfP::RAW(*val as i64))));
-                                body.push((token.location.clone(),Instruction::PUSH(OfP::REGISTER(Register::RAX))));
-                            }
-                            RawConstValueType::STR(val) => {
-                                let body = currentScope.body_unwrap_mut().unwrap();
-                                body.push((token.location.clone(),Instruction::PUSH(OfP::STR(val, ProgramStringType::STR))));
-                            }
-                            RawConstValueType::PTR(_) => { todo!("RawConstValueType::PTR")}
-                                                 
-                        }
-                    }
-                }
-                if !isvalid && currentScope.contract_is_some(){
-                    let contract = currentScope.contract_unwrap().unwrap();
-                    for (p_name,_) in contract.Inputs.iter() {
-                        if p_name == word {
-                            isvalid = true;
-                            let f = par_expect!(lexer.currentLocation, lexer.next(), "Error: Abruptly ran out of tokens for parameter operation");
-                            match f.typ {
-                                TokenType::WordType(_) => todo!(),
-                                TokenType::IntrinsicType(typ) => {
-                                    match typ {
-                                        IntrinsicType::PUSH => {
-                                            let body = currentScope.body_unwrap_mut().unwrap();
-                                            body.push((lexer.currentLocation.clone(), Instruction::PUSH(OfP::PARAM(word.clone()))))
-                                        },
-                                        _ => {
-                                            par_error!(lexer.currentLocation, "Unknown operation for parameter {}",typ.to_string(false))
+                        TokenType::StringType(Type) => {
+                            match Type.as_str() {
+                                "C" => {
+                                    let externWord = lexer.next();
+                                    let externWord = externWord.expect("Error: C type extern defined but stream of tokens abruptly ended!");
+                                    match externWord.typ {
+                                        TokenType::WordType(Word) => {
+                                            par_assert!(lexer.currentLocation, !build.contains_symbol(&Word), "Error: Redifinition of existing symbol {}",Word);
+                                            let mut contract: Option<AnyContract> = None;
+                                            if let Some(tok) = lexer.peekable().peek() {
+                                                if tok.typ == TokenType::IntrinsicType(IntrinsicType::OPENPAREN) {
+                                                    contract = Some(parse_any_contract(lexer));
+                                                    let ntc = par_expect!(lexer.currentLocation,lexer.next(),"Error: stream of tokens abruptly ended in extern definition");
+                                                    par_assert!(ntc, ntc.typ==TokenType::IntrinsicType(IntrinsicType::DOTCOMA),"Error: Expected dotcoma at the end of extern definition! But found {}",ntc.typ.to_string(false));
+                                                }
+                                                else {
+                                                    par_assert!(tok, tok.typ==TokenType::IntrinsicType(IntrinsicType::DOTCOMA),"Error: Expected dotcoma at the end of extern definition!");
+                                                }
+                                            }
+                                            build.externals.insert(Word,External { typ: ExternalType::CExternal, loc: externWord.location.clone(), contract});
+
+                                        }
+                                        TokenType::StringType(Word) => {
+                                            par_error!(token, "Error: Expected type Word but found String \"{}\"",Word)
+                                        }
+                                        Other => {
+                                            par_error!(token, "Unexpected token type \"{}\", (Expected Word)",Other.to_string(false));
                                         }
                                     }
-                                },
-                                TokenType::Definition(_) => todo!(),
-                                TokenType::StringType(_) => todo!(),
-                                TokenType::CStringType(_) => todo!(),
-                                TokenType::CharType(_) => todo!(),
-                                TokenType::Number32(_) => todo!(),
-                                TokenType::Number64(_) => todo!(),
-                                TokenType::Function(word) => {
-                                    //TODO: Finish function calling....
-                                    let argcontract = parse_argument_contract(lexer, &mut build, currentScope.locals_unwrap(),);
-                                    let body = currentScope.body_unwrap_mut().unwrap();
-                                    //todo!("Parse arguments list");
-                                    // TODO: There might be some optimzation to do with references of strings instead of actual strings
-                                    body.push((token.location.clone(),Instruction::CALL(word,argcontract)));
-                                },
-                                TokenType::Register(_) => todo!(),
+                                }
+                                typ => {
+                                    par_error!(token, "Unexpected behaviour! Unexpected type: {}",typ)
+                                }
                             }
-                            break;
+                        },
+                        other => {
+                            par_error!(token,"Unexpected behaviour! expected type Word or String but found {}",other.to_string(false));
+                        }
+
+                    }
+                }
+                IntrinsicType::Func => {
+                    
+                    let funcName: Option<Token> = lexer.next();
+                    let funcName: Token = par_expect!(lexer.currentLocation,funcName,"Unexpected abtrupt end of tokens in func");
+                    match funcName.typ {
+                        TokenType::WordType(Word) => {
+                            par_assert!(lexer.currentLocation, !build.contains_symbol(&Word), "Error: Redifinition of existing symbol {}",Word);
+                            par_assert!(token,build.functions.get(&Word).is_none(),"Multiply defined symbols {}!",Word);
+                            let contract = parse_function_contract(lexer);
+                            lexer.CurrentFuncs.insert(Word.clone());
+                            let mut locals: Locals = LinkedHashMap::with_capacity(contract.Inputs.len());
+                            for (inn,inp) in contract.Inputs.iter() {
+                                locals.insert(inn.clone(), inp.clone());
+                            }                                
+                            scopeStack.push(Scope { typ: ScopeType::FUNCTION(Function { contract, body:  vec![(token.location.clone(),Instruction::FNBEGIN())], location: token.location.clone(), locals: Locals::new() }, Word), hasBeenOpened: false });
+                            currentLocals.push(locals);
+                            build.functions.reserve(1);
+                        }
+                        Other => par_error!(token,"Unexpected behaviour! Expected type Word but found {}",Other.to_string(false))
+                    }
+
+                }
+                IntrinsicType::OPENPAREN => todo!("loc: {}",token.location.loc_display()),
+                IntrinsicType::CLOSEPAREN => todo!(),
+                IntrinsicType::DOUBLE_COLIN => todo!("Context {:#?}",build),
+                IntrinsicType::COMA => todo!(),
+                IntrinsicType::OPENCURLY => {
+                    let ln = scopeStack.len();
+                    if ln != 0 {
+                        let s = scopeStack.last_mut().unwrap();
+                        if s.hasBeenOpened {
+                            //println!("CurrentLocals: {:#?}",currentLocals);
+                            currentLocals.push(Locals::new());
+                            //println!("CurrentLocals: {:#?}",currentLocals);
+                            scopeStack.push(Scope { typ: ScopeType::NORMAL(NormalScope { typ: NormalScopeType::EMPTY, body: vec![], locals: Locals::new()}), hasBeenOpened: true });
+                            return;
+                        }
+                        par_assert!(token,!s.hasBeenOpened, "Scope already opened! {:?}",scopeStack);
+                        s.hasBeenOpened = true;
+                        
+                        match &s.typ {
+                            ScopeType::FUNCTION(_, _) => {}
+                            ScopeType::NORMAL(normal) => {
+                                //println!("CurrentLocals: {:#?}",currentLocals);
+                                currentLocals.push(Locals::new());
+                                match normal.typ {
+                                    NormalScopeType::IF(_) => {
+                                       par_assert!(token, ln > 1, "Error: Alone if outside of any scope is not allowed!");
+                                       let prev = scopeStack.get_mut(ln-2).unwrap();
+                                       par_assert!(token, prev.body_is_some(), "Error: if can not be declared inside of scope of {} as they do not allow instructions!",prev.typ.to_string(true));
+                                    }
+                                    NormalScopeType::ELSE | NormalScopeType::EMPTY => {}
+                                    NormalScopeType::WHILE(_) => {
+                                        par_assert!(token, ln > 1, "Error: Alone if outside of any scope is not allowed!");
+                                        let prev = scopeStack.get_mut(ln-2).unwrap();
+                                        par_assert!(token, prev.body_is_some(), "Error: if can not be declared inside of scope of {} as they do not allow instructions!",prev.typ.to_string(true));
+                                    },
+                                }
+                            }
+                        }
+                    }
+                    else {
+                        
+                        scopeStack.push(Scope { typ: ScopeType::NORMAL(NormalScope { typ: NormalScopeType::EMPTY, body: vec![], locals: Locals::new()}), hasBeenOpened: true});
+                    }
+                }
+                IntrinsicType::CLOSECURLY => {
+                    if let Some(sc) = scopeStack.pop() {
+                        par_assert!(token,sc.hasBeenOpened, "Error: scope closed but never opened!");
+                        match sc.typ {
+                            ScopeType::FUNCTION(mut func, name) => {
+                                //println!("CurrentLocals function: {:#?}",currentLocals);
+                                func.body.push((token.location.clone(),Instruction::SCOPEEND));
+                                func.locals = currentLocals.pop().unwrap();
+                                build.functions.insert(name, func);
+                            },
+                            ScopeType::NORMAL(mut normal) => {
+                                //println!("CurrentLocals at Normal: {:#?}",currentLocals);
+                                normal.locals = currentLocals.pop().unwrap();
+                                match normal.typ {
+                                    NormalScopeType::IF(_) => {
+                                        let currentScope = getTopMut(scopeStack).unwrap();
+                                        let body = par_expect!(token,currentScope.body_unwrap_mut(), "Error: Can not close if, because it is inside a {} which doesn't support instructions!",currentScope.typ.to_string(false));
+                                        body.push((token.location.clone(),Instruction::EXPAND_IF_SCOPE(normal)))
+                                    },
+                                    NormalScopeType::EMPTY => {
+                                        let currentScope = getTopMut(scopeStack).unwrap();
+                                        let body = par_expect!(token,currentScope.body_unwrap_mut(), "Error: Can not close if, because it is inside a {} which doesn't support instructions!",currentScope.typ.to_string(false));
+                                        body.push((token.location.clone(),Instruction::EXPAND_SCOPE(normal)));
+                                    }
+                                    NormalScopeType::ELSE => {
+                                        let currentScope = getTopMut(scopeStack).unwrap();
+
+                                        let body = par_expect!(token,currentScope.body_unwrap_mut(), "Error: Can not close if, because it is inside a {} which doesn't support instructions!",currentScope.typ.to_string(false));
+                                        body.push((token.location.clone(),Instruction::EXPAND_ELSE_SCOPE(normal)));
+                                    },
+                                    NormalScopeType::WHILE(_) => {
+                                        let currentScope = getTopMut(scopeStack).unwrap();
+                                        let body = par_expect!(token,currentScope.body_unwrap_mut(), "Error: Can not close if, because it is inside a {} which doesn't support instructions!",currentScope.typ.to_string(false));
+                                        body.push((token.location.clone(),Instruction::EXPAND_WHILE_SCOPE(normal)))
+                                    },
+                                }
+                            }
+                        }
+                        
+                    }
+                    else {
+                        par_error!(token, "Scope closed but never opened!!!");
+                    }
+                }
+                IntrinsicType::RET => {
+                    par_assert!(token, scopeStack.len()> 0 && getTopMut(scopeStack).unwrap().body_is_some(), "Error: Unexpected return intrinsic outside of scope! Scopes of type {} do not support instructions!",getTopMut(scopeStack).unwrap().typ.to_string(false));
+                    let body = getTopMut(scopeStack).unwrap().body_unwrap_mut().unwrap();
+                    let result_body: Vec<Token> = lexer.map_while(|t| {
+                        if t.typ != TokenType::IntrinsicType(IntrinsicType::DOTCOMA) {
+                            Some(t)
+                        }
+                        else {
+                            None
+                        }
+                    }).collect();
+                    body.push((token.location.clone(),Instruction::RET(tokens_to_expression(&result_body, build, program, &currentLocals))));
+                },
+                IntrinsicType::INCLUDE => {
+                    let includeName = par_expect!(lexer.currentLocation,lexer.next(),"Error: abruptly ran out of tokens");
+                    match includeName.typ {
+                        TokenType::StringType(path) => {
+                            let p = PathBuf::from(&program.path);
+                            let p = p.parent().unwrap();
+                            let include_p  = PathBuf::from(path);
+                            let info = fs::read_to_string(String::from(p.join(&include_p).to_str().unwrap().replace("\\", "/"))).expect(&format!("Error: could not open file: {}",String::from(p.join(&include_p).to_str().unwrap()).replace("\\", "/")));
+                            let mut lf = Lexer::new(&info,lexer.Intrinsics,lexer.Definitions,HashSet::new());
+                            lf.currentLocation.file = Rc::new(String::from(p.join(&include_p).to_str().unwrap().replace("\\", "/")));
+                            let mut nprogram = program.clone();
+                            nprogram.path = String::from(p.join(&include_p).to_str().unwrap().replace("\\", "/"));
+                            let mut build2 = parse_tokens_to_build(&mut lf, &mut nprogram);
+                            build.externals.extend(build2.externals);
+                            for (strdefId,_strdef) in build2.stringdefs.iter() {
+                                let orgstrdefId  = strdefId.clone();
+                                let mut strdefId = strdefId.clone();
+                                let isContaining = build.stringdefs.contains_key(&strdefId);
+                                while build.stringdefs.contains_key(&strdefId) || build2.stringdefs.contains_key(&strdefId) {
+                                    strdefId = Uuid::new_v4();
+                                }
+                                if isContaining {
+                                    for (_, cn_cn) in build2.constdefs.iter_mut() {
+                                        match cn_cn.typ {
+                                            _ => {}
+                                            _ => {}
+                                            RawConstValueType::STR(ref mut val) => {
+                                                if &orgstrdefId == val {
+                                                    *val = strdefId
+                                                }
+                                            },
+                                        }
+                                    }
+                                }
+                            }
+                            build.stringdefs.extend(build2.stringdefs);
+                            for (fn_name,fn_fn) in build2.functions {
+                                let _loc = fn_fn.location.clone();
+                                match build.functions.insert(fn_name.clone(), fn_fn) {
+                                    Some(_Other) => {
+                                        par_error!(_loc, "Error: mulitply defined symbols {}",fn_name);
+                                    },
+                                    None => {},
+                                }
+                            }
+                            build.constdefs.reserve(build2.constdefs.len());
+                            for (cn_name,cn_val) in build2.constdefs{
+                                let loc = cn_val.loc.clone();
+                                match build.constdefs.insert(cn_name.clone(),cn_val) {
+                                    Some(_Other) => {
+                                        par_error!(loc,"Error: mulitply defined symbols {}",cn_name);
+                                    },
+                                    None => {},
+                                }
+                            }
+                        }
+                        _ => {
+                            par_error!(includeName, "Expected token type String but found {}",includeName.typ.to_string(false));
+                        }
+                    }
+                },
+                
+                IntrinsicType::CONSTANT => {
+                    let first = lexer.next();
+                    let first = par_expect!(lexer.currentLocation,first,"abruptly ran out of tokens in constant name definition");
+                    let name: String = match first.typ {
+                        TokenType::WordType(ref word) => {
+                            par_assert!(first, !lexer.CurrentFuncs.contains(word), "Error: multiple constant symbol definitions! Cannot define a constant that already exists as a function!\nFunction defined at: {}",build.functions.get(word).unwrap().location.loc_display());
+                            word.to_string()
+                        }
+                        _ => {
+                            par_error!(first, "Unexpected token type! Expected word but found {}",first.typ.to_string(false));
+                        }
+                    };
+                    par_assert!(first, !build.contains_symbol(&name) || build.constdefs.contains_key(&name), "Error: Cannot define constant {} as that would redefine a symbol of a different type!",name);
+                    let first = lexer.next();
+                    let first = par_expect!(lexer.currentLocation,first,"abruptly ran out of tokens in constant name definition");
+                    let mut expect_type: Option<VarType> = None;
+                    match first.typ {
+                        TokenType::SETOperation(ref typ) => {
+                            par_assert!(first,*typ == SetOp::SET,"Error: Unexpected operation type: {}",typ.to_string());
+                        }
+                        TokenType::IntrinsicType(typ) => {
+                            match typ {
+                                IntrinsicType::DOUBLE_COLIN => {
+                                    let typ = par_expect!(lexer.currentLocation,lexer.next(), "Error: abruptly ran out of tokens in constant type definition");
+                                    if let TokenType::Definition(d) = typ.typ {
+                                        expect_type = Some(d);
+                                        let typ = par_expect!(lexer.currentLocation,lexer.next(), "Error: abruptly ran out of tokens in constant type definition");
+                                        par_assert!(typ, typ.typ == TokenType::SETOperation(SetOp::SET), "Error: unexpected token type {} after constant definition! Expected =",typ.typ.to_string(false));
+                                    }
+                                    else {
+                                        par_error!(typ, "Error: Expected definition but found {}!",typ.typ.to_string(false));
+                                    }
+                                }
+                                _ => {
+                                    par_error!(first, "Error: expected = but found {}",typ.to_string(false));
+                                }
+                            }
+                        }
+                        _ => {
+                            par_error!(first, "Unexpected token type! Expected intrinsic but found {}",first.typ.to_string(false));
                         }
                     }
                     
-                }
-                par_assert!(token,isvalid,"Unknown word type: {}, funcs: {:#?}",word,build.functions);
-            }
-            TokenType::IntrinsicType(Type) => {
-                match Type {
-                    IntrinsicType::Extern => {
-                        let externType = lexer.next();
-                        let externType = par_expect!(lexer.currentLocation,externType,"Error: Unexpected abtrupt end of tokens in extern");
-                        match externType.typ {
-                            TokenType::WordType(Word) => {
-                                let mut contract: Option<AnyContract> = None;
-                       
-                                if let Some(tok) = lexer.peekable().peek() {
-                                    if tok.typ == TokenType::IntrinsicType(IntrinsicType::OPENPAREN) {
-                                        let tok = tok.clone();
-                                        contract = Some(parse_any_contract(lexer));
-                                        par_assert!(tok, tok.typ==TokenType::IntrinsicType(IntrinsicType::DOTCOMA),"Error: Expected dotcoma at the end of extern definition!");
-                                    }
-                                    else{
-                                        par_assert!(tok, tok.typ==TokenType::IntrinsicType(IntrinsicType::DOTCOMA),"Error: Expected dotcoma at the end of extern definition!");
-                                    }
-                                }
-                                build.externals.insert(Word,External { typ: ExternalType::RawExternal, loc: externType.location.clone(), contract});
-                            }
-                            TokenType::IntrinsicType(_) => assert!(false,"Unexpected behaviour! expected type Word or String but found Intrinsic"),
-                            TokenType::StringType(Type) => {
-                                match Type.as_str() {
-                                    "C" => {
-                                        let externWord = lexer.next();
-                                        let externWord = externWord.expect("Error: C type extern defined but stream of tokens abruptly ended!");
-                                        match externWord.typ {
-                                            TokenType::WordType(Word) => {
-                                                let mut contract: Option<AnyContract> = None;
-                                                //println!("Lexer current loc: {}",lexer.currentLocation.loc_display());                                                
-                                                if let Some(tok) = lexer.peekable().peek() {
-                                                    if tok.typ == TokenType::IntrinsicType(IntrinsicType::OPENPAREN) {
-                                                        // let tok2 = tok.clone();
-                                                        // println!("Lexer current loc: {}",lexer.currentLocation.loc_display());
-                                                        contract = Some(parse_any_contract(lexer));
-                                                        let ntc = par_expect!(lexer.currentLocation,lexer.next(),"Error: stream of tokens abruptly ended in extern definition");
-                                                        par_assert!(ntc, ntc.typ==TokenType::IntrinsicType(IntrinsicType::DOTCOMA),"Error: Expected dotcoma at the end of extern definition! But found {}",ntc.typ.to_string(false));
-                                                    }
-                                                    else {
-                                                        par_assert!(tok, tok.typ==TokenType::IntrinsicType(IntrinsicType::DOTCOMA),"Error: Expected dotcoma at the end of extern definition!");
-                                                    }
-                                                }
-                                                build.externals.insert(Word,External { typ: ExternalType::CExternal, loc: externWord.location.clone(), contract});
-
-                                            }
-                                            TokenType::StringType(Word) => {
-                                                par_error!(token, "Error: Expected type Word but found String \"{}\"",Word)
-                                            }
-                                            Other => {
-                                                par_error!(token, "Unexpected token type \"{}\", (Expected Word)",Other.to_string(false));
-                                            }
-                                        }
-                                    }
-                                    typ => {
-                                        par_error!(token, "Unexpected behaviour! Unexpected type: {}",typ)
-                                    }
-                                }
-                            },
-                            other => {
-                                par_error!(token,"Unexpected behaviour! expected type Word or String but found {}",other.to_string(false));
-                            }
-
-                        }
+                    let val = eval_const_def(lexer,build,TokenType::IntrinsicType(IntrinsicType::DOTCOMA));
+                    if let Some(expect_type) = expect_type {
+                        let tvt = val.typ.to_var_type();
+                        par_assert!(lexer.currentLocation, val.typ.is_eq_vartype(&expect_type), "Error: Non matching variable types!\nExpected: {}\nFound: {}",expect_type.to_string(false),if let Some(tvt) = tvt {tvt.to_string(false)} else {"None".to_string()});
                     }
-                    IntrinsicType::Func => {
-                        
-                        let funcName: Option<Token> = lexer.next();
-                        let funcName: Token = par_expect!(lexer.currentLocation,funcName,"Unexpected abtrupt end of tokens in func");
-                        match funcName.typ {
-                            TokenType::WordType(Word) => {
-                                par_assert!(token,build.functions.get(&Word).is_none(),"Multiply defined symbols {}!",Word);
-                                let contract = parse_function_contract(lexer);
-                                //println!("Contract parsed: {:#?}",contract);
-                                //currentFunction = Some(Word.clone()); // Make currentFunction a shared reference with Rc<RefCell<>>
-                                // if Word == "main" {
-                                //     //build.functions.insert(Word.clone(), None); //Function { contract: contract.clone(), body:  vec![], location: token.location.clone(), locals: HashMap::new() }
-                                //     lexer.CurrentFuncs.insert(Word.clone());
-                                //     scopeStack.push(Scope { typ: ScopeType::FUNCTION(Function { contract, body:  vec![], location: token.location.clone(), locals: HashMap::new() }, Word), hasBeenOpened: false });
-                                //     build.functions.reserve(1);
-                                // }
-                                // else {
-                                    //build.functions.insert(Word.clone(), None);//Function { contract: contract.clone(), body:  vec![(token.location.clone(),Instruction::FNBEGIN())], location: token.location.clone(), locals:  HashMap::new() }
-                                    lexer.CurrentFuncs.insert(Word.clone());
-                                    scopeStack.push(Scope { typ: ScopeType::FUNCTION(Function { contract, body:  vec![(token.location.clone(),Instruction::FNBEGIN())], location: token.location.clone(), locals: HashMap::new() }, Word), hasBeenOpened: false });
-                                    build.functions.reserve(1);
-                                //}
-                                //let v = build.functions.get_mut(&Word).unwrap();
-                                //Scope {typ: ScopeType::FUNC, hasBeenOpened: false,inst: InstBodyType::Func(v.body.clone()), locals: LocalBodyType::Func(v.locals.clone()), contract: Some(contract)}
-                                //scopeStack.push(Scope { typ: ScopeType::FUNCTION(FunctionScope { func: v }), hasBeenOpened: false});
+                    let result = match val.typ {
+                        ConstValueType::INT(rval) => {
+                           RawConstValue {typ: RawConstValueType::INT(rval), loc: val.loc}
+                        }
+                        ConstValueType::LONG(rval) => {
+                            RawConstValue {typ: RawConstValueType::LONG(rval), loc: val.loc}
+                        }
+                        ConstValueType::STR(rval, typ) => {
+                            let mut UUID = Uuid::new_v4();
+                            while build.stringdefs.contains_key(&UUID) {
+                                UUID = Uuid::new_v4();
                             }
-                            Other => par_error!(token,"Unexpected behaviour! Expected type Word but found {}",Other.to_string(false))
+                            build.stringdefs.insert(UUID,ProgramString {Data: rval, Typ: typ});
+                            RawConstValue {typ: RawConstValueType::STR(UUID), loc: val.loc}
+                        }
+                        ConstValueType::PTR(typ,v) => { 
+                            RawConstValue {typ: RawConstValueType::PTR(typ, v), loc: val.loc}
                         }
 
+                    };
+                    if let Some(constdef) = build.constdefs.get(&name) {
+                        let i1 = constdef.typ.to_type(&build);
+                        let i2 = result.typ.to_type(&build);
+                        par_assert!(result.loc, i1 == i2,"Error: Constant value defined at {}, Redined with a different type at {}!\nOriginal = {:?}\nRedefinition = {:?}",constdef.loc.loc_display(),result.loc.loc_display(),i1,i2);
                     }
-                    IntrinsicType::OPENPAREN => todo!("loc: {}",token.location.loc_display()),
-                    IntrinsicType::CLOSEPAREN => todo!(),
-                    IntrinsicType::DOUBLE_COLIN => todo!("Context {:#?}",build),
-                    IntrinsicType::COMA => todo!(),
-                    IntrinsicType::OPENCURLY => {
-                        let ln = scopeStack.len();
-                        if ln != 0 {
-                            let s = scopeStack.get_mut(ln-1).unwrap();
-                            
-                            par_assert!(token,!s.hasBeenOpened, "Scope already opened! {:?}",scopeStack);
-                            s.hasBeenOpened = true;
-                            //let currentFunc = build.functions.get_mut(currentFunction.as_mut().unwrap()).unwrap();
-                            
-                            match &s.typ {
-                                ScopeType::FUNCTION(_, _) => {}
-                                ScopeType::NORMAL(normal) => {
-                                    match normal.typ {
-                                        NormalScopeType::IF => {
-                                           par_assert!(token, ln > 1, "Error: Alone if outside of any scope is not allowed!");
-                                           let prev = scopeStack.get_mut(ln-2).unwrap();
-                                           // TODO: implement expect_mut()
-                                           par_assert!(token, prev.body_is_some(), "Error: if can not be declared inside of scope of {} as they do not allow instructions!",prev.typ.to_string(true));
-                                        }
-                                        NormalScopeType::ELSE | NormalScopeType::EMPTY => {}
-                                    }
-                                }
-                            }
-                        }
-                        else {
-                            //inst: InstBodyType::Normal(vec![]), locals: LocalBodyType::None, contract: None, hasBeenOpened: true }
-                            scopeStack.push(Scope { typ: ScopeType::NORMAL(NormalScope { typ: NormalScopeType::EMPTY, body: vec![] }), hasBeenOpened: true});
-                        }
-                    }
-                    IntrinsicType::CLOSECURLY => {
-                        if let Some(sc) = scopeStack.pop() {
-                            par_assert!(token,sc.hasBeenOpened, "Error: scope closed but never opened!");
-                            match sc.typ {
-                                ScopeType::FUNCTION(mut func, name) => {
-                                    // TODO: Redo system, since we know that if the scope is Function it is always going to have a body
-                                    // Meaning we basically need to redo this
-                                    //let body = sc.body_unwrap_mut().unwrap();
-                                    func.body.push((token.location.clone(),Instruction::SCOPEEND));
-                                    build.functions.insert(name, func);
-                                },
-                                ScopeType::NORMAL(normal) => {
-                                    match normal.typ {
-                                        NormalScopeType::IF => {
-                                            let currentScope = getTopMut(&mut scopeStack).unwrap();
-
-                                            let body = par_expect!(token,currentScope.body_unwrap_mut(), "Error: Can not close if, because it is inside a {} which doesn't support instructions!",currentScope.typ.to_string(false));
-                                            body.push((token.location.clone(),Instruction::EXPAND_IF_SCOPE(normal)))
-                                        },
-                                        NormalScopeType::EMPTY => {
-                                            let currentScope = getTopMut(&mut scopeStack).unwrap();
-                                            let body = par_expect!(token,currentScope.body_unwrap_mut(), "Error: Can not close if, because it is inside a {} which doesn't support instructions!",currentScope.typ.to_string(false));
-                                            body.push((token.location.clone(),Instruction::EXPAND_SCOPE(normal)));
-                                        }
-                                        NormalScopeType::ELSE => {
-                                            let currentScope = getTopMut(&mut scopeStack).unwrap();
-
-                                            let body = par_expect!(token,currentScope.body_unwrap_mut(), "Error: Can not close if, because it is inside a {} which doesn't support instructions!",currentScope.typ.to_string(false));
-                                            body.push((token.location.clone(),Instruction::EXPAND_ELSE_SCOPE(normal)));
-                                        },
-                                    }
-                                }
-                            }
-                            
-                        }
-                        else {
-                            par_error!(token, "Scope closed but never opened!!!");
-                        }
-                    }
-                    IntrinsicType::POP => {
-                        par_assert!(token, scopeStack.len() > 0 && getTopMut(&mut scopeStack).unwrap().body_is_some(), "Error: Unexpected pop intrinsic outside of scope! Scopes of type {} do not support instructions!",getTopMut(&mut scopeStack).unwrap().typ.to_string(false));
-                        let body = getTopMut(&mut scopeStack).unwrap().body_unwrap_mut().unwrap();
-                        body.push((token.location.clone(),Instruction::POP(OfP::REGISTER(Register::RAX))));
-                    }
-                    IntrinsicType::PUSH => todo!("{}",lexer.currentLocation.loc_display()),
-                    IntrinsicType::SET => todo!("{}",lexer.currentLocation.loc_display()),
-                    IntrinsicType::ADD => {
-                        par_assert!(token, scopeStack.len() > 0 && getTopMut(&mut scopeStack).unwrap().body_is_some(), "Error: Unexpected add intrinsic outside of scope! Scopes of type {} do not support instructions!",getTopMut(&mut scopeStack).unwrap().typ.to_string(false));
-                        let body = getTopMut(&mut scopeStack).unwrap().body_unwrap_mut().unwrap();
-                        body.push((token.location.clone(),Instruction::POP(OfP::REGISTER(Register::EAX))));
-                        body.push((token.location.clone(),Instruction::POP(OfP::REGISTER(Register::R8D))));
-                        body.push((token.location.clone(),Instruction::ADD(OfP::REGISTER(Register::EAX), OfP::REGISTER(Register::R8D))))
-                    }
-                    IntrinsicType::SUB => {
-                        par_assert!(token, scopeStack.len() > 0 && getTopMut(&mut scopeStack).unwrap().body_is_some(), "Error: Unexpected sub intrinsic outside of scope! Scopes of type {} do not support instructions!",getTopMut(&mut scopeStack).unwrap().typ.to_string(false));
-                        let body = getTopMut(&mut scopeStack).unwrap().body_unwrap_mut().unwrap();
-                        body.push((token.location.clone(),Instruction::POP(OfP::REGISTER(Register::EAX))));
-                        body.push((token.location.clone(),Instruction::POP(OfP::REGISTER(Register::R8D))));
-                        body.push((token.location.clone(),Instruction::SUB(OfP::REGISTER(Register::EAX), OfP::REGISTER(Register::R8D))))
-                    }
-                    IntrinsicType::MUL => {
-                        par_assert!(token, scopeStack.len() > 0 && getTopMut(&mut scopeStack).unwrap().body_is_some(), "Error: Unexpected multiply intrinsic outside of scope! Scopes of type {} do not support instructions!",getTopMut(&mut scopeStack).unwrap().typ.to_string(false));
-                        let body = getTopMut(&mut scopeStack).unwrap().body_unwrap_mut().unwrap();
-                        body.push((token.location.clone(),Instruction::POP(OfP::REGISTER(Register::EAX))));
-                        body.push((token.location.clone(),Instruction::POP(OfP::REGISTER(Register::R8D))));
-                        body.push((token.location.clone(),Instruction::MUL(OfP::REGISTER(Register::EAX), OfP::REGISTER(Register::R8D))))
-                    }
-                    IntrinsicType::RET => {
-                        par_assert!(token, scopeStack.len()> 0 && getTopMut(&mut scopeStack).unwrap().body_is_some(), "Error: Unexpected return intrinsic outside of scope! Scopes of type {} do not support instructions!",getTopMut(&mut scopeStack).unwrap().typ.to_string(false));
-                        let body = getTopMut(&mut scopeStack).unwrap().body_unwrap_mut().unwrap();
-                        body.push((token.location.clone(),Instruction::RET()));
-                    },
-                    IntrinsicType::INCLUDE => {
-                        let includeName = par_expect!(lexer.currentLocation,lexer.next(),"Error: abruptly ran out of tokens");
-                        match includeName.typ {
-                            TokenType::StringType(path) => {
-                                let p = PathBuf::from(&program.path);
-                                let p = p.parent().unwrap();
-                                let include_p  = PathBuf::from(path);
-                                let info = fs::read_to_string(String::from(p.join(&include_p).to_str().unwrap().replace("\\", "/"))).expect(&format!("Error: could not open file: {}",String::from(p.join(&include_p).to_str().unwrap()).replace("\\", "/")));
-                                let mut lf = Lexer::new(&info,lexer.Intrinsics,lexer.Definitions,HashSet::new());
-                                lf.currentLocation.file = Rc::new(String::from(p.join(&include_p).to_str().unwrap().replace("\\", "/")));
-                                let mut nprogram = program.clone();
-                                
-                                nprogram.path = String::from(p.join(&include_p).to_str().unwrap().replace("\\", "/"));
-                                let mut build2 = parse_tokens_to_build(&mut lf, &mut nprogram);
-                                build.externals.extend(build2.externals);
-                                for (strdefId,_strdef) in build2.stringdefs.iter() {
-                                    let orgstrdefId  = strdefId.clone();
-                                    let mut strdefId = strdefId.clone();
-                                    let isContaining = build.stringdefs.contains_key(&strdefId);
-                                    while build.stringdefs.contains_key(&strdefId) {
-                                        strdefId = Uuid::new_v4();
-                                    }
-                                    if isContaining {
-                                        for (_, cn_cn) in build2.constdefs.iter_mut() {
-                                            match cn_cn.typ {
-                                                _ => {}
-                                                _ => {}
-                                                RawConstValueType::STR(ref mut val) => {
-                                                    if &orgstrdefId == val {
-                                                        *val = strdefId
-                                                    }
-                                                },
-                                            }
-                                        }
-                                        for (_floc, funcDef) in build2.functions.iter_mut() {
-                                            for (_iloc,Inst) in funcDef.body.iter_mut() {
-                                                match Inst {
-                                                    Instruction::PUSH(ref mut strid) => {
-                                                        match strid {
-                                                            OfP::STR(strid,_) => {
-                                                                if *strid == orgstrdefId {
-                                                                    *strid = strdefId.clone();
-                                                                }
-                                                            }
-                                                            _ => {}
-                                                        }
-                                                    }
-                                                    _ => {}
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
-                                build.stringdefs.extend(build2.stringdefs);
-                                for (fn_name,fn_fn) in build2.functions {
-                                    let _loc = fn_fn.location.clone();
-                                    match build.functions.insert(fn_name.clone(), fn_fn) {
-                                        Some(_Other) => {
-                                            lpar_error!(_loc, "Error: mulitply defined symbols {}",fn_name);
-                                        },
-                                        None => {},
-                                    }
-                                }
-                                build.constdefs.reserve(build2.constdefs.len());
-                                for (cn_name,cn_val) in build2.constdefs{
-                                    let loc = cn_val.loc.clone();
-                                    match build.constdefs.insert(cn_name.clone(),cn_val) {
-                                        Some(_Other) => {
-                                            par_error!(loc,"Error: mulitply defined symbols {}",cn_name);
-                                        },
-                                        None => {},
-                                    }
-                                }
-                            }
-                            _ => {
-                                par_error!(includeName, "Expected token type String but found {}",includeName.typ.to_string(false));
-                            }
-                        }
-                    },
-                    IntrinsicType::IF => {
-                        scopeStack.push(Scope { typ: ScopeType::NORMAL(NormalScope { typ: NormalScopeType::IF, body: vec![] }), hasBeenOpened: false })
-                        //scopeStack.push( ScopeOpener { hasBeenOpened: false, typ: ScopeType::IF, cinstruct_size: build.functions.get_mut(currentFunction.as_mut().unwrap()).unwrap().body.len().clone() });
-                    },
-                    IntrinsicType::EQ => {
-                        par_assert!(token, scopeStack.len() > 0 && getTopMut(&mut scopeStack).unwrap().body_is_some(), "Error: Unexpected equals intrinsic outside of scope! Scopes of type {} do not support instructions!",getTopMut(&mut scopeStack).unwrap().typ.to_string(false));
-                        let body = getTopMut(&mut scopeStack).unwrap().body_unwrap_mut().unwrap();
-                        body.push((token.location.clone(),Instruction::POP(OfP::REGISTER(Register::RAX))));
-                        body.push((token.location.clone(),Instruction::POP(OfP::REGISTER(Register::R8))));
-                        body.push((token.location.clone(),Instruction::EQUALS(OfP::REGISTER(Register::RAX), OfP::REGISTER(Register::R8))));
-                        
-                    },
-                    IntrinsicType::CONSTANT => {
-                        let first = lexer.next();
-                        let first = par_expect!(lexer.currentLocation,first,"abruptly ran out of tokens in constant name definition");
-                        let name: String = match first.typ {
-                            TokenType::WordType(ref word) => {
-                                par_assert!(first, !build.constdefs.contains_key(word) && !lexer.CurrentFuncs.contains(word), "Error: multiple constant symbol definitions");
-                                word.to_string()
-                            }
-                            _ => {
-                                par_error!(first, "Unexpected token type! Expected word but found {}",first.typ.to_string(false));
-                            }
-                        };
-                        let first = lexer.next();
-                        let first = par_expect!(lexer.currentLocation,first,"abruptly ran out of tokens in constant name definition");
-                        match first.typ {
-                            TokenType::IntrinsicType(typ) => {
-                                match typ {
-                                    IntrinsicType::SET => {}
-                                    _ => {
-                                        par_error!(first, "Error: expected = but found {}",typ.to_string(false));
-                                    }
-                                }
-                            }
-                            _ => {
-                                par_error!(first, "Unexpected token type! Expected intrinsic but found {}",first.typ.to_string(false));
-                            }
-                        }
-                        
-                        let val = eval_const_def(lexer,&mut build);
-                        build.constdefs.insert(name, match val.typ {
-                            ConstValueType::INT(rval) => {
-                               RawConstValue {typ: RawConstValueType::INT(rval), loc: val.loc}
-                            }
-                            ConstValueType::LONG(rval) => {
-                                RawConstValue {typ: RawConstValueType::LONG(rval), loc: val.loc}
-                            }
-                            ConstValueType::STR(rval) => {
-                                let mut UUID = Uuid::new_v4();
-                                while build.stringdefs.contains_key(&UUID) {
-                                    UUID = Uuid::new_v4();
-                                }
-                                build.stringdefs.insert(UUID,ProgramString {Data: rval, Typ: ProgramStringType::STR});
-                                RawConstValue {typ: RawConstValueType::STR(UUID), loc: val.loc}
-                            }
-                            ConstValueType::PTR(_) => { todo!("ConstValueType::PTR")}
- 
-                        });
-                        
-                    },
-                    IntrinsicType::DOTCOMA => {},
-                    IntrinsicType::ELSE => todo!(),
-                    IntrinsicType::DIV => todo!("{:#?} at {}",build,lexer.currentLocation.loc_display()),
-                    IntrinsicType::Let => {
-                        
-                        let nametok = par_expect!(lexer.currentLocation, lexer.next(), "Error: abruptly ran out of tokens for Let");
-                        let loc = nametok.location.clone();
-                        match nametok.typ {
-                            TokenType::WordType(name) => {
-                                par_assert!(loc, !build.constdefs.contains_key(&name) && !lexer.CurrentFuncs.contains(&name), "Error: multiply defined symbols");
-                                //let currentFunc = build.functions.get_mut(&currentFunction.clone().expect("Todo: Global variables are not yet implemented :|")).unwrap();
-                                par_assert!(token, scopeStack.len() > 0 && getTopMut(&mut scopeStack).unwrap().body_is_some(), "Error: Unexpected multiply intrinsic outside of scope! Scopes of type {} do not support instructions!",getTopMut(&mut scopeStack).unwrap().typ.to_string(false));
-                                let currentScope = getTopMut(&mut scopeStack).unwrap();
-                                //let body = currentScope.body_unwrap_mut().unwrap();
-                                //let locals = currentScope.locals_unwrap_mut().unwrap();
-                                let typ = par_expect!(lexer.currentLocation, lexer.next(), "Error: abruptly ran out of tokens for let type");                                
-                                par_assert!(typ,typ.typ==TokenType::IntrinsicType(IntrinsicType::DOUBLE_COLIN), "Error: You probably forgot to put a : after the name!");
-                                let typ = par_expect!(lexer.currentLocation, lexer.next(), "Error: abruptly ran out of tokens for let type");
-                                match typ.typ {
-                                    TokenType::Definition(def) => {
-                                        currentScope.locals_unwrap_mut().unwrap().insert(name.clone(), LocalVariable { typ: def, operand: 0 });
-                                        currentScope.body_unwrap_mut().unwrap().push((lexer.currentLocation.clone(),Instruction::DEFVAR(name)))
-                                    }
-                                    _ => {
-                                        par_error!(typ, "Error: unexpected token type in let definition. Expected VarType but found {}",typ.typ.to_string(false))
-                                    }
-                                }
-                            },
-                            _ => {
-                                par_error!(nametok, "Unexpected name type, Expected Word but found {}", nametok.typ.to_string(false))
-                            }
-                        }
-                    },
-                    IntrinsicType::INTERRUPT => {
-                        // TODO: Fix the whole system of currentFunction as this is REALLY REALLY REALLY wasteful
-                        par_assert!(token, scopeStack.len() > 0 && getTopMut(&mut scopeStack).unwrap().body_is_some(), "Error: Unexpected interrupt intrinsic outside of scope! Scopes of type {} do not support instructions!",getTopMut(&mut scopeStack).unwrap().typ.to_string(false));
-                        let body = getTopMut(&mut scopeStack).unwrap().body_unwrap_mut().unwrap();
-                        let lexerNext = par_expect!(lexer.currentLocation,lexer.next(),"Stream of tokens ended abruptly at INTERRUPT call");
-                        match lexerNext.typ {
-                            TokenType::Number32(val) => {
-                                body.push((lexer.currentLocation.clone(),Instruction::INTERRUPT(val as i64)));
-                            }
-                            TokenType::Number64(val) => {
-                                body.push((lexer.currentLocation.clone(),Instruction::INTERRUPT(val)));
-                            }
-                            _ => {
-                                par_error!(lexerNext, "Unexpected token type for INTERRUPT, {}",lexerNext.typ.to_string(false))
-                            }
-                        }
-                        
-                    },
-                    IntrinsicType::RS => {
-                        par_assert!(token, scopeStack.len() > 0 && getTopMut(&mut scopeStack).unwrap().body_is_some(), "Error: Unexpected rs intrinsic outside of scope! Scopes of type {} do not support instructions!",getTopMut(&mut scopeStack).unwrap().typ.to_string(false));
-                        let body = getTopMut(&mut scopeStack).unwrap().body_unwrap_mut().unwrap();
-                        //                             Call here: ⌄
-                        // PARAM <Reserve Space for return stack> RIP
-                        let lexerNext = par_expect!(lexer.currentLocation,lexer.next(),"Stream of tokens ended abruptly at RS call");
-                        match lexerNext.typ {
-                            TokenType::Register(reg) => {
-                                let optyp = par_expect!(lexer.currentLocation,lexer.next(),"Stream of tokens ended abruptly at RS push call");
-                                match optyp.typ {
-                                    TokenType::IntrinsicType(typ) => {
-                                    match typ {
-                                        IntrinsicType::PUSH => {
-                                            
-                                            body.push((lexer.currentLocation.clone(), Instruction::RSPUSH(OfP::REGISTER(reg))))            
-                                        }
-                                        _ => {
-                                            par_error!(lexerNext.location, "Error: Unexpected Intrinsic Type: {}",typ.to_string(false))
-                                        }
-                                    }
-                                    }
-                                    _ => {
-                                        par_error!(lexerNext.location, "Error: Expected Intrinsic but found {}",lexerNext.typ.to_string(false))
-                                    }
-                                }
-                                
-                            }
-                            _ => {
-                                par_error!(lexerNext.location, "Error: Expected Register but found {}",lexerNext.typ.to_string(false))                
-                            }
-                            
-                        }
-                    },
-                    IntrinsicType::TOP => todo!(),
-                }
-            }
-            TokenType::StringType(Word) => {
-
-                par_assert!(lexer.currentLocation, scopeStack.len() > 0 && getTopMut(&mut scopeStack).unwrap().body_is_some(), "Error: Unexpected string outside of scope! Scopes of type {} do not support instructions!",getTopMut(&mut scopeStack).unwrap().typ.to_string(false));
-                let body = getTopMut(&mut scopeStack).unwrap().body_unwrap_mut().unwrap();
-                let mut UUID = Uuid::new_v4();
-                while build.stringdefs.contains_key(&UUID) {
-                    UUID = Uuid::new_v4();
-                }
-                build.stringdefs.insert(UUID,ProgramString {Data: Word, Typ: ProgramStringType::STR});
-                body.push((token.location,Instruction::PUSH(OfP::STR(UUID,ProgramStringType::STR))));
-            }
-            TokenType::CStringType(Word) => {
-                par_assert!(lexer.currentLocation, scopeStack.len() > 0 && getTopMut(&mut scopeStack).unwrap().body_is_some(), "Error: Unexpected cstring outside of scope! Scopes of type {} do not support instructions!",getTopMut(&mut scopeStack).unwrap().typ.to_string(false));
-                let body = getTopMut(&mut scopeStack).unwrap().body_unwrap_mut().unwrap();
-
+                    build.constdefs.insert(name, result);
+                    
+                },
+                IntrinsicType::DOTCOMA => {},
                 
-                let mut UUID = Uuid::new_v4();
-                while build.stringdefs.contains_key(&UUID) {
-                    UUID = Uuid::new_v4();
-                }
-                build.stringdefs.insert(UUID,ProgramString {Data: Word, Typ: ProgramStringType::CSTR}); 
-                body.push((token.location,Instruction::PUSH(OfP::STR(UUID,ProgramStringType::CSTR))));
+                IntrinsicType::Let => {
+                    
+                    let nametok = par_expect!(lexer.currentLocation, lexer.next(), "Error: abruptly ran out of tokens for Let");
+                    let loc = nametok.location.clone();
+                    match nametok.typ {
+                        TokenType::WordType(name) => {
+                            par_assert!(loc, !build.contains_symbol(&name), "Error: Redifinition of existing symbol {}",name);
+                            par_assert!(token, scopeStack.len() > 0 && getTopMut(scopeStack).unwrap().body_is_some(), "Error: Unexpected multiply intrinsic outside of scope! Scopes of type {} do not support instructions!",getTopMut(scopeStack).unwrap().typ.to_string(false));
+                            let currentScope = getTopMut(scopeStack).unwrap();
+                            let typ = par_expect!(lexer.currentLocation, lexer.next(), "Error: abruptly ran out of tokens for let type");                                
+                            par_assert!(typ,typ.typ==TokenType::IntrinsicType(IntrinsicType::DOUBLE_COLIN), "Error: You probably forgot to put a : after the name!");
+                            let typ = par_expect!(lexer.currentLocation, lexer.next(), "Error: abruptly ran out of tokens for let type");
+                            match typ.typ {
+                                TokenType::Definition(def) => {
+                                    currentLocals.last_mut().unwrap().insert(name.clone(), def);
+                                    currentScope.body_unwrap_mut().unwrap().push((lexer.currentLocation.clone(),Instruction::DEFVAR(name)))
+                                }
+                                _ => {
+                                    par_error!(typ, "Error: unexpected token type in let definition. Expected VarType but found {}",typ.typ.to_string(false))
+                                }
+                            }
+                        },
+                        _ => {
+                            par_error!(nametok, "Unexpected name type, Expected Word but found {}", nametok.typ.to_string(false))
+                        }
+                    }
+                },
+                IntrinsicType::INTERRUPT => {
+                    
+                    par_assert!(token, scopeStack.len() > 0 && getTopMut(scopeStack).unwrap().body_is_some(), "Error: Unexpected interrupt intrinsic outside of scope! Scopes of type {} do not support instructions!",getTopMut(scopeStack).unwrap().typ.to_string(false));
+                    let body = getTopMut(scopeStack).unwrap().body_unwrap_mut().unwrap();
+                    let lexerNext = par_expect!(lexer.currentLocation,lexer.next(),"Stream of tokens ended abruptly at INTERRUPT call");
+                    match lexerNext.typ {
+                        TokenType::Number32(val) => {
+                            body.push((lexer.currentLocation.clone(),Instruction::INTERRUPT(val as i64)));
+                        }
+                        TokenType::Number64(val) => {
+                            body.push((lexer.currentLocation.clone(),Instruction::INTERRUPT(val)));
+                        }
+                        TokenType::WordType(ref data) => {
+                            if let Some(cons) = build.constdefs.get(data) {
+                                body.push((lexer.currentLocation.clone(),Instruction::INTERRUPT(cons.typ.get_num_data())));
+                            }
+                            else {
+                                par_error!(lexerNext, "Unexpected word type for INTERRUPT, {}",lexerNext.typ.to_string(false))
+                            }
+                        }
+                        _ => {
+                            par_error!(lexerNext, "Unexpected token type for INTERRUPT, {}",lexerNext.typ.to_string(false))
+                        }
+                    }
+                    
+                },
+                IntrinsicType::TOP => todo!(),
+                IntrinsicType::CAST => todo!(),
+                IntrinsicType::DLL_IMPORT => {
+                    let ntok = par_expect!(lexer.currentLocation, lexer.next(), "Error: Abruptly ran out of tokens for DLL_IMPORT");
+                    let file_from = par_expect!(ntok, ntok.unwrap_string(), "Error: Expected token string but found {}",ntok.typ.to_string(false));
+                    let ntok = par_expect!(lexer.currentLocation, lexer.next(), "Error: Abruptly ran out of tokens for DLL_IMPORT");
+                    let symbol_name = par_expect!(ntok,ntok.unwrap_word(), "Error: Expected token word but found {}",ntok.typ.to_string(false));
+                    par_assert!(ntok, !build.contains_symbol(symbol_name), "Error: Trying to overwrite already existing symbol! {}",symbol_name);
+                    let ntok = par_expect!(lexer.currentLocation, lexer.next(), "Error: Abruptly ran out of tokens for DLL_IMPORT");
+                    par_assert!(ntok, ntok.typ == TokenType::IntrinsicType(IntrinsicType::OPENPAREN), "Error: Unexpected symbol {} in DLL_IMPORT! {}",ntok.typ.to_string(false),symbol_name);
+                    let symbol_contract = parse_any_contract(lexer);
+                    build.dll_imports.insert(symbol_name.clone(), DLL_import { from: file_from.clone(), contract: symbol_contract });
+                },
+                IntrinsicType::DLL_EXPORT => {
+                    let ntok = par_expect!(lexer.currentLocation, lexer.next(), "Error: Abruptly ran out of tokens for DLL_EXPORT");
+                    let symbol_name = par_expect!(ntok,ntok.unwrap_word(), "Error: Expected token word but found {}",ntok.typ.to_string(false));
+                    let ntok = par_expect!(lexer.currentLocation, lexer.next(), "Error: Abruptly ran out of tokens for DLL_EXPORT");
+                    par_assert!(ntok, ntok.typ == TokenType::IntrinsicType(IntrinsicType::OPENPAREN), "Error: Unexpected symbol {} in DLL_EXPORT! {}",ntok.typ.to_string(false),symbol_name);
+                    let symbol_contract = parse_any_contract(lexer);
+                    build.dll_exports.insert(symbol_name.clone(), DLL_export { contract: symbol_contract });
+                },
+                IntrinsicType::WHILE => {
+                    let condition: Vec<Token> = lexer.map_while(|t| {
+                        if t.typ == TokenType::IntrinsicType(IntrinsicType::OPENCURLY) {
+                            None
+                        }
+                        else{
+                            Some(t)
+                        }
+                    }).collect();
+                    scopeStack.push(Scope { typ: ScopeType::NORMAL(NormalScope { typ: NormalScopeType::WHILE(tokens_to_expression(&condition, build, program, &currentLocals)), body: vec![], locals: Locals::new()}), hasBeenOpened: true});
+                    currentLocals.push(Locals::new());
+                },
+                IntrinsicType::IF => {
+                    let condition: Vec<Token> = lexer.map_while(|t| {
+                        if t.typ == TokenType::IntrinsicType(IntrinsicType::OPENCURLY) {
+                            None
+                        }
+                        else{
+                            Some(t)
+                        }
+                    }).collect();
+                    scopeStack.push(Scope { typ: ScopeType::NORMAL(NormalScope { typ: NormalScopeType::IF(tokens_to_expression(&condition, build, program, &currentLocals)), body: vec![], locals: Locals::new()}), hasBeenOpened: true});
+                    currentLocals.push(Locals::new());
+                    
+                },
+                IntrinsicType::ELSE => {
+                    scopeStack.push(Scope { typ: ScopeType::NORMAL(NormalScope { typ: NormalScopeType::ELSE, body: vec![], locals: Locals::new()}), hasBeenOpened: false })
+                },
             }
+        }
+        TokenType::StringType(_) => {
+            par_error!(lexer.currentLocation, "Error: Unexpected Token type String!");
+        }
+        TokenType::CStringType(_) => {
+            par_error!(lexer.currentLocation, "Error: Unexpected Token type CString!");
+        }
+        
+        TokenType::CharType(_) => {
+            todo!("{}: Unexpected char! Chars",token.loc_display())
             
-            TokenType::CharType(_) => {
-                todo!("{}: Unexpected char! Chars",token.loc_display())
-                //par_assert!(token,currentFunction.is_some(), "Unexpected char definition outside of entry point!");
-            }
-            TokenType::Number32(val) => {
-                let len = scopeStack.len();
-                let a = &mut scopeStack;
-                par_assert!(token, len > 0 && getTopMut(a).unwrap().body_is_some(), "Error: Unexpected interrupt intrinsic outside of scope! Scopes of type {} do not support instructions!",getTopMut(a).unwrap().typ.to_string(false));
-                let body = getTopMut(a).unwrap().body_unwrap_mut().unwrap();
-                // TODO: implement this
-                body.push((token.location.clone(),Instruction::MOV(OfP::REGISTER(Register::EAX), OfP::RAW(val as i64))));
-                body.push((token.location.clone(),Instruction::PUSH(OfP::REGISTER(Register::EAX))));
-            }
-            TokenType::Number64(val) => {
-                let len = scopeStack.len();
-                let a = &mut scopeStack;
-                par_assert!(token,  len > 0 && getTopMut(a).unwrap().body_is_some(), "Error: Unexpected interrupt intrinsic outside of scope! Scopes of type {} do not support instructions!",getTopMut(a).unwrap().typ.to_string(false));
-                let body = getTopMut(a).unwrap().body_unwrap_mut().unwrap();
-                body.push((token.location.clone(),Instruction::PUSH(OfP::RAW(val))));
-            }
-            TokenType::Definition(_) => todo!(),
-            TokenType::CStringType(_) => todo!(),
-            TokenType::Function(name) => {
-                let args = parse_argument_contract(lexer, &mut build, getTop(&scopeStack).unwrap().locals_unwrap());
-                let body = getTopMut(&mut scopeStack).unwrap().body_unwrap_mut().unwrap();
-                body.push((token.location.clone(),Instruction::CALL(name, args)));
-                // println!("Got to {}",name);
-                // exit(1);
-            },
-            TokenType::Register(reg) => {
-                let currentScope = getTopMut(&mut scopeStack).unwrap();
-                let regOp = par_expect!(lexer.currentLocation,lexer.next(),"Unexpected register operation or another register!");
-                //TODO: remove warn_rax_usage
-                if reg == Register::RAX && program.warn_rax_usage {
-                    eprintln!("(P) [WARNING] {}:{}:{}: Usage of RAX is not recommended since RAX is used for popping and might be manipulated! Consider using registers like RBX, RCX, RDX etc.", token.location.file, token.location.linenumber,token.location.character);
-                    program.warn_rax_usage = false
-                }
-                match regOp.typ {
-                    TokenType::IntrinsicType(typ) => {
-                        match typ {
-                            IntrinsicType::POP => {
-                                let body = currentScope.body_unwrap_mut().unwrap();
-                                body.push((token.location.clone(),Instruction::POP(OfP::REGISTER(reg))));
-                            }
-                            IntrinsicType::PUSH => {
-                                let body = currentScope.body_unwrap_mut().unwrap();
-                                body.push((token.location.clone(),Instruction::PUSH(OfP::REGISTER(reg))));
-                            }
-                            IntrinsicType::SET => {
-                                let token = par_expect!(lexer.currentLocation,lexer.next(),"abruptly ran out of tokens");
-                                match token.typ {
-                                    TokenType::Number32(data) => {
-                                        if reg.size() >= 4 {
-                                            let body = currentScope.body_unwrap_mut().unwrap();
-                                            body.push((token.location,Instruction::MOV(OfP::REGISTER(reg), OfP::RAW(data as i64))))
-                                        }
+        }
+        TokenType::Number32(_) => {
+            par_error!(lexer.currentLocation, "Error: Unexpected Token type Integer!");
+        }
+        TokenType::Number64(_) => {
+            par_error!(lexer.currentLocation, "Error: Unexpected Token type Long!");
+        }
+        TokenType::Definition(_) => todo!(),
+        TokenType::CStringType(_) => todo!(),
+        TokenType::Function(name) => {
+            let args = parse_argument_contract(lexer, build, currentLocals);
+            let body = getTopMut(scopeStack).unwrap().body_unwrap_mut().unwrap();
+            body.push((token.location.clone(),Instruction::CALL(name, args)));
+            
+        },
+        TokenType::Register(reg) => {
+            let currentScope = getTopMut(scopeStack).unwrap();
+            let regOp = par_expect!(lexer.currentLocation,lexer.next(),"Unexpected register operation or another register!");
+            match regOp.typ {
+                TokenType::SETOperation(ref op) => {
+                    match op {
+                        SetOp::SET => {
+                            let token = par_expect!(lexer.currentLocation,lexer.next(),"abruptly ran out of tokens");
+                            match token.typ {
+                                TokenType::Number32(data) => {
+                                    if reg.size() >= 4 {
+                                        let body = currentScope.body_unwrap_mut().unwrap();
+                                        body.push((token.location,Instruction::MOV(OfP::REGISTER(reg), Expression::val(OfP::CONST(RawConstValueType::INT(data))))))
                                     }
-                                    TokenType::Number64(data) => {
-                                        if reg.size() >= 8 {
-                                            let body = currentScope.body_unwrap_mut().unwrap();
-                                            body.push((token.location,Instruction::MOV(OfP::REGISTER(reg), OfP::RAW(data))))
-                                        }
+                                }
+                                TokenType::Number64(data) => {
+                                    if reg.size() >= 8 {
+                                        let body = currentScope.body_unwrap_mut().unwrap();
+                                        body.push((token.location,Instruction::MOV(OfP::REGISTER(reg), Expression::val(OfP::CONST(RawConstValueType::LONG(data))))));
                                     }
-                                    TokenType::Register(reg2) => {
-                                        currentScope.body_unwrap_mut().unwrap().push((token.location.clone(),Instruction::MOV(OfP::REGISTER(reg), OfP::REGISTER(reg2))));
+                                }
+                                TokenType::Register(reg2) => {
+                                    currentScope.body_unwrap_mut().unwrap().push((token.location.clone(),Instruction::MOV(OfP::REGISTER(reg), Expression::val(OfP::REGISTER(reg2)))));
 
-                                    }
-                                    TokenType::WordType(ref data) => {
-                                        if currentScope.contract_is_some() {
-                                            let contract = currentScope.contract_unwrap().unwrap();
-                                            par_assert!(token, contract.Inputs.contains_key(data), "Error: Unexpected word for register: '{}'",data);
-                                            currentScope.body_unwrap_mut().unwrap().push((token.location.clone(), Instruction::MOV(OfP::REGISTER(reg), OfP::PARAM(data.to_owned()))))
-                                        }
-                                        else {
-                                            par_error!(token,"Unexpected Type for Mov Intrinsic. Expected Number32/Number64 but found {}",token.typ.to_string(false))
-                                        }
-                                    }
-                                    _ => par_error!(token,"Unexpected Type for Mov Intrinsic. Expected Number32/Number64 but found {}",token.typ.to_string(false))
                                 }
-                            }
-                            Other => {
-                                par_error!(token,"Unexpected Intrinsic Type: {}, Registers can only perform register operations \"pop\" \"push\" \"mov\" ",Other.to_string(false))
+                                TokenType::WordType(ref data) => {
+                                    if currentScope.contract_is_some() && currentScope.contract_unwrap().unwrap().Inputs.contains_key(data) {
+                                        let contract = currentScope.contract_unwrap().unwrap();
+                                        par_assert!(token, contract.Inputs.contains_key(data), "Error: Unexpected word for register: '{}'",data);
+                                        currentScope.body_unwrap_mut().unwrap().push((token.location.clone(), Instruction::MOV(OfP::REGISTER(reg), Expression::val(OfP::LOCALVAR(data.to_owned())))))
+                                    }
+                                    else if let Some(cons) = build.constdefs.get(data) {
+                                        currentScope.body_unwrap_mut().unwrap().push((token.location.clone(), Instruction::MOV(OfP::REGISTER(reg), Expression::val(OfP::CONST(cons.typ.clone())))))
+                                    }
+                                    else {
+                                        par_error!(token,"Unexpected Type for Mov Intrinsic. Expected Number32/Number64 but found {}",token.typ.to_string(false))
+                                    }
+                                }
+                                _ => par_error!(token,"Unexpected Type for Mov Intrinsic. Expected Number32/Number64 but found {}",token.typ.to_string(false))
                             }
                         }
-                    },
-                    TokenType::Register(reg2) => {
-                        par_assert!(token,reg.size()==reg2.size(),"Gotten two differently sized registers to one op!");
-                        let regOp = lexer.next().expect(&format!("(P) [ERROR] {}:{}:{}: Unexpected register operation!",token.location.clone().file,&token.location.clone().linenumber,&token.location.clone().character));
-                        let body = currentScope.body_unwrap_mut().unwrap();
-                        match regOp.typ {
-                            TokenType::IntrinsicType(typ) => {
-                                
-                                match typ {
-                                    IntrinsicType::ADD => {
-                                        body.push((token.location.clone(),Instruction::ADD(OfP::REGISTER(reg), OfP::REGISTER(reg2))))
-                                    }
-                                    IntrinsicType::SUB => {
-                                        body.push((token.location.clone(),Instruction::SUB(OfP::REGISTER(reg), OfP::REGISTER(reg2))))
-                                    }
-                                    IntrinsicType::MUL => {
-                                        body.push((token.location.clone(),Instruction::MUL(OfP::REGISTER(reg), OfP::REGISTER(reg2))))
-                                    }
-                                    IntrinsicType::EQ => {
-                                        body.push((token.location.clone(),Instruction::EQUALS(OfP::REGISTER(reg), OfP::REGISTER(reg2))))
-                                    }
-                                    IntrinsicType::DIV => {
-                                        body.push((token.location.clone(),Instruction::DIV(OfP::REGISTER(reg), OfP::REGISTER(reg2))))
-                                    }
-                                    IntrinsicType::SET => {
-                                        body.push((token.location.clone(),Instruction::MOV(OfP::REGISTER(reg), OfP::REGISTER(reg2))))
-                                    }
-                                    other => par_error!(token,"Unexpected Intrinsic! Expected Register Intrinsic but found {}",other.to_string(false))
-                                }
-                            }
-                            other => {
-                                par_error!(token, "Unexpected token type: Expected Intrinsic but found {}",other.to_string(false));
-                            }
+                        _ => {
+                            par_error!(regOp,"Error: Unexepected operation {}",op.to_string());
                         }
-                    }
-                    typ => {
-                        par_error!(token,"Unexpected register operation! Expected Intrinsic or another Register but found {}",typ.to_string(false));
                     }
                 }
-            },
-        }
+                TokenType::Register(reg2) => {
+                    par_assert!(token,reg.size()==reg2.size(),"Gotten two differently sized registers to one op!");
+                    let regOp = lexer.next().expect(&format!("(P) [ERROR] {}:{}:{}: Unexpected register operation!",token.location.clone().file,&token.location.clone().linenumber,&token.location.clone().character));
+                    let body = currentScope.body_unwrap_mut().unwrap();
+                    match regOp.typ {
+                        TokenType::SETOperation(typ) => {
+                            match typ {
+                                SetOp::PLUSSET => {
+                                    body.push((token.location.clone(),Instruction::ADDSET(OfP::REGISTER(reg), Expression::val(OfP::REGISTER(reg2)))))
+                                }
+                                SetOp::MINUSSET => {
+                                    body.push((token.location.clone(),Instruction::SUBSET(OfP::REGISTER(reg), Expression::val(OfP::REGISTER(reg2)))))
+                                }
+                                SetOp::MULSET => {
+                                    body.push((token.location.clone(),Instruction::MULSET(OfP::REGISTER(reg), Expression::val(OfP::REGISTER(reg2)))))
+                                }
+                                // Op::EQ => {
+                                //     body.push((token.location.clone(),Instruction::EQUALS(OfP::REGISTER(reg), Expression::val(OfP::REGISTER(reg2)))))
+                                // }
+                                SetOp::DIVSET => {
+                                    body.push((token.location.clone(),Instruction::DIVSET(OfP::REGISTER(reg), Expression::val(OfP::REGISTER(reg2)))))
+                                }
+                                SetOp::SET => {
+                                    body.push((token.location.clone(),Instruction::MOV(OfP::REGISTER(reg), Expression::val(OfP::REGISTER(reg2)))))
+                                }
+                                other => par_error!(token,"Unexpected Operation! Expected Register Operation but found {}",other.to_string())
+                            }
+                        }
+                        other => {
+                            par_error!(token, "Unexpected token type: Expected Op but found {}",other.to_string(false));
+                        }
+                    }
+                }
+                typ => {
+                    par_error!(token,"Unexpected register operation! Expected Op or another Register but found {}",typ.to_string(false));
+                }
+            }
+        },
+        TokenType::Operation(_) => todo!(),
+        TokenType::SETOperation(_) => todo!(),
     }
-    for (fn_name, fn_fn)in build.functions.iter_mut() {
-        if fn_name != "main" && fn_fn.location.file == lexer.currentLocation.file {
-            fn_fn.body.push((fn_fn.location.clone(),Instruction::RET()))
-        }
+
+}
+fn parse_tokens_to_build(lexer: &mut Lexer, program: &mut CmdProgram) -> BuildProgram {
+    let mut build: BuildProgram = BuildProgram { externals: HashMap::new(), functions: HashMap::new(),stringdefs: HashMap::new(), constdefs: HashMap::new(), dll_imports: HashMap::new(), dll_exports: HashMap::new() };
+    let mut scopeStack: ScopeStack = vec![];
+    let mut currentLocals: Vec<Locals> = Vec::new();
+    while let Some(token) = lexer.next() {
+        parse_token_to_build_inst(token, lexer, program, &mut build, &mut scopeStack, &mut currentLocals);
     }
+    // for (fn_name, fn_fn)in build.functions.iter_mut() {
+    //     if fn_name != "main" && fn_fn.location.file == lexer.currentLocation.file {
+    //         fn_fn.body.push((fn_fn.location.clone(),Instruction::RET()))
+    //     }
+    // }
     build
 }
 
 struct optim_ops {
-    should_use_callstack: bool,
     usedStrings: HashMap<Uuid, String>,
     usedExterns: HashSet<String>,
     usedFuncs: HashSet<String>,
 }
 impl optim_ops {
     fn new() -> Self{
-        Self { should_use_callstack: false, usedStrings: HashMap::new(), usedExterns: HashSet::new(), usedFuncs: HashSet::new() }
+        Self { usedStrings: HashMap::new(), usedExterns: HashSet::new(), usedFuncs: HashSet::new() }
+    }
+}
+fn optimization_ops_scope(build: &BuildProgram, program: &CmdProgram, scope: TCScopeType, out: &mut optim_ops,fn_name: String) {
+    for (_,op) in scope.get_body(build).iter() {
+        match op {
+            Instruction::CALLRAW(r, args) => {   
+                for arg in args {
+                    match &arg.typ {
+                        CallArgType::CONSTANT(val) => {
+                            match val {
+                                RawConstValueType::STR(uuid) => {
+                                    out.usedStrings.insert(uuid.clone(), fn_name.clone());
+                                },
+                                _ => {}
+                            }
+                        },
+
+                        _ => {}
+                    }
+                }
+                out.usedExterns.insert(r.clone());
+            }
+            Instruction::MOV(_, v2) => {
+                match v2.unwrap_val() {
+                    OfP::CONST(val) => {
+                        match val {
+                            RawConstValueType::STR(uuid) => {
+                                out.usedStrings.insert(uuid.clone(), fn_name.clone());
+                            }
+                            _ => {}
+                        }
+                    }
+                    _ => {}
+                }   
+            }
+            Instruction::CALL(r,args) => {
+                for arg in args {
+                    match &arg.typ {
+                        CallArgType::CONSTANT(val) => {
+                            match val {
+                                RawConstValueType::STR(uuid) => {
+                                    out.usedStrings.insert(uuid.clone(), fn_name.clone());
+                                },
+                                _ => {}
+                            }
+                        },
+
+                        _ => {}
+                    }
+                }
+                
+                out.usedFuncs.insert(r.clone());
+            }
+            Instruction::EXPAND_SCOPE(s) | Instruction::EXPAND_IF_SCOPE(s) | Instruction::EXPAND_ELSE_SCOPE(s) => {
+                optimization_ops_scope(build, program, TCScopeType::NORMAL(&s), out, fn_name.clone())
+            }
+            
+            _ => {}
+        }
     }
 }
 fn optimization_ops(build: &mut BuildProgram, program: &CmdProgram) -> optim_ops{
@@ -2885,68 +3741,15 @@ fn optimization_ops(build: &mut BuildProgram, program: &CmdProgram) -> optim_ops
         OptimizationMode::RELEASE => {
             let mut out = optim_ops::new();
 
-            for (fn_name, func) in build.functions.iter() {
-                for (_,op) in func.body.iter() {
-                    match op {
-                        Instruction::PUSH(d) => {
-                            match d {
-                                OfP::STR(UUID,_) => {
-                                    //TODO: Make usedStrings to be a HashMap of two references instead of the raw values so that they don't need to be cloned
-                                    out.usedStrings.insert(UUID.clone(), fn_name.clone());
-                                }
-                                _ => {}
-                            }
-                        }
-                        Instruction::DEFVAR(_) => {
-                            out.should_use_callstack = true;
-                        }
-                        Instruction::CALLRAW(r, args) => {
-                            //TODO: Make callraw use reference instead of raw
-                            for arg in args {
-                                match &arg.typ {
-                                    CallArgType::CONSTANT(val) => {
-                                        match val {
-                                            RawConstValueType::STR(uuid) => {
-                                                out.usedStrings.insert(uuid.clone(), fn_name.clone());
-                                            },
-                                            _ => {}
-                                        }
-                                    },
-
-                                    _ => {}
-                                }
-                            }
-                            out.usedExterns.insert(r.clone());
-                        }
-                        //TODO: loop through arguments to find used strings
-                        Instruction::CALL(r,args) => {
-                            for arg in args {
-                                match &arg.typ {
-                                    CallArgType::CONSTANT(val) => {
-                                        match val {
-                                            RawConstValueType::STR(uuid) => {
-                                                out.usedStrings.insert(uuid.clone(), fn_name.clone());
-                                            },
-                                            _ => {}
-                                        }
-                                    },
-
-                                    _ => {}
-                                }
-                            }
-                            //TODO: Make call use reference instead of raw
-                            out.usedFuncs.insert(r.clone());
-                        }
-                        _ => {}
-                    }
-                }
+            for fn_name in build.functions.keys() {
+                optimization_ops_scope(build, program, TCScopeType::FUNCTION(fn_name.clone()), &mut out, fn_name.clone())
             }
             out
         },
-        OptimizationMode::DEBUG => optim_ops { should_use_callstack: true, usedStrings: HashMap::new(), usedExterns: HashSet::new(), usedFuncs: HashSet::new() },
+        OptimizationMode::DEBUG => optim_ops { usedStrings: HashMap::new(), usedExterns: HashSet::new(), usedFuncs: HashSet::new() },
     }
 }
-fn nasm_x86_64_prep_args(program: &CmdProgram, build: &BuildProgram, f: &mut File,mut econtract: AnyContract,contract: &Vec<CallArg>, stack_size: &mut i64, callstack_size: &mut i64, loc: ProgramLocation, local_vars: &HashMap<String, LocalVariable>) -> io::Result<()>{
+fn nasm_x86_64_prep_args(program: &CmdProgram, build: &BuildProgram, f: &mut File,mut _econtract: AnyContract,contract: &Vec<CallArg>, stack_size: &mut usize, _: ProgramLocation, local_vars: &HashMap<String, LocalVariable>) -> io::Result<()>{
     let mut shadow_space = 0;
     if let Some(ops) = program.architecture.options.argumentPassing.custom_get() {
         if ops.shadow_space > 0 {
@@ -2954,75 +3757,27 @@ fn nasm_x86_64_prep_args(program: &CmdProgram, build: &BuildProgram, f: &mut Fil
             writeln!(f, "   sub rsp, {}",ops.shadow_space)?;
         }
     }
-    //todo!("use contract");
-    //TODO: Check if its dynamic or not;
     let dcontract = contract.clone();
-    //dcontract.reverse();
-    //let external = build.externals.get(Word).expect("Error: unknown external raw call");
-    //let mut externContract = external.contract.as_ref().expect("TODO: implement rawcall without contract").clone();
-    //TODO: Implement this with traits
-    //com_assert!(loc, CallArg::match_any(contract, econtract), "Error: Expected contract: {:?}\nFound {:?}",econtract, contract);
-    //econtract.InputPool.reverse();
-    //let mut econtract = econtract.clone();
+    #[allow(unused_variables)]
     let mut stack_space_taken: usize = 0;
     let mut int_ptr_count:  usize = 0;
     let mut _float_count:    usize = 0;
     for arg in dcontract {
         match arg.typ {
-            CallArgType::TOP(_)      => {
-                if program.architecture.options.argumentPassing == ArcPassType::PUSHALL {
-                    let o = com_expect!(arg.loc, econtract.InputPool.pop(), "Error: ran out of parameters for contract!");
-                    let osize = o.get_size(program);
-                    stack_space_taken += osize;
-                    *stack_size += osize as i64;
-                    let oreg = Register::RAX.to_byte_size(osize);
-                    writeln!(f, "   sub rsp, {}",osize)?;                
-                    writeln!(f, "   mov {}, {} [rsp+{}]",oreg.to_string(),size_to_nasm_type(osize),stack_space_taken+shadow_space)?;
-                    writeln!(f, "   mov {} [rsp], {}",size_to_nasm_type(osize),oreg.to_string())?;
-                    int_ptr_count += 1;
-                    //o.get_size(program)
-                    //                                   
-                    //printf("Hello World %d, %d", top, top);
-                    //                                                                                           
-                }
-                else {
-                    //TODO: Make sure to check for floats once we introduce them!
-                    let o = com_expect!(arg.loc, econtract.InputPool.pop(), "Error: ran out of parameters for contract!");
-                    let osize = o.get_size(program);
-                    let ops = program.architecture.options.argumentPassing.custom_get().unwrap();
-                    if let Some(numptrs) = &ops.nums_ptrs {
-                        if int_ptr_count > numptrs.len() && ops.on_overflow_stack{
-                            todo!("Handle overflow situation");
-                        }
-                        else {                                                    
-                            let ireg = numptrs.get(int_ptr_count).unwrap();
-                            let ireg = ireg.to_byte_size(osize);
-                            writeln!(f, "   mov {}, {} [rsp+{}]",ireg.to_string(),size_to_nasm_type(ireg.size()),stack_space_taken+shadow_space)?;    
-                        }
-                    }
-                    else {
-                        stack_space_taken += osize;
-                        *stack_size += osize as i64;
-                        let oreg = Register::RAX.to_byte_size(osize);
-                        writeln!(f, "   sub rsp, {}",osize)?;                
-                        writeln!(f, "   mov {}, {} [rsp+{}]",oreg.to_string(),size_to_nasm_type(osize),stack_space_taken+shadow_space)?;
-                        writeln!(f, "   mov {} [rsp], {}",size_to_nasm_type(osize),oreg.to_string())?;
-                    }
-                    int_ptr_count += 1;
-                }
-            },
             CallArgType::LOCALVAR(name) => {
                 let var1 = local_vars.get(&name).expect("Unknown local variable parameter");
-                if *callstack_size as usize-var1.operand-var1.typ.get_size(program) == 0 {
-                    writeln!(f, "   mov rax, [_CALLSTACK_BUF_PTR]")?;
+                let oreg = Register::RAX.to_byte_size(var1.typ.get_size(program));
+                if *stack_size-var1.operand == 0 {
+                    writeln!(f, "   mov {}, [rsp+{}]",oreg.to_string(),shadow_space)?;
                 }
                 else {
-                    writeln!(f, "   mov rax, [_CALLSTACK_BUF_PTR+{}]",*callstack_size as usize-var1.operand-var1.typ.get_size(program))?;
+                    writeln!(f, "   mov {}, [rsp+{}]",oreg.to_string(),*stack_size-var1.operand+shadow_space)?;
                 }
                 let osize = var1.typ.get_size(program);
                 if program.architecture.options.argumentPassing == ArcPassType::PUSHALL {
+                    //TODO: todo!("This is probably broken btw");
                     stack_space_taken += osize;
-                    *stack_size += osize as i64;
+                    *stack_size += osize;
                     let oreg = Register::RAX.to_byte_size(osize);
                     writeln!(f, "   sub rsp, {}",osize)?;
                     writeln!(f, "   mov {} [rsp], {}",size_to_nasm_type(osize), oreg.to_string())?;
@@ -3033,7 +3788,7 @@ fn nasm_x86_64_prep_args(program: &CmdProgram, build: &BuildProgram, f: &mut Fil
                             if let Some(numptrs) = &ops.nums_ptrs {
                                 if int_ptr_count > numptrs.len() && ops.on_overflow_stack{
                                     stack_space_taken += osize;
-                                    *stack_size += osize as i64;
+                                    *stack_size += osize;
                                     let oreg = Register::RAX.to_byte_size(osize);
                                     writeln!(f, "   sub rsp, {}",osize)?;    
                                     writeln!(f, "   mov {} [rsp], {}",size_to_nasm_type(osize),oreg.to_string())?;
@@ -3045,7 +3800,7 @@ fn nasm_x86_64_prep_args(program: &CmdProgram, build: &BuildProgram, f: &mut Fil
                             }
                             else {
                                 stack_space_taken += osize;
-                                *stack_size += osize as i64;
+                                *stack_size += osize;
                                 writeln!(f, "   sub rsp, {}",osize)?;    
                                 writeln!(f, "   mov qword [rsp], rax")?;
                             }
@@ -3062,9 +3817,10 @@ fn nasm_x86_64_prep_args(program: &CmdProgram, build: &BuildProgram, f: &mut Fil
                 match val {
                     RawConstValueType::INT(val) => {
                         if program.architecture.options.argumentPassing == ArcPassType::PUSHALL {
+                            
                             let osize = 4;
                             stack_space_taken += osize;
-                            *stack_size += osize as i64;
+                            *stack_size += osize;
                             writeln!(f, "   sub rsp, {}",osize)?;
                             writeln!(f, "   mov eax, {}",val)?;
                             writeln!(f, "   mov dword [rsp], eax")?;
@@ -3079,7 +3835,7 @@ fn nasm_x86_64_prep_args(program: &CmdProgram, build: &BuildProgram, f: &mut Fil
                             else {
                                 let osize = 4;
                                 stack_space_taken += osize;
-                                *stack_size += osize as i64;
+                                *stack_size += osize;
                                 writeln!(f, "   sub rsp, {}",osize)?;
                                 writeln!(f, "   mov eax, {}",val)?;
                                 writeln!(f, "   mov dword [rsp], eax")?;
@@ -3091,7 +3847,7 @@ fn nasm_x86_64_prep_args(program: &CmdProgram, build: &BuildProgram, f: &mut Fil
                         let osize = 8;
                         if program.architecture.options.argumentPassing == ArcPassType::PUSHALL {
                             stack_space_taken += osize;
-                            *stack_size += osize as i64;
+                            *stack_size += osize;
                             writeln!(f, "   sub rsp, {}",osize)?;
                             writeln!(f, "   mov rax, {}",val)?;
                             writeln!(f, "   mov qword [rsp], rax")?;
@@ -3101,12 +3857,12 @@ fn nasm_x86_64_prep_args(program: &CmdProgram, build: &BuildProgram, f: &mut Fil
                             let ops = program.architecture.options.argumentPassing.custom_get().unwrap();
                             if let Some(num_ptrs) = &ops.nums_ptrs {
                                 let ireg = num_ptrs.get(int_ptr_count).unwrap();
-                                //println!("Got to here");
+                                
                                 writeln!(f, "   mov {}, {}",ireg.to_string(), val)?;    
                             }
                             else {
                                 stack_space_taken += osize;
-                                *stack_size += osize as i64;
+                                *stack_size += osize;
                                 writeln!(f, "   sub rsp, {}",osize)?;
                                 writeln!(f, "   mov rax, {}",val)?;
                                 writeln!(f, "   mov qword [rsp], rax")?;
@@ -3115,10 +3871,10 @@ fn nasm_x86_64_prep_args(program: &CmdProgram, build: &BuildProgram, f: &mut Fil
                         }
                     },
                     RawConstValueType::STR(UUID) => {
-                        let osize: usize = program.architecture.bits as usize /8;
+                        let osize: usize = build.stringdefs.get(&UUID).unwrap().Typ.sizeof(program.architecture.bits);
                         if program.architecture.options.argumentPassing == ArcPassType::PUSHALL {
                             stack_space_taken += osize;
-                            *stack_size += osize as i64;
+                            *stack_size += osize;
                             let typ = &build.stringdefs.get(&UUID).unwrap().Typ;
                             match typ {
                                 ProgramStringType::STR => {
@@ -3135,7 +3891,7 @@ fn nasm_x86_64_prep_args(program: &CmdProgram, build: &BuildProgram, f: &mut Fil
                                         }
                                     }
                                     writeln!(f, "   mov qword [rsp], {}",build.stringdefs.get(&UUID).unwrap().Data.len())?;
-                                    //writeln!(f, "   mov qword [rsp], _LEN_STRING_{}_",UUID.to_string().replace("-", ""))?;
+                                    
                                 },
                                 ProgramStringType::CSTR => {
                                     match program.architecture.bits {
@@ -3158,11 +3914,22 @@ fn nasm_x86_64_prep_args(program: &CmdProgram, build: &BuildProgram, f: &mut Fil
                             let ops = program.architecture.options.argumentPassing.custom_get().unwrap();
                             if let Some(num_ptrs) = &ops.nums_ptrs {
                                 let ireg = num_ptrs.get(int_ptr_count).unwrap();
-                                writeln!(f, "   lea {}, [rel _STRING_{}_]",ireg.to_string(), UUID.to_string().replace("-", ""))?;    
+                                let s = build.stringdefs.get(&UUID).unwrap();
+                                match s.Typ {
+                                    ProgramStringType::STR => {
+                                        writeln!(f, "   lea {}, [rel _STRING_{}_]",ireg.to_string(), UUID.to_string().replace("-", ""))?;    
+                                        let ireg = num_ptrs.get(int_ptr_count+1).unwrap();
+                                        writeln!(f, "   mov {}, {}",ireg.to_string(), s.Data.len())?;    
+                                        int_ptr_count += 1;
+                                    }
+                                    ProgramStringType::CSTR => {
+                                        writeln!(f, "   lea {}, [rel _STRING_{}_]",ireg.to_string(), UUID.to_string().replace("-", ""))?;    
+                                    }
+                                }
                             }
                             else {
                                 stack_space_taken += osize;
-                                *stack_size += osize as i64;
+                                *stack_size += osize;
                                 writeln!(f, "   sub rsp, {}",osize)?;
                                 writeln!(f, "   lea rax, [rel _STRING_{}_]",UUID.to_string().replace("-", ""))?;
                                 writeln!(f, "   mov {} [rsp], rax",size_to_nasm_type(osize))?;
@@ -3171,8 +3938,31 @@ fn nasm_x86_64_prep_args(program: &CmdProgram, build: &BuildProgram, f: &mut Fil
                             int_ptr_count += 1;
                         }
                     },
-                    RawConstValueType::PTR(_) => {
-                        todo!("Fix ptrs");
+                    RawConstValueType::PTR(_,val) => {                        
+                        let osize = (program.architecture.bits/8) as usize;
+                        if program.architecture.options.argumentPassing == ArcPassType::PUSHALL {
+                            stack_space_taken += osize;
+                            *stack_size += osize;
+                            writeln!(f, "   sub rsp, {}",osize)?;
+                            writeln!(f, "   mov rax, {}",val)?;
+                            writeln!(f, "   mov qword [rsp], rax")?;
+                            int_ptr_count += 1;
+                        }
+                        else {
+                            let ops = program.architecture.options.argumentPassing.custom_get().unwrap();
+                            if let Some(num_ptrs) = &ops.nums_ptrs {
+                                let ireg = num_ptrs.get(int_ptr_count).unwrap();
+                                writeln!(f, "   mov {}, {}",ireg.to_string(), val)?;    
+                            }
+                            else {
+                                stack_space_taken += osize;
+                                *stack_size += osize;
+                                writeln!(f, "   sub rsp, {}",osize)?;
+                                writeln!(f, "   mov rax, {}",val)?;
+                                writeln!(f, "   mov qword [rsp], rax")?;
+                            }
+                            int_ptr_count += 1;
+                        }
                     },
                 }
 
@@ -3181,7 +3971,540 @@ fn nasm_x86_64_prep_args(program: &CmdProgram, build: &BuildProgram, f: &mut Fil
     }
     Ok(())
 }
-//fn nasm_x86_64_handle_scope(build: &mut BuildProgram, program: &CmdProgram, scope: &
+fn nasm_x86_64_load_args(f: &mut File, scope: &TCScopeType, build: &BuildProgram, program: &CmdProgram) -> io::Result<usize> {
+    let mut offset = 0;
+    if program.architecture.options.argumentPassing == ArcPassType::PUSHALL {                    
+        for (_,iarg) in scope.get_contract(build).unwrap().Inputs.iter() {
+            let osize = iarg.get_size(program);
+            let reg = Register::RAX.to_byte_size(osize);
+            if offset+osize > 0 {
+                writeln!(f, "   mov {}, {} [rsp+{}]",reg.to_string(),size_to_nasm_type(osize),offset)?;
+                writeln!(f, "   mov {} [rsp-{}], {}",size_to_nasm_type(osize),offset+osize,reg.to_string())?;
+            }
+            else {
+                writeln!(f, "   mov {}, {} [rsp]",reg.to_string(),size_to_nasm_type(osize))?;
+                writeln!(f, "   mov {} [rsp-{}], {}",size_to_nasm_type(osize),osize,reg.to_string())?;
+            }
+            offset += osize;
+        }
+        todo!("Fix this^");
+    }
+    else {
+        let mut int_ptr_args: usize = 0;
+        let argsPassing = program.architecture.options.argumentPassing.custom_get().unwrap();
+        let mut offset_from_sbegin: usize = 0;
+        for (_,iarg) in scope.get_contract(build).unwrap().Inputs.iter() {
+            let osize = iarg.get_size(program);
+            if let Some(reg) = argsPassing.nums_ptrs.as_ref().unwrap_or(&Vec::new()).get(int_ptr_args){
+                let reg = reg.to_byte_size(osize);
+                if offset+osize > 0 { 
+                    writeln!(f, "   mov {} [rsp-{}], {}",size_to_nasm_type(osize),offset+osize,reg.to_string())?;
+                }
+                else {
+                    writeln!(f, "   mov {} [rsp-{}], {}",size_to_nasm_type(osize),osize,reg.to_string())?;
+                }
+                offset += reg.size();
+            }
+            else {
+                let reg = Register::RAX.to_byte_size(osize);
+                if offset > 0 {
+                    if offset_from_sbegin > 0 {
+                        writeln!(f, "   mov {}, {} [rsp+{}]",reg.to_string(),size_to_nasm_type(osize),offset_from_sbegin)?;
+                    }
+                    else {
+                        writeln!(f, "   mov {}, {} [rsp]",reg.to_string(),size_to_nasm_type(osize))?;
+                    }
+                    writeln!(f, "   mov {} [rsp-{}], {}",size_to_nasm_type(osize),offset,reg.to_string())?;
+                }
+                else {
+                    if offset_from_sbegin > 0 {
+                        writeln!(f, "   mov {}, {} [rsp+{}]",reg.to_string(),size_to_nasm_type(osize),offset_from_sbegin)?;
+                    }
+                    else {
+                        writeln!(f, "   mov {}, {} [rsp]",reg.to_string(),size_to_nasm_type(osize))?;
+                    }
+                    writeln!(f, "   mov {} [rsp], {}",size_to_nasm_type(osize),reg.to_string())?;
+                }
+                offset_from_sbegin+=osize;
+                offset+=osize;
+            }
+            int_ptr_args+=1
+        }
+        // if offset > 0 {
+        //     writeln!(f, "   sub rsp, {}",offset)?;
+        // }
+    }
+    Ok(offset)
+}
+fn nasm_x86_64_handle_scope(f: &mut File, build: &BuildProgram, program: &CmdProgram, scope: TCScopeType, mut local_vars: HashMap<String, LocalVariable>, mut stack_size: usize, func_stack_begin: usize, inst_count: &mut usize) -> io::Result<()> {
+    let expect_loc_t = LinkedHashMap::new();
+    let contract_loc_t = FunctionContract { Inputs: LinkedHashMap::new(), Outputs: Vec::new()};
+    let expect_locals = scope.get_locals(build).unwrap_or(&expect_loc_t);
+    let contract = scope.get_contract(build).unwrap_or(&contract_loc_t);
+    let stack_size_org: usize = stack_size;
+    local_vars.reserve(contract.Inputs.len()+expect_locals.len());
+    if scope.has_contract() {
+        nasm_x86_64_load_args(f, &scope, build, program)?;
+    }
+    for (name, val) in expect_locals.iter() {
+        stack_size += val.get_size(program);
+    
+        local_vars.insert(name.clone(), LocalVariable { typ: val.clone(), operand: stack_size });
+    }
+    let dif = stack_size-stack_size_org;
+    let additional = dif%8;
+    let dif = dif + additional;
+    stack_size+=additional;
+    if dif > 0 {
+        writeln!(f, "   sub rsp, {}",dif)?;
+    }
+    for (i,(loc,inst)) in scope.get_body(build).iter().enumerate() {
+        
+        //println!("Instruction at {}: {:?}",i,inst);
+        match inst {
+            Instruction::MOV(Op, Op2) => {
+                match Op {
+                    OfP::REGISTER(Reg1) => {
+                        let oreg2 = Register::RBX.to_byte_size(Reg1.size());
+                        //TODO: This may break
+                        Op2.LEIRnasm(vec![*Reg1,oreg2], f, program, build,&local_vars, stack_size, loc)?;
+                    }
+                    OfP::LOCALVAR(varOrg) => {
+                        let var = com_expect!(loc,local_vars.get(varOrg),"Error: Unknown variable found during compilation {}",varOrg);
+                        let oreg = Register::RAX.to_byte_size(var.typ.get_size(program));
+                        let oreg2 = Register::RBX.to_byte_size(var.typ.get_size(program));
+                        let oregs = Op2.LEIRnasm(vec![oreg,oreg2], f, program,build, &local_vars, stack_size, loc)?;
+                        if stack_size-var.operand == 0 {
+                            writeln!(f, "   mov {} [rsp], {}",size_to_nasm_type(var.typ.get_size(program)), oregs[0].to_byte_size(var.typ.get_size(program)).to_string())?;
+                        }
+                        else {
+                            writeln!(f, "   mov {} [rsp+{}], {}",size_to_nasm_type(var.typ.get_size(program)),stack_size-var.operand, oregs[0].to_byte_size(var.typ.get_size(program)).to_string())?;
+                        }
+                    }
+                    _ => {
+                        todo!("Unsupported");
+                    }
+                }
+                
+            }
+            Instruction::CALLRAW(Word, contract) => {
+                nasm_x86_64_prep_args(program, build, f, build.get_contract_of_symbol(Word).expect("TODO: implement rawcall without contract").clone(), contract, &mut stack_size, loc.clone(), &local_vars)?;
+                writeln!(f, "   xor rax, rax")?;
+                if let Some(external) = build.externals.get(Word) {
+                    writeln!(f, "   call {}{}{}",external.typ.prefix(program),Word,external.typ.suffix())?;
+                }
+                else {
+                    writeln!(f, "   call {}",Word)?;
+                }
+                if let Some(ops) = program.architecture.options.argumentPassing.custom_get() {
+                    if ops.shadow_space > 0 {
+                        writeln!(f, "   add rsp, {}",ops.shadow_space)?;
+                    }
+                }
+            }
+            Instruction::ADDSET(op1, op2) => {
+                match op1 {
+                    OfP::REGISTER(reg1) => {
+                        let reg2 = Register::RAX.to_byte_size(reg1.size());
+                        let reg3 = Register::RBX.to_byte_size(reg1.size());
+                        op2.LEIRnasm(vec![reg2,reg3], f, program,build, &local_vars, stack_size, loc)?;
+                        writeln!(f, "   add {}, {}",reg1.to_string(), reg2.to_string())?;
+                    }
+                    OfP::LOCALVAR(var1) => {
+                        let var1 = com_expect!(loc,local_vars.get(var1),"Error: Unknown variable found during compilation {}",var1);
+                        let reg1 = Register::RAX.to_byte_size(var1.typ.get_size(program));
+                        let reg2 = Register::RBX.to_byte_size(reg1.size());
+                        op2.LEIRnasm(vec![reg1,reg2], f, program,build, &local_vars, stack_size, loc)?;
+                        if stack_size-var1.operand == 0 {
+                            writeln!(f, "   add {} [rsp], {}",size_to_nasm_type(var1.typ.get_size(program)),reg1.to_string())?;
+                        }
+                        else {
+                            writeln!(f, "   add {} [rsp+{}], {}",size_to_nasm_type(var1.typ.get_size(program)),stack_size-var1.operand,reg1.to_string())?;
+                        }
+                    },
+                    OfP::CONST(_) => todo!(),
+                    OfP::RESULT(_, _) => todo!(),
+                }   
+            }
+            Instruction::SUBSET(op1, op2) => {
+                match op1 {
+                    OfP::REGISTER(reg1) => {
+                        let reg2 = Register::RAX.to_byte_size(reg1.size());
+                        let reg3 = Register::RBX.to_byte_size(reg1.size());
+                        op2.LEIRnasm(vec![reg2,reg3], f, program,build, &local_vars, stack_size, loc)?;
+                        writeln!(f, "   sub {}, {}",reg1.to_string(), reg2.to_string())?;
+                    }
+                    OfP::LOCALVAR(var1) => {
+                        let var1 = com_expect!(loc,local_vars.get(var1),"Error: Unknown variable found during compilation {}",var1);
+                        let reg1 = Register::RAX.to_byte_size(var1.typ.get_size(program));
+                        let reg2 = Register::RBX.to_byte_size(reg1.size());
+                        op2.LEIRnasm(vec![reg1,reg2], f, program,build, &local_vars, stack_size, loc)?;
+                        if stack_size-var1.operand == 0 {
+                            writeln!(f, "   sub {} [rsp], {}",size_to_nasm_type(var1.typ.get_size(program)),reg1.to_string())?;
+                        }
+                        else {
+                            writeln!(f, "   sub {} [rsp+{}], {}",size_to_nasm_type(var1.typ.get_size(program)),stack_size-var1.operand,reg1.to_string())?;
+                        }
+                    },
+                    OfP::CONST(_) => todo!(),
+                    OfP::RESULT(_, _) => todo!(),
+                }
+            }
+            Instruction::MULSET(op1, op2) => {
+                match op1 {
+                    OfP::REGISTER(reg1) => {
+                        let reg2 = Register::RAX.to_byte_size(reg1.size());
+                        op2.LEIRnasm(vec![reg2], f, program,build, &local_vars, stack_size, loc)?;
+                        writeln!(f, "   imul {}, {}",reg1.to_string(), reg2.to_string())?;
+                    }
+                    OfP::LOCALVAR(var1) => {
+                        let var1 = com_expect!(loc,local_vars.get(var1),"Error: Unknown variable found during compilation {}",var1);
+                        let reg1 = Register::RAX.to_byte_size(var1.typ.get_size(program));
+                        op2.LEIRnasm(vec![reg1], f, program,build, &local_vars, stack_size, loc)?;
+                        if stack_size-var1.operand == 0 {
+                            writeln!(f, "   imul {} [rsp], {}",size_to_nasm_type(var1.typ.get_size(program)),reg1.to_string())?;
+                        }
+                        else {
+                            writeln!(f, "   imul {} [rsp+{}], {}",size_to_nasm_type(var1.typ.get_size(program)),stack_size-var1.operand,reg1.to_string())?;
+                        }
+                    },
+                    _ => todo!()
+                }
+                
+            }
+            Instruction::DIVSET(_, _) => {
+                todo!("Divset is not yet implemented!");
+                // match op1 {
+                //     OfP::REGISTER(reg1) => {
+                //         match op2 {
+                //             OfP::REGISTER(reg2) => {
+                //                 assert!(reg1.size() == reg2.size(), "Two different sized registers passed to div Instruction");
+                //                 writeln!(f, "   mov r9, rdx")?;
+                //                 writeln!(f, "   xor rdx, rdx")?;
+                //                 writeln!(f, "   cqo")?;
+                //                 writeln!(f, "   mov rax, {}",reg1.to_string())?;
+                //                 writeln!(f, "   idiv {}",reg2.to_string())?;
+                //                 writeln!(f, "   mov {}, rax",reg1.to_string())?;
+                //                 writeln!(f, "   mov {}, rdx",reg2.to_string())?;
+                //                 writeln!(f, "   mov rdx, r9")?;
+                //             }
+                //             OfP::LOCALVAR(_) => todo!(),
+                   
+                //             OfP::CONST(_) => todo!(),
+                //         }
+                //     }
+                //     OfP::LOCALVAR(_) => todo!(),
+                   
+                //     OfP::CONST(_) => todo!(),
+                // }
+            }
+            Instruction::CALL(Func,args) => {
+                nasm_x86_64_prep_args(program, build, f, build.functions.get(Func).unwrap().contract.to_any_contract(), args, &mut stack_size, loc.clone(), &local_vars)?;
+                writeln!(f, "   call {}{}",program.architecture.func_prefix,Func)?;
+                if let Some(ops) = program.architecture.options.argumentPassing.custom_get() {
+                    if ops.shadow_space > 0 {
+                        writeln!(f, "   add rsp, {}",ops.shadow_space)?;
+                    }
+                }
+            }
+            Instruction::FNBEGIN() => {
+                
+                
+            }
+            Instruction::RET(expr) => {
+                let dif = if scope.is_normal() {stack_size-func_stack_begin} else {stack_size-stack_size_org};
+                let _regs = expr.LEIRnasm(vec![Register::RAX,Register::RBX,Register::RCX], f, program, build, &local_vars, stack_size, loc)?;
+                let oreg = Register::RAX.to_byte_size(_regs[0].size());
+                writeln!(f, "   mov {}, {}",oreg.to_string(),_regs[0].to_string())?;
+                if dif > 0 {
+                    writeln!(f, "   add rsp, {}",dif)?;
+                }
+                //writeln!(f, "   ; its this ret")?;
+                writeln!(f, "   ret")?;
+            }
+            //TOOD: Potentially remove these
+            Instruction::SCOPEBEGIN | Instruction::SCOPEEND => {}
+            Instruction::DEFVAR(_) => {
+                // let var = local_vars.get_mut(name).expect("Error: unknown defvar definition in function! This is most likely due to a bug inside the compiler! Make sure to contact the developer if you encounter this!");
+                // var.operand     = callstack_size as usize;
+                // callstack_size += var.typ.get_size(program) as i64;
+
+                // writeln!(f, "   mov rax, [_CALLSTACK_BUF_PTR]")?;
+                // writeln!(f, "   sub rax, {}",var.typ.get_size(program))?;
+                // writeln!(f, "   mov [_CALLSTACK_BUF_PTR], rax")?;
+            },
+            Instruction::INTERRUPT(val) => {
+                writeln!(f, "   int 0x{:x}",val)?;
+            },
+            Instruction::EXPAND_SCOPE(s) => nasm_x86_64_handle_scope(f, build, program, TCScopeType::NORMAL(&s),local_vars.clone(),stack_size,func_stack_begin,inst_count)?,
+            Instruction::EXPAND_IF_SCOPE(s)   => {
+                let condition = match s.typ {
+                    NormalScopeType::IF(ref c) => c,
+                    _ => panic!("Unreachable")
+                };
+                if condition.is_ofp() {
+                    let val = condition.unwrap_val();
+                    match val {
+                        OfP::REGISTER(reg) => {
+                            let reg = reg.to_byte_size(1);
+                            writeln!(f, "   cmp {}, 0",reg.to_string())?;
+                        },
+                        OfP::LOCALVAR(v) => {
+                            let var = local_vars.get(v).unwrap();
+                            com_assert!(loc,var.typ.weak_eq(&VarType::BOOLEAN),"Error: Expected boolean but found {}",var.typ.to_string(false));
+                            if stack_size-var.operand == 0 {
+                                writeln!(f, "   cmp {} [rsp], 0",size_to_nasm_type(var.typ.get_size(program)),)?;
+                            }
+                            else {
+                                writeln!(f, "   cmp {} [rsp+{}], 0",size_to_nasm_type(var.typ.get_size(program)),stack_size-var.operand)?;
+                            }
+                        },
+                        OfP::CONST(val) => {
+                            writeln!(f, "   mov rax, {}",val.get_num_data())?;
+                            writeln!(f, "   cmp rax, 0")?;
+                        },
+                        OfP::RESULT(_, _) => todo!(),
+                    }
+                    writeln!(f, "   jnz .IF_SCOPE_{}",inst_count)?;
+                }
+                else {
+                    let val = condition.unwrap_expr();
+                    com_assert!(loc,val.op.is_boolean(),"Error: Condition MUST be of type boolean but encountered op {}",val.op.to_string());
+                    match val.op {
+                        Op::EQ   => {
+                            let oreg1 = val.left.as_ref().unwrap().LEIRnasm(vec![Register::RAX, Register::RBX, Register::RCX], f, program, build, &local_vars, stack_size, loc)?;
+                            let tmp = Register::RSI.to_byte_size(oreg1[0].size());
+                            writeln!(f, "   mov {}, {}",tmp.to_string(),oreg1[0].to_string())?;
+                            let oreg2 = val.right.as_ref().unwrap().LEIRnasm(vec![Register::RAX, Register::RBX, Register::RCX], f, program, build, &local_vars, stack_size, loc)?;
+                            writeln!(f, "   cmp {}, {}",tmp.to_string(),oreg2[0].to_string())?;
+                            writeln!(f, "   jz .IF_SCOPE_{}",inst_count)?;
+                        },
+                        Op::NEQ  => {
+                            let oreg1 = val.left.as_ref().unwrap().LEIRnasm(vec![Register::RAX, Register::RBX, Register::RCX], f, program, build, &local_vars, stack_size, loc)?;
+                            let tmp = Register::RSI.to_byte_size(oreg1[0].size());
+                            writeln!(f, "   mov {}, {}",tmp.to_string(),oreg1[0].to_string())?;
+                            let oreg2 = val.right.as_ref().unwrap().LEIRnasm(vec![Register::RAX, Register::RBX, Register::RCX], f, program, build, &local_vars, stack_size, loc)?;
+                            writeln!(f, "   cmp {}, {}",tmp.to_string(),oreg2[0].to_string())?;
+                            writeln!(f, "   jnz .IF_SCOPE_{}",inst_count)?;
+                        },
+                        Op::GT   => {
+                            let oreg1 = val.left.as_ref().unwrap().LEIRnasm(vec![Register::RAX, Register::RBX, Register::RCX], f, program, build, &local_vars, stack_size, loc)?;
+                            let tmp = Register::RSI.to_byte_size(oreg1[0].size());
+                            writeln!(f, "   mov {}, {}",tmp.to_string(),oreg1[0].to_string())?;
+                            let oreg2 = val.right.as_ref().unwrap().LEIRnasm(vec![Register::RAX, Register::RBX, Register::RCX], f, program, build, &local_vars, stack_size, loc)?;
+                            writeln!(f, "   cmp {}, {}",tmp.to_string(),oreg2[0].to_string())?;
+                            writeln!(f, "   jg .IF_SCOPE_{}",inst_count)?;
+                        },
+                        Op::GTEQ => {
+                            let oreg1 = val.left.as_ref().unwrap().LEIRnasm(vec![Register::RAX, Register::RBX, Register::RCX], f, program, build, &local_vars, stack_size, loc)?;
+                            let tmp = Register::RSI.to_byte_size(oreg1[0].size());
+                            writeln!(f, "   mov {}, {}",tmp.to_string(),oreg1[0].to_string())?;
+                            let oreg2 = val.right.as_ref().unwrap().LEIRnasm(vec![Register::RAX, Register::RBX, Register::RCX], f, program, build, &local_vars, stack_size, loc)?;
+                            writeln!(f, "   cmp {}, {}",tmp.to_string(),oreg2[0].to_string())?;
+                            writeln!(f, "   jge .IF_SCOPE_{}",inst_count)?;
+                        },
+                        Op::LT   => {
+                            let oreg1 = val.left.as_ref().unwrap().LEIRnasm(vec![Register::RAX, Register::RBX, Register::RCX], f, program, build, &local_vars, stack_size, loc)?;
+                            let tmp = Register::RSI.to_byte_size(oreg1[0].size());
+                            writeln!(f, "   mov {}, {}",tmp.to_string(),oreg1[0].to_string())?;
+                            let oreg2 = val.right.as_ref().unwrap().LEIRnasm(vec![Register::RAX, Register::RBX, Register::RCX], f, program, build, &local_vars, stack_size, loc)?;
+                            writeln!(f, "   cmp {}, {}",tmp.to_string(),oreg2[0].to_string())?;
+                            writeln!(f, "   jl .IF_SCOPE_{}",inst_count)?;
+                        },
+                        Op::LTEQ => {
+                            let oreg1 = val.left.as_ref().unwrap().LEIRnasm(vec![Register::RAX, Register::RBX, Register::RCX], f, program, build, &local_vars, stack_size, loc)?;
+                            let tmp = Register::RSI.to_byte_size(oreg1[0].size());
+                            writeln!(f, "   mov {}, {}",tmp.to_string(),oreg1[0].to_string())?;
+                            let oreg2 = val.right.as_ref().unwrap().LEIRnasm(vec![Register::RAX, Register::RBX, Register::RCX], f, program, build, &local_vars, stack_size, loc)?;
+                            writeln!(f, "   cmp {}, {}",tmp.to_string(),oreg2[0].to_string())?;
+                            writeln!(f, "   jle .IF_SCOPE_{}",inst_count)?;
+                        },
+                        Op::NOT  => todo!(),
+                        _ => panic!("Unreachable")
+                    }
+                }
+                //println!("Count: {} at {:?}",inst_count.clone()-2,scope.get_body(build).get(inst_count.clone()-4));
+                if let Some((_,elses)) = scope.get_body(build).get(i+1) {
+                    match elses {
+                        Instruction::EXPAND_ELSE_SCOPE(elses) => {
+                            nasm_x86_64_handle_scope(f, build, program, TCScopeType::NORMAL(&elses), local_vars.clone(), stack_size,func_stack_begin,inst_count)?;
+                        }
+                        _ => {}
+                    }
+                }
+                let binst = inst_count.clone();
+                writeln!(f, "   jmp .IF_SCOPE_END_{}",binst)?;
+                writeln!(f, "   .IF_SCOPE_{}:",binst)?;
+                *inst_count += 1;
+                nasm_x86_64_handle_scope(f, build, program, TCScopeType::NORMAL(&s), local_vars.clone(), stack_size,func_stack_begin,inst_count)?;
+                *inst_count -= 1;
+                writeln!(f, "   .IF_SCOPE_END_{}:",binst)?;
+                //TODO: Implement actual conditions
+            },
+            Instruction::EXPAND_WHILE_SCOPE(s) => {
+                writeln!(f, "   .WHILE_SCOPE_{}:",inst_count)?;
+                let condition = match s.typ {
+                    NormalScopeType::WHILE(ref c) => c,
+                    _ => panic!("Unreachable")
+                };
+                if condition.is_ofp() {
+                    let val = condition.unwrap_val();
+                    match val {
+                        OfP::REGISTER(reg) => {
+                            let reg = reg.to_byte_size(1);
+                            writeln!(f, "   cmp {}, 0",reg.to_string())?;
+                        },
+                        OfP::LOCALVAR(v) => {
+                            let var = local_vars.get(v).unwrap();
+                            com_assert!(loc,var.typ.weak_eq(&VarType::BOOLEAN),"Error: Expected boolean but found {}",var.typ.to_string(false));
+                            if stack_size-var.operand == 0 {
+                                writeln!(f, "   cmp {} [rsp], 0",size_to_nasm_type(var.typ.get_size(program)),)?;
+                            }
+                            else {
+                                writeln!(f, "   cmp {} [rsp+{}], 0",size_to_nasm_type(var.typ.get_size(program)),stack_size-var.operand)?;
+                            }
+                        },
+                        OfP::CONST(val) => {
+                            writeln!(f, "   mov rax, {}",val.get_num_data())?;
+                            writeln!(f, "   cmp rax, 0")?;
+                        },
+                        OfP::RESULT(_, _) => todo!(),
+                    }
+                    writeln!(f, "   jz .WHILE_SCOPE_END_{}",inst_count)?;
+                }
+                else {
+                    let val = condition.unwrap_expr();
+                    com_assert!(loc,val.op.is_boolean(),"Error: Condition MUST be of type boolean but encountered op {}",val.op.to_string());
+                    match val.op {
+                        Op::EQ   => {
+                            let oreg1 = val.left.as_ref().unwrap().LEIRnasm(vec![Register::RAX, Register::RBX, Register::RCX], f, program, build, &local_vars, stack_size, loc)?;
+                            let tmp = Register::RSI.to_byte_size(oreg1[0].size());
+                            writeln!(f, "   mov {}, {}",tmp.to_string(),oreg1[0].to_string())?;
+                            let oreg2 = val.right.as_ref().unwrap().LEIRnasm(vec![Register::RAX, Register::RBX, Register::RCX], f, program, build, &local_vars, stack_size, loc)?;
+                            writeln!(f, "   cmp {}, {}",tmp.to_string(),oreg2[0].to_string())?;
+                            writeln!(f, "   jnz .WHILE_SCOPE_END_{}",inst_count)?;
+                        },
+                        Op::NEQ  => {
+                            let oreg1 = val.left.as_ref().unwrap().LEIRnasm(vec![Register::RAX, Register::RBX, Register::RCX], f, program, build, &local_vars, stack_size, loc)?;
+                            let tmp = Register::RSI.to_byte_size(oreg1[0].size());
+                            writeln!(f, "   mov {}, {}",tmp.to_string(),oreg1[0].to_string())?;
+                            let oreg2 = val.right.as_ref().unwrap().LEIRnasm(vec![Register::RAX, Register::RBX, Register::RCX], f, program, build, &local_vars, stack_size, loc)?;
+                            writeln!(f, "   cmp {}, {}",tmp.to_string(),oreg2[0].to_string())?;
+                            writeln!(f, "   jz .WHILE_SCOPE_END_{}",inst_count)?;
+                        },
+                        Op::GT   => {
+                            let oreg1 = val.left.as_ref().unwrap().LEIRnasm(vec![Register::RAX, Register::RBX, Register::RCX], f, program, build, &local_vars, stack_size, loc)?;
+                            let tmp = Register::RSI.to_byte_size(oreg1[0].size());
+                            writeln!(f, "   mov {}, {}",tmp.to_string(),oreg1[0].to_string())?;
+                            let oreg2 = val.right.as_ref().unwrap().LEIRnasm(vec![Register::RAX, Register::RBX, Register::RCX], f, program, build, &local_vars, stack_size, loc)?;
+                            writeln!(f, "   cmp {}, {}",tmp.to_string(),oreg2[0].to_string())?;
+                            writeln!(f, "   jle .WHILE_SCOPE_END_{}",inst_count)?;
+                        },
+                        Op::GTEQ => {
+                            let oreg1 = val.left.as_ref().unwrap().LEIRnasm(vec![Register::RAX, Register::RBX, Register::RCX], f, program, build, &local_vars, stack_size, loc)?;
+                            let tmp = Register::RSI.to_byte_size(oreg1[0].size());
+                            writeln!(f, "   mov {}, {}",tmp.to_string(),oreg1[0].to_string())?;
+                            let oreg2 = val.right.as_ref().unwrap().LEIRnasm(vec![Register::RAX, Register::RBX, Register::RCX], f, program, build, &local_vars, stack_size, loc)?;
+                            writeln!(f, "   cmp {}, {}",tmp.to_string(),oreg2[0].to_string())?;
+                            writeln!(f, "   jl .WHILE_SCOPE_END_{}",inst_count)?;
+                        },
+                        Op::LT   => {
+                            let oreg1 = val.left.as_ref().unwrap().LEIRnasm(vec![Register::RAX, Register::RBX, Register::RCX], f, program, build, &local_vars, stack_size, loc)?;
+                            let tmp = Register::RSI.to_byte_size(oreg1[0].size());
+                            writeln!(f, "   mov {}, {}",tmp.to_string(),oreg1[0].to_string())?;
+                            let oreg2 = val.right.as_ref().unwrap().LEIRnasm(vec![Register::RAX, Register::RBX, Register::RCX], f, program, build, &local_vars, stack_size, loc)?;
+                            writeln!(f, "   cmp {}, {}",tmp.to_string(),oreg2[0].to_string())?;
+                            writeln!(f, "   jge .WHILE_SCOPE_END_{}",inst_count)?;
+                        },
+                        Op::LTEQ => {
+                            let oreg1 = val.left.as_ref().unwrap().LEIRnasm(vec![Register::RAX, Register::RBX, Register::RCX], f, program, build, &local_vars, stack_size, loc)?;
+                            let tmp = Register::RSI.to_byte_size(oreg1[0].size());
+                            writeln!(f, "   mov {}, {}",tmp.to_string(),oreg1[0].to_string())?;
+                            let oreg2 = val.right.as_ref().unwrap().LEIRnasm(vec![Register::RAX, Register::RBX, Register::RCX], f, program, build, &local_vars, stack_size, loc)?;
+                            writeln!(f, "   cmp {}, {}",tmp.to_string(),oreg2[0].to_string())?;
+                            writeln!(f, "   jg .WHILE_SCOPE_END_{}",inst_count)?;
+                        },
+                        Op::NOT  => todo!(),
+                        _ => panic!("Unreachable")
+                    }
+                }
+                
+                // writeln!(f, "   jmp .WHILE_SCOPE_END_{}",i)?;
+                // writeln!(f, "   .IF_SCOPE_{}:",i)?;
+                let binst = inst_count.clone();
+                nasm_x86_64_handle_scope(f, build, program, TCScopeType::NORMAL(&s), local_vars.clone(), stack_size,func_stack_begin,inst_count)?;
+                writeln!(f, "   jmp .WHILE_SCOPE_{}" ,binst)?;
+                writeln!(f, "   .WHILE_SCOPE_END_{}:",binst)?;
+                
+            }
+            Instruction::EXPAND_ELSE_SCOPE(_) => {
+                // com_error!(loc,"Error: this should never happen!"w);
+            },
+            
+            //TODO: Re-enble these
+            _ => todo!("Re-enable these:")
+            // Instruction::MORETHAN(ofp1, ofp2) => {
+            //     let regs = ofp1.LOIRGNasm(vec![Register::RAX], f, program, build, &local_vars, stack_size,loc)?[0];
+            //     let regs2 = ofp2.LOIRGNasm(vec![Register::RBX], f, program, build, &local_vars, stack_size,loc)?[0];
+            //     writeln!(f,"   cmp {}, {}",regs.to_string(),regs2.to_string())?;
+            //     writeln!(f,"   setg al")?;
+            // },
+            // Instruction::LESSTHAN(ofp1, ofp2) => {
+            //     let regs = ofp1.LOIRGNasm(vec![Register::RAX], f, program, build, &local_vars, stack_size,loc)?[0];
+            //     let regs2 = ofp2.LOIRGNasm(vec![Register::RBX], f, program, build, &local_vars, stack_size,loc)?[0];
+            //     writeln!(f,"   cmp {}, {}",regs.to_string(),regs2.to_string())?;
+            //     writeln!(f,"   setl al")?;
+            // },
+            // Instruction::MORETHANEQUALS(ofp1, ofp2) => {
+            //     let regs = ofp1.LOIRGNasm(vec![Register::RAX], f, program, build, &local_vars, stack_size,loc)?[0];
+            //     let regs2 = ofp2.LOIRGNasm(vec![Register::RBX], f, program, build, &local_vars, stack_size,loc)?[0];
+            //     writeln!(f,"   cmp {}, {}",regs.to_string(),regs2.to_string())?;
+            //     writeln!(f,"   setge al")?;
+            // },
+            // Instruction::LESSTHANEQUALS(ofp1, ofp2) => {
+            //     let regs = ofp1.LOIRGNasm(vec![Register::RAX], f, program, build, &local_vars, stack_size,loc)?[0];
+            //     let regs2 = ofp2.LOIRGNasm(vec![Register::RBX], f, program, build, &local_vars, stack_size,loc)?[0];
+            //     writeln!(f,"   cmp {}, {}",regs.to_string(),regs2.to_string())?;
+            //     writeln!(f,"   setle al")?;
+            // },
+            // Instruction::NOTEQUALS(ofp1, ofp2) => {
+            //     let regs = ofp1.LOIRGNasm(vec![Register::RAX], f, program, build, &local_vars, stack_size,loc)?[0];
+            //     let regs2 = ofp2.LOIRGNasm(vec![Register::RBX], f, program, build, &local_vars, stack_size,loc)?[0];
+            //     writeln!(f,"   cmp {}, {}",regs.to_string(),regs2.to_string())?;
+            //     writeln!(f,"   setne al")?;
+            // },
+            // Instruction::EQUALS(ofp1, ofp2) => {
+            //     let regs = ofp1.LOIRGNasm(vec![Register::RAX], f, program, build, &local_vars, stack_size,loc)?[0];
+            //     let regs2 = ofp2.LOIRGNasm(vec![Register::RBX], f, program, build, &local_vars, stack_size,loc)?[0];
+            //     writeln!(f,"   cmp {}, {}",regs.to_string(),regs2.to_string())?;
+            //     writeln!(f,"   sete al")?;
+            // },
+        }
+        *inst_count += 1;
+    }
+    if !scope.is_func() {
+        // let mut varSize: usize = 0;
+        // for val in scope.get_locals(build).unwrap().values() {
+        //     varSize += val.get_size(program);
+        // };
+        // if varSize > 0 {
+        //     writeln!(f, "   add rsp, {}",varSize)?;
+        // }
+        let dif = stack_size-stack_size_org;
+        if dif != 0 {
+            writeln!(f, "   add rsp, {}",dif)?;
+        }
+    }
+    else if scope.unwrap_func() != "main" {
+        //println!("Got to here for {}!",scope.unwrap_func());
+        let dif = stack_size-stack_size_org;
+        if dif != 0 {
+            writeln!(f, "   add rsp, {}",dif)?;
+        }
+        writeln!(f, "   ret")?;
+    }
+    Ok(())
+}
 fn to_nasm_x86_64(build: &mut BuildProgram, program: &CmdProgram) -> io::Result<()>{
     let optimization = optimization_ops(build, program);
     let mut f = File::create(&program.opath).expect(&format!("Error: could not open output file {}",program.opath.as_str()));
@@ -3191,7 +4514,7 @@ fn to_nasm_x86_64(build: &mut BuildProgram, program: &CmdProgram) -> io::Result<
     
     
     for (UUID,stridef) in build.stringdefs.iter(){                
-        if program.in_mode == OptimizationMode::DEBUG || (optimization.usedStrings.contains_key(UUID) && (optimization.usedFuncs.contains(optimization.usedStrings.get(UUID).unwrap()) || optimization.usedStrings.get(UUID).expect(&format!("Could not find: {}",UUID)) == "main")) {
+        if program.in_mode == OptimizationMode::DEBUG || (optimization.usedStrings.contains_key(UUID) && (optimization.usedFuncs.contains(optimization.usedStrings.get(UUID).unwrap()) || !program.remove_unused_functions || optimization.usedStrings.get(UUID).expect(&format!("Could not find: {}",UUID)) == "main")) {
             write!(&mut f, "   _STRING_{}_: db ",UUID.to_string().replace("-", ""))?;
             for chr in stridef.Data.chars() {
                 write!(&mut f, "{}, ",(chr as u8))?;
@@ -3203,40 +4526,40 @@ fn to_nasm_x86_64(build: &mut BuildProgram, program: &CmdProgram) -> io::Result<
                 writeln!(&mut f, "0")?;
             }
             match stridef.Typ {
-                ProgramStringType::STR  => writeln!(&mut f, "   _LEN_STRING_{}_: dq {}",UUID.to_string().replace("-", ""),stridef.Data.len())?,
+                ProgramStringType::STR  => {},//writeln!(&mut f, "   _LEN_STRING_{}_: dq {}",UUID.to_string().replace("-", ""),stridef.Data.len())?,
                 ProgramStringType::CSTR => {},
             }
         }
         else if program.print_unused_warns && program.print_unused_strings {
-                println!("[NOTE] Unused string:   <{}> \"{}\" - This is probably due to a constant definition that was never used or a function that may have used that strings, that got cut off from the final build",UUID, stridef.Data.escape_default());
-                for (cd_name, cd) in build.constdefs.iter() {
-                    match cd.typ {
-                        RawConstValueType::STR(ref id) => {
-                            if id == UUID {
-                                println!("       ^ Found matching constant definition: \"{}\" at {}",cd_name,cd.loc.loc_display());
-                            }
+            println!("[NOTE] Unused string:   <{}> \"{}\" - This is probably due to a constant definition that was never used or a function that may have used that strings, that got cut off from the final build",UUID, stridef.Data.escape_default());
+            for (cd_name, cd) in build.constdefs.iter() {
+                match cd.typ {
+                    RawConstValueType::STR(ref id) => {
+                        if id == UUID {
+                            println!("       ^ Found matching constant definition: \"{}\" at {}",cd_name,cd.loc.loc_display());
                         }
-                        _ => {}
                     }
+                    _ => {}
                 }
+            }
         }
     }
-    if optimization.should_use_callstack {
-        writeln!(&mut f, "section .bss")?;
-        writeln!(&mut f, "   _CALLSTACK: resb {}",program.call_stack_size)?;
-        writeln!(&mut f, "   _CALLSTACK_TOP: ")?;
-        writeln!(&mut f, "   _CALLSTACK_BUF_PTR: resd 1")?;
+    for (dll_import_name,_) in build.dll_imports.iter() {
+        writeln!(&mut f, "extern {}",dll_import_name)?;
+        //writeln!(&mut f, "import {} {}",dll_import_name,dll_import.from)?;
+    }
+    for (dll_export_name,_dll_export) in build.dll_exports.iter() {
+        writeln!(&mut f, "global {}",dll_export_name)?;
     }
     for function_name in build.functions.keys() {
-        if function_name == "main" {
-            
+        if function_name == "main" {    
             writeln!(&mut f,"global {}{}",program.architecture.func_prefix,function_name)?;
         }
         else {
-            if program.in_mode == OptimizationMode::DEBUG || !program.remove_unused_functions || optimization.usedFuncs.contains(function_name){
-                writeln!(&mut f,"global {}{}",program.architecture.func_prefix,function_name)?;
-            }
-            else if program.print_unused_warns && program.print_unused_funcs {
+            // if program.in_mode == OptimizationMode::DEBUG || !program.remove_unused_functions || optimization.usedFuncs.contains(function_name){
+            //     writeln!(&mut f,"global {}{}",program.architecture.func_prefix,function_name)?;
+            // }
+            if program.in_mode != OptimizationMode::DEBUG && program.remove_unused_functions && !optimization.usedFuncs.contains(function_name) && program.print_unused_warns && program.print_unused_funcs {
                 println!("[NOTE] {}: Unused function: \"{}\"", build.functions.get(function_name).unwrap().location.loc_display(),function_name);
             }
         }
@@ -3244,7 +4567,7 @@ fn to_nasm_x86_64(build: &mut BuildProgram, program: &CmdProgram) -> io::Result<
     for (Word,exter) in build.externals.iter() {
         match exter.typ {            
             ExternalType::CExternal| ExternalType::RawExternal => {
-                if program.in_mode == OptimizationMode::DEBUG || optimization.usedExterns.contains(&format!("{}{}{}",exter.typ.prefix(&program),Word,exter.typ.suffix())) {
+                if program.in_mode == OptimizationMode::DEBUG || optimization.usedExterns.contains(Word) {
                     writeln!(&mut f,"  extern {}{}{}",exter.typ.prefix(&program),Word,exter.typ.suffix())?;
                 }
                 else if program.print_unused_warns && program.print_unused_externs {
@@ -3254,656 +4577,28 @@ fn to_nasm_x86_64(build: &mut BuildProgram, program: &CmdProgram) -> io::Result<
         }
     }
     writeln!(&mut f, "section .text")?;
-    // TODO: introduce something like mainMEM which won't be bound to the 640 000
-    let mut callstack_size: i64 = 0;
+
     for (function_name,function) in build.functions.iter() {
-        // true                                          true                               true                                               true                              
+        // TODO: implement build.architecture.entry
         if program.in_mode != OptimizationMode::DEBUG && program.remove_unused_functions && !optimization.usedFuncs.contains(function_name) && function_name != "main" {
             continue;
         }
-        let mut hasFoundRet = false;
-        let mut stack_size: i64 = 0;
         
         if function_name == "main" {
             writeln!(&mut f, "{}{}:",program.architecture.func_prefix,function_name)?;
             writeln!(&mut f, "   sub rsp, {}",program.architecture.bits/8)?;
-            //writeln!(&mut f, "   push rsp")?;
-            //writeln!(&mut f, "   sub rsp, 4")?;
-            //writeln!(&mut f, "   mov rbp, rsp")?;
         }
         else {
             writeln!(&mut f, "{}{}:",program.architecture.func_prefix,function_name)?;
         }
-        let mut rs_stack_offset: usize = {
-            let mut o: usize = 0;
-            for v in function.contract.Outputs.iter() {
-                o += v.get_size(program);
-            }
-            o
-        };
-        let mut local_vars: HashMap<String, LocalVariable> = function.locals.clone();
-        for (i,(_location, instruction)) in function.body.iter().enumerate(){
-            if program.in_mode == OptimizationMode::DEBUG {
-                writeln!(&mut f,"   ; --- {} ",i)?
-            }
-            match instruction {
-                Instruction::PUSH(Reg) => {
-                    match Reg {
-                        OfP::REGISTER(Reg) => {
-                            writeln!(&mut f, "   sub rsp, {}",Reg.size())?;
-                            writeln!(&mut f, "   mov {} [rsp], {}",size_to_nasm_type(Reg.size()), Reg.to_string())?;
-                                
-                            stack_size += Reg.size() as i64
-                        }
-                        OfP::STR(UUID,typ) => {
-                            match typ {
-                                ProgramStringType::STR => {
-                                    match program.architecture.bits {
-                                        64 => {
-                                            writeln!(&mut f, "   sub rsp, 12")?;
-                                            writeln!(&mut f, "   lea rax, [rel _STRING_{}_]",UUID.to_string().replace("-", ""))?;
-                                            writeln!(&mut f, "   mov qword [rsp+8], rax")?;
-                                            stack_size += 12
-                                        }
-                                        32 | _ => {
-                                            writeln!(&mut f, "   sub rsp, 16")?;
-                                            writeln!(&mut f, "   lea rax, [rel _STRING_{}_]",UUID.to_string().replace("-", ""))?;
-                                            writeln!(&mut f, "   mov dword [rsp+8], rax")?;
-                                            //writeln!(&mut f, "   mov dword [rsp+8], _STRING_{}_",UUID.to_string().replace("-", ""))?;
-                                            stack_size += 16
-                                        }
-                                    }
-                                    writeln!(&mut f, "   mov qword [rsp], {}",build.stringdefs.get(&UUID).unwrap().Data.len())?;
-                                    //writeln!(&mut f, "   mov qword [rsp], _LEN_STRING_{}_",UUID.to_string().replace("-", ""))?;
-                                },
-                                ProgramStringType::CSTR => {
-                                    match program.architecture.bits {
-                                        64 => {
-                                            writeln!(&mut f, "   sub rsp, 8")?;
-                                            writeln!(&mut f, "   lea rax, [rel _STRING_{}_]",UUID.to_string().replace("-", ""))?;
-                                            writeln!(&mut f, "   mov qword [rsp], rax")?;
-                                            stack_size += 8
-                                        }
-                                        32 | _ => {
-                                            writeln!(&mut f, "   sub rsp, 4")?;
-                                            writeln!(&mut f, "   lea rax, [rel _STRING_{}_]",UUID.to_string().replace("-", ""))?;
-                                            writeln!(&mut f, "   mov dword [rsp], rax")?;
-                                            stack_size += 4
-                                        }
-                                    }
-                                },
-                            }
-                        }
-                        OfP::RAW(Data) => {
-                            writeln!(&mut f, "   sub rsp, 8")?;
-                            writeln!(&mut f, "   mov qword [rsp], {}",Data)?;
-                            stack_size += 8
-                        }
-                        OfP::LOCALVAR(var) => {
-                            let var = local_vars.get(var).expect(&format!("Error: could not find variable {}",var));
-                            if callstack_size as usize-var.operand-var.typ.get_size(program) == 0 {
-                                writeln!(&mut f, "   mov rax, qword [_CALLSTACK_BUF_PTR]")?;
-                            }
-                            else {
-                                writeln!(&mut f, "   mov rax, qword [_CALLSTACK_BUF_PTR+{}]",callstack_size as usize-var.operand-var.typ.get_size(program))?;
-                            }
-                            stack_size += var.typ.get_size(program) as i64;
-                            todo!("Remove push r10");
-                            writeln!(&mut f, "   push r10")?;
-                        }
-                        OfP::PARAM(var) => {
-                            /*for (i,(name, p)) in function.contract.Inputs.iter().enumerate() {
-                                if name == var {
-                                    let offset = stack_size+{
-                                        let mut o: usize = 0;
-                                        for (_, p) in &function.contract.Inputs[i..] {                                        
-                                            o += p.get_size(program)
-                                        }
-                                        o
-                                    } as i64+{
-                                        let mut o: usize = 0;
-                                        for i in function.contract.Outputs.iter() {
-                                            o += i.get_size(program)
-                                        }
-                                        o
-                                    } as i64;
-                                    writeln!(&mut f, "   mov rbx, qword [rsp+{}]",offset)?;
-                                    writeln!(&mut f, "   sub rsp, {}",p.get_size(program))?;
-                                    writeln!(&mut f, "   mov qword [rsp], rbx")?;
-                                    stack_size += p.get_size(program) as i64;
-                                    break;
-                                }
-                            }*/
-                            let i = com_expect!(_location,function.contract.Inputs.get(var), "Error: Unknown Parameter {}",var).clone();
-                            let osize = function.contract.InputPool.get(i).unwrap().get_size(program);
-                            let offset = stack_size as usize+
-                            {
-                                let mut o: usize = 0;
-                                for typ in &function.contract.InputPool[i..] {
-                                   o += typ.get_size(program) 
-                                }
-                                o
-                            }+{
-                                let mut o: usize = 0;
-                                for i in function.contract.Outputs.iter() {
-                                    o += i.get_size(program)
-                                }
-                                o
-                            }-osize;
-                            let reg = Register::RAX.to_byte_size(osize);
-                            if offset > 0 {
-                                writeln!(&mut f, "   mov {}, {} [rsp+{}]",reg.to_string(),size_to_nasm_type(osize),offset)?;
-                            }
-                            else {
-                                writeln!(&mut f, "   mov {}, {} [rsp]",reg.to_string(),size_to_nasm_type(osize))?;
-                            }
-                            writeln!(&mut f, "   sub rsp, {}", function.contract.InputPool.get(i).unwrap().get_size(program) )?;
-                            writeln!(&mut f, "   mov {} [rsp], {}",size_to_nasm_type(osize),reg.to_string())?;
-                            stack_size += function.contract.InputPool.get(i).unwrap().get_size(program) as i64;                                                                                                             
-                        }
-                        _ => {
-                            todo!("Unsupported")
-                        }
-                    }
-                    
-                }
-                Instruction::MOV(Op, Op2) => {
-                    match Op {
-                        OfP::REGISTER(Reg1) => {
-                            match Op2 {
-                                OfP::REGISTER(Reg2) => {
-                                    writeln!(&mut f, "   mov {}, {}",Reg1.to_string(), Reg2.to_string())?;
-                                },
-                                OfP::LOCALVAR(_) => todo!(),
-                                OfP::RAW(Data) => {
-                                    writeln!(&mut f, "   mov {}, {}",Reg1.to_string(), Data)?;
-                                },
-                                OfP::STR(_, _) => todo!(),
-                                OfP::PARAM(data) => {
-                                    let i = com_expect!(_location, function.contract.Inputs.get(data),"Error: Unexpected variable {}",data).clone();
-                                    let osize = function.contract.InputPool.get(i).unwrap().get_size(program);
-                                    //for typ in &function.contract.InputPool[i..] {
-                                    let offset = stack_size as usize+{
-                                        let mut o: usize = 0;
-                                        for typ in &function.contract.InputPool[i..] {
-                                            o+=typ.get_size(program)
-                                        }
-                                        o
-                                    }+{
-                                         let mut o: usize = 0;
-                                         for i in function.contract.Outputs.iter() {
-                                             o += i.get_size(program)
-                                         }
-                                         o
-                                    }-osize;
-                                    //TODO: Potentially dangerous because of raw qword:
-                                    if offset > 0 {
-                                        writeln!(&mut f, "   mov {}, qword [rsp+{}]",Reg1.to_string(),offset)?;
-                                    }
-                                    else {
-                                        writeln!(&mut f, "   mov {}, qword [rsp]",Reg1.to_string())?;
-                                    }
-                                        
-                                    //}
-                                    /*
-                                    for (i,(name, _)) in function.contract.Inputs.iter().enumerate() {
-                                        if name == data {
-                                            let offset = stack_size+{
-                                                let mut o: usize = 0;
-                                                for (_, p) in &function.contract.Inputs[i..] {                                        
-                                                    o += p.get_size(program)
-                                                }
-                                                o
-                                            } as i64+{
-                                                let mut o: usize = 0;
-                                                for i in function.contract.Outputs.iter() {
-                                                    o += i.get_size(program)
-                                                }
-                                                o
-                                            } as i64;
-                                            writeln!(&mut f, "   mov {}, qword [rsp+{}]",Reg1.to_string(),offset)?;
-                                            break;
-                                        }
-                                    }
-                                    */
-                                },
-                            }
-                        }
-                        OfP::LOCALVAR(varOrg) => {
-                            match Op2 {
-                                OfP::REGISTER(val) => {
-                                    let var = com_expect!(_location,local_vars.get(varOrg),"Error: Unknown variable found during compilation {}",varOrg);
-                                    
-                                    if var.typ.get_size(program) <= 8  {
-                                        if callstack_size as usize-var.operand-var.typ.get_size(program) == 0 {
-                                            writeln!(&mut f, "   mov {} [_CALLSTACK_BUF_PTR], {}",size_to_nasm_type(var.typ.get_size(program)), val.to_string())?;
-                                        }
-                                        else {
-                                            writeln!(&mut f, "   mov {} [_CALLSTACK_BUF_PTR+{}], {}",size_to_nasm_type(var.typ.get_size(program)),callstack_size as usize-var.operand-var.typ.get_size(program), val.to_string())?;
-                                        }
-                                    }
-                                    else {
-                                        todo!()
-                                    }
- 
-                                },
-                                OfP::LOCALVAR(_) => todo!("vars"),
-                                OfP::RAW(val) => {
-                                    let var = com_expect!(_location,local_vars.get(varOrg),"Error: Unknown variable found during compilation {}",varOrg);
-                                    
-                                    if var.typ.get_size(program) <= 8  {
-                                        if callstack_size as usize-var.operand-var.typ.get_size(program) == 0 {
-                                            writeln!(&mut f, "   mov {} [_CALLSTACK_BUF_PTR], {}",size_to_nasm_type(var.typ.get_size(program)), val)?;
-                                        }
-                                        else {
-                                            writeln!(&mut f, "   mov {} [_CALLSTACK_BUF_PTR+{}], {}",size_to_nasm_type(var.typ.get_size(program)),callstack_size as usize-var.operand-var.typ.get_size(program), val)?;
-                                        }
-                                    }
-                                    else {
-                                        todo!()
-                                    }
-                                },
-                                OfP::STR(_,_) => todo!(),
-                                OfP::PARAM(param) => {
-                                    let var = com_expect!(_location,local_vars.get(varOrg),"Error: Unknown variable found during compilation {}",varOrg);
-                                    let i = com_expect!(_location,function.contract.Inputs.get(param), "Error: Unknown Parameter {}",param).clone();
-                                    let osize = function.contract.InputPool.get(i).unwrap().get_size(program);
-                                    let offset = stack_size as usize+
-                                    {
-                                        let mut o: usize = 0;
-                                        for typ in &function.contract.InputPool[i..] {
-                                        o += typ.get_size(program) 
-                                        }
-                                        o
-                                    }+{
-                                        let mut o: usize = 0;
-                                        for i in function.contract.Outputs.iter() {
-                                            o += i.get_size(program)
-                                        }
-                                        o
-                                    }-osize;
-                                    let reg = Register::RAX.to_byte_size(osize);
-                                    writeln!(&mut f, "   mov {}, {} [rsp+{}]",reg.to_string(),size_to_nasm_type(osize),offset)?;
-                                    if callstack_size as usize-var.operand-var.typ.get_size(program) == 0 {
-                                        writeln!(&mut f, "   mov {} [_CALLSTACK_BUF_PTR], {}",size_to_nasm_type(var.typ.get_size(program)), reg.to_string())?;
-                                    }
-                                    else {
-                                        writeln!(&mut f, "   mov {} [_CALLSTACK_BUF_PTR+{}], {}",size_to_nasm_type(var.typ.get_size(program)),callstack_size as usize-var.operand-var.typ.get_size(program), reg.to_string())?;
-                                    }
-                                },
-                            }
-                        }
-                        _ => {
-                            todo!("Unsupported");
-                        }
-                    }
-                    
-                }
-                Instruction::POP(Reg) => {
-                    match Reg {
-                        OfP::REGISTER(Reg) => {
-                            writeln!(&mut f, "   mov {}, {} [rsp]",Reg.to_string(),size_to_nasm_type(Reg.size()))?;
-                            writeln!(&mut f, "   add rsp, {}",Reg.size())?;
-                            stack_size -= Reg.size() as i64
-                        }
-                        _ => {
-                            todo!("Unsupported")
-                        }
-                    }
-                }
-                Instruction::CALLRAW(Word, contract) => {
-                    nasm_x86_64_prep_args(program, build, &mut f, build.externals.get(Word).unwrap().contract.as_ref().expect("TODO: implement rawcall without contract").clone(), contract, &mut stack_size, &mut callstack_size, _location.clone(), &local_vars)?;
-                    writeln!(&mut f, "   xor rax, rax")?;
-                    writeln!(&mut f, "   call {}",Word)?;
-                    if let Some(ops) = program.architecture.options.argumentPassing.custom_get() {
-                        if ops.shadow_space > 0 {
-                            writeln!(&mut f, "   add rsp, {}",ops.shadow_space)?;
-                        }
-                    }
-                }
-                Instruction::ADD(op1, op2) => {
-                    match op1 {
-                        OfP::REGISTER(reg1) => {
-                            match op2 {
-                                OfP::REGISTER(reg2) => {
-                                    assert!(reg1.size() == reg2.size(), "Two different sized registers passed to add Instruction");
-                                    writeln!(&mut f, "   add {}, {}",reg1.to_string(), reg2.to_string())?;
-                                }
-                                OfP::LOCALVAR(_) => todo!(),
-                                OfP::RAW(val) => {
-                                    if val != &0 {
-                                        writeln!(&mut f, "   add {}, {}",reg1.to_string(),val)?;
-                                    }
-                                }
-                                OfP::STR(_,_) => todo!(),
-                                OfP::PARAM(_) => todo!(),
-                            }
-                        }
-                        OfP::LOCALVAR(var1) => {
-                            match op2 {
-                                OfP::REGISTER(_) => todo!(),
-                                OfP::LOCALVAR(var2) => {
-                                    com_assert!(_location, function.locals.contains_key(var1) && function.locals.contains_key(var2), "Unknown variable");
-                                    let local_vars = &local_vars;
-                                    let var1 = local_vars.get(var1).unwrap();
-                                    let var2 = local_vars.get(var2).unwrap();
-                                    com_assert!(_location, var1.typ.get_size(program) == var2.typ.get_size(program), "Unknown variable size");
-                                    if callstack_size as usize-var1.operand-var1.typ.get_size(program) == 0 {
-                                        writeln!(&mut f, "   mov rax, [_CALLSTACK_BUF_PTR]")?;
-                                    }
-                                    else {
-                                        writeln!(&mut f, "   mov rax, [_CALLSTACK_BUF_PTR+{}]",callstack_size as usize-var1.operand-var1.typ.get_size(program))?;
-                                    }
-                                    if callstack_size as usize-var2.operand-var2.typ.get_size(program) == 0{
-                                        writeln!(&mut f, "   add rax, [_CALLSTACK_BUF_PTR]")?;  
-                                    }
-                                    else {
-                                        writeln!(&mut f, "   add rax, [_CALLSTACK_BUF_PTR+{}]", callstack_size as usize-var2.operand-var2.typ.get_size(program))?;  
-                                    }
-                                    if callstack_size as usize-var1.operand-var1.typ.get_size(program) == 0 {
-                                        writeln!(&mut f, "   mov [_CALLSTACK_BUF_PTR], rax")?;
-                                    }
-                                    else {
-                                        writeln!(&mut f, "   mov [_CALLSTACK_BUF_PTR+{}], rax",callstack_size as usize-var1.operand-var1.typ.get_size(program))?;
-                                    }
-                                },
-                                OfP::RAW(_) => todo!(),
-                                OfP::STR(_,_) => todo!(),
-                                OfP::PARAM(_) => todo!(),
-                            }
-                        },
-                        OfP::RAW(_) => todo!(),
-                        OfP::STR(_,_) => todo!(),
-                        OfP::PARAM(_) => todo!(),
-                        
-                    }
-                    
-                }
-                Instruction::SUB(op1, op2) => {
-                    match op1 {
-                        OfP::REGISTER(reg1) => {
-                            match op2 {
-                                OfP::REGISTER(reg2) => {
-                                    assert!(reg1.size() == reg2.size(), "Two different sized registers passed to sub Instruction");
-                                    writeln!(&mut f, "   sub {} {}, {}",size_to_nasm_type(reg1.size()),reg1.to_string(), reg2.to_string())?;
-                                }
-                                OfP::LOCALVAR(_) => todo!(),
-                                OfP::RAW(val) => {
-                                    writeln!(&mut f, "   sub {}, {}",reg1.to_string(),val)?;
-                                },
-                                OfP::STR(_,_) => todo!(),
-                                OfP::PARAM(_) => todo!(),
-                            }
-                        }
-                        OfP::LOCALVAR(_) => todo!(),
-                        OfP::RAW(_) => todo!(),
-                        OfP::STR(_,_) => todo!(),
-                        OfP::PARAM(_) => todo!(),
-                    }
-                }
-                Instruction::MUL(op1, op2) => {
-                    match op1 {
-                        OfP::REGISTER(reg1) => {
-                            match op2 {
-                                OfP::REGISTER(reg2) => {
-                                    assert!(reg1.size() == reg2.size(), "Two different sized registers passed to mul Instruction");
-                                    writeln!(&mut f, "   mul {} {}, {}",size_to_nasm_type(reg1.size()),reg1.to_string(), reg2.to_string())?;
-                                }
-                                OfP::LOCALVAR(_) => todo!(),
-                                OfP::RAW(val) => {
-                                    writeln!(&mut f, "   mul {}, {}",reg1.to_string(),val)?;
-                                },
-                                OfP::STR(_,_) => todo!(),
-                                OfP::PARAM(_) => todo!(),
-                            }
-                        }
-                        OfP::LOCALVAR(_) => todo!(),
-                        OfP::RAW(_) => todo!(),
-                        OfP::STR(_,_) => todo!(),
-                        OfP::PARAM(_) => todo!(),
-                    }
-                    
-                }
-                Instruction::DIV(op1, op2) => {
-                    match op1 {
-                        OfP::REGISTER(reg1) => {
-                            match op2 {
-                                OfP::REGISTER(reg2) => {
-                                    assert!(reg1.size() == reg2.size(), "Two different sized registers passed to div Instruction");
-                                    writeln!(&mut f, "   mov r9, rdx")?;
-                                    writeln!(&mut f, "   xor rdx, rdx")?;
-                                    writeln!(&mut f, "   cqo")?;
-                                    writeln!(&mut f, "   mov rax, {}",reg1.to_string())?;
-                                    writeln!(&mut f, "   idiv {}",reg2.to_string())?;
-                                    writeln!(&mut f, "   mov {}, rax",reg1.to_string())?;
-                                    writeln!(&mut f, "   mov {}, rdx",reg2.to_string())?;
-                                    writeln!(&mut f, "   mov rdx, r9")?;
-                                }
-                                OfP::LOCALVAR(_) => todo!(),
-                                OfP::RAW(_) => todo!(),
-                                OfP::STR(_,_) => todo!(),
-                                OfP::PARAM(_) => todo!(),
-                            }
-                        }
-                        OfP::LOCALVAR(_) => todo!(),
-                        OfP::RAW(_) => todo!(),
-                        OfP::STR(_,_) => todo!(),
-                        OfP::PARAM(_) => todo!(),
-                    }
-                    
-                }
-                Instruction::CALL(Func,args) => {
-                    //todo!("use contract");
-                    //todo!("Finish type checking for arguments");
-                    // for arg in args {
-                    //     match arg.typ {
-                    //         CallArgType::TOP(_)      => todo!(),
-                    //         CallArgType::LOCALVAR(_) => todo!(),
-                    //         CallArgType::REGISTER(_) => todo!(),
-                    //         CallArgType::CONSTANT(_) => todo!(),
-                    //     }
-                    // }
-                    
-                    // let mut o: usize = 0;
-                    // for i in build.functions.get(Func).unwrap().contract.Outputs.iter() {
-                    //     o += i.get_size(program)
-                    // }
-                    // if o > 0 {
-                    //     writeln!(&mut f, "   sub rsp, {}",o)?;
-                    // }
-                    nasm_x86_64_prep_args(program, build, &mut f, build.functions.get(Func).unwrap().contract.to_any_contract(), args, &mut stack_size, &mut callstack_size, _location.clone(), &local_vars)?;
-                    writeln!(&mut f, "   call {}{}",program.architecture.func_prefix,Func)?;
-                    if let Some(ops) = program.architecture.options.argumentPassing.custom_get() {
-                        if ops.shadow_space > 0 {
-                            writeln!(&mut f, "   add rsp, {}",ops.shadow_space)?;
-                        }
-                    }
-                    //stack_size += o as i64;
-
-                }
-                Instruction::FNBEGIN() => {
-                    //println!("This was called on {}!",function_name);
-                    let mut offset: usize = 0;
-                    if program.architecture.options.argumentPassing == ArcPassType::PUSHALL {
-                        //let mut cont = function.contract.InputPool.clone();
-                        //TODO: I think this is broken, not sure :(
-                        for iarg in function.contract.InputPool.iter() {
-                            let osize = iarg.get_size(program);
-                            let reg = Register::RAX.to_byte_size(osize);
-                            if offset+osize > 0 {
-                                writeln!(&mut f, "   mov {}, {} [rsp+{}]",reg.to_string(),size_to_nasm_type(osize),offset)?;
-                                writeln!(&mut f, "   mov {} [rsp-{}], {}",size_to_nasm_type(osize),offset,reg.to_string())?;
-                            }
-                            else {
-                                writeln!(&mut f, "   mov {}, {} [rsp]",reg.to_string(),size_to_nasm_type(osize))?;
-                                writeln!(&mut f, "   mov {} [rsp], {}",size_to_nasm_type(osize),reg.to_string())?;
-                            }
-                            offset += osize;
-                        }
-                        if offset > 0 {
-                            writeln!(&mut f, "   sub rsp, {}",offset)?;
-                        }
-                    }
-                    else {
-                        let mut int_ptr_args: usize = 0;
-                        let argsPassing = program.architecture.options.argumentPassing.custom_get().unwrap();
-                        //let mut offset: usize = 8;
-                        let mut offset_from_sbegin: usize = 0;
-                        for iarg in function.contract.InputPool.iter() {
-                            let osize = iarg.get_size(program);
-                            if let Some(reg) = argsPassing.nums_ptrs.as_ref().unwrap_or(&Vec::new()).get(int_ptr_args){
-                                let reg = reg.to_byte_size(osize);
-                                if offset+osize > 0 { 
-                                    writeln!(&mut f, "   mov {} [rsp-{}], {}",size_to_nasm_type(osize),offset+osize,reg.to_string())?;
-                                }
-                                else {
-                                    writeln!(&mut f, "   mov {} [rsp], {}",size_to_nasm_type(osize),reg.to_string())?;
-                                }
-                                offset += reg.size();
-                            }
-                            else {
-                                let reg = Register::RAX.to_byte_size(osize);
-                                if offset+osize > 0 {
-                                    if offset_from_sbegin > 0 {
-                                        writeln!(&mut f, "   mov {}, {} [rsp+{}]",reg.to_string(),size_to_nasm_type(osize),offset_from_sbegin)?;
-                                    }
-                                    else {
-                                        writeln!(&mut f, "   mov {}, {} [rsp]",reg.to_string(),size_to_nasm_type(osize))?;
-                                    }
-                                    writeln!(&mut f, "   mov {} [rsp-{}], {}",size_to_nasm_type(osize),offset+osize,reg.to_string())?;
-                                }
-                                else {
-                                    if offset_from_sbegin > 0 {
-                                        writeln!(&mut f, "   mov {}, {} [rsp+{}]",reg.to_string(),size_to_nasm_type(osize),offset_from_sbegin)?;
-                                    }
-                                    else {
-                                        writeln!(&mut f, "   mov {}, {} [rsp]",reg.to_string(),size_to_nasm_type(osize))?;
-                                    }
-                                    writeln!(&mut f, "   mov {} [rsp], {}",size_to_nasm_type(osize),reg.to_string())?;
-                                }
-                                offset_from_sbegin+=osize;
-                                offset+=osize;
-                            }
-                            int_ptr_args+=1
-                        }
-                        // if offset > 0 {
-                        //     writeln!(&mut f, "   sub rsp, {}",offset)?;
-                        // }
-                        if offset > 0 {
-                            writeln!(&mut f, "   sub rsp, {}",offset)?;
-                        }
-                    }
-                    //todo!("Set up stack!");
-                    //writeln!(&mut f, "   push rbp")?;
-                }
-                Instruction::RET() => {
-                    let mut functionSize: usize = 0;
-                    if !hasFoundRet {
-                        for val in function.locals.values() {
-                            functionSize += val.typ.get_size(program);
-                        };
-                        if functionSize > 0 {
-                            writeln!(&mut f, "   mov rax, [_CALLSTACK_BUF_PTR]")?;
-                            writeln!(&mut f, "   add rax, {}",functionSize)?;
-                            writeln!(&mut f, "   mov [_CALLSTACK_BUF_PTR], rax")?;
-                        }
-                        //writeln!(&mut f, "   pop rbp")?;
-                        let mut argsize: usize = 0;
-                        for arg in function.contract.InputPool.iter() {
-                            argsize += arg.get_size(program);
-                        }
-                        if argsize > 0 {
-                            writeln!(&mut f, "   add rsp, {}",argsize)?;
-                        }
-                        
-                        writeln!(&mut f, "   ret")?;
-                        hasFoundRet = true;
-                    }
-                }
-                Instruction::SCOPEBEGIN => {
-                    writeln!(&mut f, "   .{}_S_{}:",function_name,i)?;
-                }
-                Instruction::SCOPEEND => {
-                    // TODO: do the same thing we did for functions but for scopes
-                    writeln!(&mut f, "   .{}_S_{}:",function_name,i)?;
-                }
-                // Instruction::CONDITIONAL_JUMP(ni) => {
-                //     let (_,prev) = function.body.get(i-1).unwrap();
-                //     match prev {
-                //         Instruction::EQUALS(Reg, _) => {
-                //             match Reg {
-                //                 OfP::REGISTER(Reg) => {
-                //                     writeln!(&mut f, "   cmp {}, 1",Reg.to_byte_size(1).to_string())?;        
-                //                 }
-                //                 _ => todo!()
-                //             }
-                            
-                //         }
-                //         _ => {
-                //             todo!("Implement parsing of if:\nif RBX {{}}\n")
-                //         }
-                //     }
-                //     writeln!(&mut f, "   jz .{}_S_{}",function_name,ni)?;
-                // }
-                // Instruction::JUMP(ni) => {
-                //     writeln!(&mut f, "   jmp .{}_S_{}",function_name,ni)?;
-                // }
-                Instruction::EQUALS(op1, op2) => {
-                    match op1 {
-                        OfP::REGISTER(Reg1) => {
-                            match op2 {
-                                OfP::REGISTER(Reg2) => {
-                                    writeln!(&mut f, "   cmp  {}, {}",Reg1.to_string(),Reg2.to_string())?;
-                                    writeln!(&mut f, "   sete  {}",Reg1.to_byte_size(1).to_string())?;
-                                }
-                                OfP::LOCALVAR(_) => todo!(),
-                                OfP::RAW(_) => todo!(),
-                                OfP::STR(_,_) => todo!(),
-                                OfP::PARAM(_) => todo!(),
-                            }
-                        }
-                        OfP::LOCALVAR(_) => todo!(),
-                        OfP::RAW(_) => todo!(),
-                        OfP::STR(_,_) => todo!(),
-                        OfP::PARAM(_) => todo!(),
-                    }
-                    
-                },
-                Instruction::DEFVAR(name) => {
-                    let var = local_vars.get_mut(name).expect("Error: unknown defvar definition in function! This is most likely due to a bug inside the compiler! Make sure to contact the developer if you encounter this!");
-                    var.operand     = callstack_size as usize;
-                    callstack_size += var.typ.get_size(program) as i64;
-
-                    writeln!(&mut f, "   mov rax, [_CALLSTACK_BUF_PTR]")?;
-                    writeln!(&mut f, "   sub rax, {}",var.typ.get_size(program))?;
-                    writeln!(&mut f, "   mov [_CALLSTACK_BUF_PTR], rax")?;
-                },
-                Instruction::INTERRUPT(val) => {
-                    writeln!(&mut f, "   int 0x{:x}",val)?;
-                },
-                Instruction::RSPUSH(val) => {
-                    match val {
-                        OfP::REGISTER(reg) => {
-                            let offset = rs_stack_offset as i64+stack_size;
-                            rs_stack_offset -= reg.size();
-                            writeln!(&mut f, "   mov {} [rsp+{}], {}",size_to_nasm_type(reg.size()),offset,reg.to_string())?;
-                        },
-                        OfP::PARAM(_) => todo!(),
-                        OfP::LOCALVAR(_) => todo!(),
-                        OfP::RAW(_) => todo!(),
-                        OfP::STR(_, _) => todo!(),
-                    }
-                },
-                Instruction::EXPAND_SCOPE(_) => todo!("EXPAND_SCOPE"),
-                Instruction::EXPAND_IF_SCOPE(_) => todo!("EXPAND_IF_SCOPE"),
-                Instruction::EXPAND_ELSE_SCOPE(_) => todo!("EXPAND_ELSE_SCOPE"),
-            }
-        }
+        let mut inst_count = 0;
+        nasm_x86_64_handle_scope(&mut f, build, program, TCScopeType::FUNCTION(function_name.clone()),HashMap::new(),0,0,&mut inst_count)?;
         if function_name == "main" {
             let mut argsize: usize = 0;
-            for arg in function.contract.InputPool.iter() {
-                argsize += arg.get_size(program);
+            for (_,local) in function.locals.iter() {
+                argsize += local.get_size(program);
             }
+            argsize += argsize%8;
             writeln!(&mut f, "   add rsp, {}",8+argsize)?;
             writeln!(&mut f, "   xor rax,rax")?;
             writeln!(&mut f, "   ret")?;
@@ -3914,235 +4609,198 @@ fn to_nasm_x86_64(build: &mut BuildProgram, program: &CmdProgram) -> io::Result<
 }
 
 
-
-
-fn type_check_build(build: &mut BuildProgram, program: &CmdProgram) {
-    // TODO: implement macros for assert, expect etc. for type checking that also print the type stack trace.
-    for (name, func) in build.functions.iter() {
-        let mut rs_stack: Vec<VarType> = Vec::new();
-        let mut typeStack: Vec<VarType> = Vec::new();
-        for (loc, instruction) in func.body.iter() {
-            match instruction {
-                Instruction::PUSH(ofp) => {
-                    match ofp {
-                        OfP::REGISTER(reg) => {
-                            typeStack.push(reg.to_var_type());
-                        }
-                        OfP::LOCALVAR(v) => {
-                            typeStack.push(func.locals.get(v).unwrap().typ.clone());
+enum TCScopeType<'a> {
+    FUNCTION(String),
+    NORMAL(&'a NormalScope)
+}
+impl TCScopeType<'_> {
+    fn is_func(&self) -> bool {
+        match self {
+            Self::FUNCTION(_) => true,
+            _ => false
+        }
+    }
+    fn is_normal(&self) -> bool {
+        match self {
+            Self::NORMAL(_) => true,
+            _ => false
+        }
+    }
+    fn has_contract(&self) -> bool {
+        match self {
+            TCScopeType::FUNCTION(_) => true,
+            TCScopeType::NORMAL(_) => false,
+        }
+    }
+    fn get_body<'a>(&'a self, build: &'a BuildProgram) -> &ScopeBody {
+        match self {
+            Self::FUNCTION(name) => {
+                &build.functions.get(name).as_ref().unwrap().body
+            }
+            Self::NORMAL(s) => {
+                &s.body
+            }
+        }
+    }
+    fn get_locals<'a>(&'a self, build: &'a BuildProgram) -> Option<&Locals> {
+        match self {
+            Self::FUNCTION(name) => {
+                Some(&build.functions.get(name).unwrap().locals)
+            }
+            Self::NORMAL(s) => {
+                Some(&s.locals)
+            }
+        }
+    }
+    fn get_locals_mut<'a>(&'a self, build: &'a mut BuildProgram) -> Option<&mut Locals> {
+        match self {
+            Self::FUNCTION(name) => {
+                Some(&mut build.functions.get_mut(name).unwrap().locals)
+            }
+            Self::NORMAL(_) => {
+                None
+            }
+        }
+    }
+    fn get_contract<'a>(&'a self, build: &'a BuildProgram) -> Option<&FunctionContract> {
+        match self {
+            Self::FUNCTION(name) => {
+                Some(&build.functions.get(name).unwrap().contract)
+            }
+            Self::NORMAL(_) => {
+                None
+            }
+        }
+    }
+    fn get_location<'a>(&'a self, build: &'a BuildProgram) -> Option<&ProgramLocation> {
+        match self {
+            Self::FUNCTION(name) => {
+                Some(&build.functions.get(name).unwrap().location)
+            }
+            Self::NORMAL(_) => {
+                None
+            }
+        }
+    }
+    fn unwrap_func(&self) -> String {
+        match self {
+            Self::FUNCTION(name) => {
+                name.clone()
+            }
+            Self::NORMAL(_) => {
+                panic!("Cannot call unwrap_func on non function scope!");
+            }
+        }
+    }
+}
+fn type_check_scope(build: &BuildProgram, program: &CmdProgram, scope: TCScopeType, currentLocals: &mut Vec<Locals>) -> bool {
+    if let Some(locals) = scope.get_locals(build) {
+        currentLocals.push(locals.clone());
+    }
+    let mut hasFoundRet = false;
+    // TODO: Add current locals (&Vec<Locals>)
+    
+    for (loc, instruction) in scope.get_body(build).iter() {
+        match instruction {
+            Instruction::DEFVAR(_)           => {},
+            Instruction::MOV(_, _)           => {},
+            Instruction::CALLRAW(name,contract)        => {
+                let mut externContract = build.get_contract_of_symbol(name).unwrap_or(AnyContract { InputPool: vec![], Outputs: vec![] }).clone();//build.externals.get(name).unwrap().contract.as_ref().unwrap_or(&AnyContract { InputPool: vec![], Outputs: vec![] }).clone();
+                externContract.InputPool.reverse();
+                //println!("externContract: {:?}",externContract);
+                typ_assert!(loc, externContract.InputPool.len() == contract.len(), "Error: Expected: {} amount of arguments but found {}",externContract.InputPool.len(), contract.len());
+                for arg in contract {
+                    //println!("arg = {:?}",arg);
+                    match &arg.typ {
+                        CallArgType::LOCALVAR(name) => {
+                            let etyp = typ_expect!(loc, externContract.InputPool.pop(), "Error: Additional arguments provided for external that doesn't take in any more arguments!");
+                            let local = get_local(currentLocals, name).unwrap();
+                            typ_assert!(loc,etyp.weak_eq(&local),"Error: Incompatible types for contract\nExpected: {}\nFound: ({}) {}",etyp.to_string(false),name,local.to_string(false));
                         },
-                        OfP::RAW(_) => {
-                            typeStack.push(VarType::LONG);
-                        },
-                        OfP::STR(_, typ) => {
-                            match typ {
-                                ProgramStringType::STR => {
-                                    typeStack.push(VarType::PTR(PtrTyp::TYP(Box::new(VarType::CHAR))));
-                                    typeStack.push(VarType::LONG)
-                                },
-                                ProgramStringType::CSTR => {
-                                    typeStack.push(VarType::PTR(PtrTyp::TYP(Box::new(VarType::CHAR))))
-                                },
+                        CallArgType::REGISTER(_) => todo!("Registers are still yet unhandled!"),
+                        CallArgType::CONSTANT(Const) => {
+                            let typs = Const.to_type(build);
+                            for typ in typs {
+                                let etyp = typ_expect!(loc, externContract.InputPool.pop(), "Error: Additional arguments provided for external that doesn't take in any more arguments!\nExpected: Nothing\nFound: {}\n",typ.to_string(false));
+                                typ_assert!(loc,etyp.weak_eq(&typ),"Error: Incompatible types for contract\nExpected: {}\nFound: {}",etyp.to_string(false),typ.to_string(false));
                             }
                         },
-                        OfP::PARAM(word) => {
-                            //println!("Got here!");
-                            /*
-                            for (name,p) in func.contract.Inputs.iter() {
-                                if word == name {
-                                    typeStack.push(p.clone());
-                                    break;
-                                }
-                            }*/
-                            // TODO: make it use par_expect
-                            typeStack.push(func.contract.InputPool.get(func.contract.Inputs.get(word).unwrap().clone()).unwrap().clone());
-                            //println!("Typestack: {:?}",typeStack);
-                        }
                     }
-                },
-                Instruction::DEFVAR(_)           => {},
-                Instruction::MOV(_, _)           => {},
-                Instruction::POP(ofp)              => {
-                    match ofp {
-                        OfP::REGISTER(reg) => {
-                            let v = com_expect!(loc, typeStack.pop(), "Error: Stack underflow occured for types! Make sure everything is ok and you aren't manipulating the stack with anything");
-                            com_assert!(loc, v.get_size(program) == reg.size(), "Error: Can not pop type into register as its a different size! Top is: {} bytes Register: {} is {} bytes, Typ: {:?}",v.get_size(program),reg.to_string(),reg.size(),v);
-                            match reg.size() {
-                                8 | 4 | 2 | 1 => {}
-                                _ => {
-                                    todo!("Unreachable");
-                                }
-                            }
-                        },
-                        _ => {
-                            todo!("Unsupported");
-                        }
-                    }
-                },
-                Instruction::CALLRAW(name,contract)        => {
-                    println!("Type stack rn: {:?}",typeStack);
-                    let mut externContract = build.externals.get(name).unwrap().contract.as_ref().unwrap_or(&AnyContract { InputPool: vec![], Outputs: vec![] }).clone();
-                    externContract.InputPool.reverse();
-                    for arg in contract {
-                        match &arg.typ {
-                            CallArgType::TOP(typ) => {
-                                let etyp = par_expect!(loc, externContract.InputPool.pop(), "Error: Additional arguments provided for external that doesn't take in any more arguments!\nExpected: Nothing\nFound: {}",typ.as_ref().unwrap_or(
-                                    par_expect!(arg.loc, typeStack.get(typeStack.len()-1), "Error: Called top on empty typestack!")
-                                ).to_string(false));
-                                if let Some(typ) = typ {
-                                    par_assert!(loc, typ.weak_eq(&etyp), "Error: Incompatible types for contract\nExpected: {}\nFound: {}",etyp.to_string(false),typ.to_string(false));
-                                }
-                                else {
-                                    let typ = typeStack.get(typeStack.len()-1).unwrap();
-                                    par_assert!(loc, typ.weak_eq(&etyp), "Error: Incompatible types for contract\nExpected: {}\nFound: {}",etyp.to_string(false),typ.to_string(false));
-                                }
-                            },
-                            CallArgType::LOCALVAR(name) => {
-                                let etyp = par_expect!(loc, externContract.InputPool.pop(), "Error: Additional arguments provided for external that doesn't take in any more arguments!");
-                                let local = func.locals.get(name).unwrap();
-                                par_assert!(loc,local.typ.weak_eq(&etyp),"Error: Incompatible types for contract\nExpected: {}\nFound: ({}) {}",etyp.to_string(false),name,local.typ.to_string(false));
-                            },
-                            CallArgType::REGISTER(_) => todo!("Registers are still yet unhandled!"),
-                            CallArgType::CONSTANT(Const) => {
-                                let typs = Const.to_type(build);
-                                for typ in typs {
-                                    let etyp = par_expect!(loc, externContract.InputPool.pop(), "Error: Additional arguments provided for external that doesn't take in any more arguments!\nExpected: Nothing\nFound: {}\n",typ.to_string(false));
-                                    par_assert!(loc,typ.weak_eq(&etyp),"Error: Incompatible types for contract\nExpected: {}\nFound: {}",etyp.to_string(false),typ.to_string(false));
-                                }
-                            },
-                        }
-                    }
-                },
-                Instruction::ADD(_, _)           => {},
-                Instruction::SUB(_, _)           => {},
-                Instruction::MUL(_, _)           => {},
-                Instruction::DIV(_, _)           => {},
-                Instruction::EQUALS(_, _)        => {},
-                Instruction::CALL(funcn, args)             => {
-                    //todo!("Handle arguments");
-                    let function = par_expect!(loc, build.functions.get(funcn), "Error: unknown function call to {}, Function may not exist!",funcn);
-                    let mut functionIP = function.contract.InputPool.clone();
-                    functionIP.reverse();
-                    for arg in args {
-                        match &arg.typ {
-                            CallArgType::TOP(typ) => {
-                                let etyp = par_expect!(loc, functionIP.pop(), "Error: Additional arguments provided for external that doesn't take in any more arguments!\nExpected: Nothing\nFound: {}",typ.as_ref().unwrap_or(typeStack.get(typeStack.len()-1).unwrap()).to_string(false));
-                                if let Some(typ) = typ {
-                                    par_assert!(loc, typ.weak_eq(&etyp), "Error: Incompatible types for contract\nExpected: {}\nFound: {}",etyp.to_string(false),typ.to_string(false));
-                                }
-                                else {
-                                    let typ = typeStack.get(typeStack.len()-1).unwrap();
-                                    par_assert!(loc, typ.weak_eq(&etyp), "Error: Incompatible types for contract\nExpected: {}\nFound: {}",etyp.to_string(false),typ.to_string(false));
-                                }
-                            },
-                            CallArgType::LOCALVAR(name) => {
-                                let etyp = par_expect!(loc, functionIP.pop(), "Error: Additional arguments provided for external that doesn't take in any more arguments!");
-                                let local = func.locals.get(name).unwrap();
-                                par_assert!(loc,local.typ.weak_eq(&etyp),"Error: Incompatible types for contract\nExpected: {}\nFound: ({}) {}",etyp.to_string(false),name,local.typ.to_string(false));
-                            },
-                            CallArgType::REGISTER(_) => todo!("Registers are still yet unhandled!"),
-                            CallArgType::CONSTANT(Const) => {
-                                let typs = Const.to_type(build);
-                                for typ in typs {
-                                    let etyp = par_expect!(loc, functionIP.pop(), "Error: Additional arguments provided for external that doesn't take in any more arguments!\nExpected: Nothing\nFound: {}\n",typ.to_string(false));
-                                    par_assert!(loc,typ.weak_eq(&etyp),"Error: Incompatible types for contract\nExpected: {}\nFound: {}",etyp.to_string(false),typ.to_string(false));
-                                }
-                            },
-                        }
-                    }
-                    //todo!("Finish function args typechecking");
-                    //function.contract.InputPool
-                    // let function =  com_expect!(loc, build.functions.get(func), "Error: unknown function call to {}, Function may not exist!",func);
-                    // com_assert!(loc, function.contract.Inputs.len() <= typeStack.len(), "Error: Not enough arguments for {} in {}",func,name);
-                    // let raw_inputs = {
-                    //     let mut o: Vec<VarType> = Vec::with_capacity(function.contract.Inputs.len());
-                    //     for typ in function.contract.InputPool.iter() {
-                    //         o.push(typ.clone())
-                    //     }
-                    //     o
-                    // };
-                    // com_assert!(loc, typeStack.ends_with(&raw_inputs), "Error: Arguments for function don't match, function expected:\n {}, But found\n: {}",
-                    // {
-                        
-                    //     for (i,typ) in function.contract.InputPool.iter().enumerate() {
-                    //         eprintln!("   {} ({})",typ.to_string(false).to_uppercase(),{
-                    //             let mut n: &str = "Unknown";
-                    //             for (name,val) in function.contract.Inputs.iter(){
-                    //                 if *val==i {
-                    //                     n = name.as_str();
-                    //                     break;
-                    //                 }
-                    //             }
-                    //             n
-                    //         });
-                    //     }
-                    //     ""
-                    // },
-                    // {
-                    //     for typ in typeStack.iter() {
-                    //         eprintln!("   {}",typ.to_string(false).to_uppercase())
-                    //     }
-                    //     ""
-                    // });
-                    // typeStack.extend(function.contract.Outputs.clone());
-                },
-                Instruction::FNBEGIN()           => {},
-                Instruction::RET()               => {},
-                Instruction::SCOPEBEGIN          => {
-                    //eprintln!("WARNING: Not implemented yet")
-                    /*
-                    func main() {
-                        // str
-                        if pop "Hello World!"c streq RAX {
-                            pop 
-                        }
-                        else {
+                }
+            },
+            Instruction::ADDSET(_, _)           => {},
+            Instruction::SUBSET(_, _)           => {},
+            Instruction::MULSET(_, _)           => {},
+            Instruction::DIVSET(_, _)           => {},
+            
+            Instruction::CALL(funcn, args)             => {
+                let function = typ_expect!(loc, build.functions.get(funcn), "Error: unknown function call to {}, Function may not exist!",funcn);
+                let mut functionIP = function.contract.Inputs.clone();
+                
+                for arg in args {
+                    match &arg.typ {
+                        CallArgType::LOCALVAR(name) => {
+                            let (_,etyp) = typ_expect!(loc, functionIP.pop_back(), "Error: Additional arguments provided for external that doesn't take in any more arguments!");
                             
-                        }
-                    }
-                    */
-                },
-                Instruction::SCOPEEND            => {},//eprintln!("WARNING: Not implemented yet"),
-                // Instruction::CONDITIONAL_JUMP(_) => todo!("Branching"),
-                // Instruction::JUMP(_)             => todo!("JUMP to index"),
-                Instruction::INTERRUPT(_)        => {},
-                Instruction::RSPUSH(typ)           => {
-                    match typ {
-                        OfP::REGISTER(Reg) => {
-                            rs_stack.push(Reg.to_var_type());
+                            let local =get_local(currentLocals, name).unwrap();
+                            typ_assert!(loc,etyp.weak_eq(&local),"Error: Incompatible types for contract\nExpected: {}\nFound: ({}) {}",etyp.to_string(false),name,local.to_string(false));
                         },
-                        OfP::PARAM(_)    => todo!(),
-                        OfP::LOCALVAR(_) => todo!(),
-                        OfP::RAW(_)      => {
-                            rs_stack.push(VarType::LONG);
+                        CallArgType::REGISTER(_) => todo!("Registers are still yet unhandled!"),
+                        CallArgType::CONSTANT(Const) => {
+                            let typs = Const.to_type(build);
+                            for typ in typs {
+                                let (_,etyp) = typ_expect!(loc, functionIP.pop_back(), "Error: Additional arguments provided for external that doesn't take in any more arguments!\nExpected: Nothing\nFound: {}\n",typ.to_string(false));
+                                typ_assert!(loc,etyp.weak_eq(&typ),"Error: Incompatible types for contract\nExpected: {}\nFound: {}",etyp.to_string(false),typ.to_string(false));
+                            }
                         },
-                        OfP::STR(_, _)   => todo!(),
                     }
-                },
-                Instruction::EXPAND_SCOPE(_) => todo!(),
-                Instruction::EXPAND_IF_SCOPE(_) => todo!(),
-                Instruction::EXPAND_ELSE_SCOPE(_) => todo!(),
-            }
+                }
+            },
+            Instruction::FNBEGIN()           => {},
+            Instruction::RET(_)=> {hasFoundRet=true}, // TODO: typecheck expression
+            Instruction::SCOPEBEGIN          => {},
+            Instruction::SCOPEEND            => {},
+            Instruction::INTERRUPT(_)        => {},
+            Instruction::EXPAND_SCOPE(s)       => if type_check_scope(build, program, TCScopeType::NORMAL(&s), currentLocals) { hasFoundRet = true},
+            Instruction::EXPAND_IF_SCOPE(s)    => if type_check_scope(build, program, TCScopeType::NORMAL(&s), currentLocals) { hasFoundRet = true}, //TODO: Typecheck condition
+            Instruction::EXPAND_ELSE_SCOPE(s)  => if type_check_scope(build, program, TCScopeType::NORMAL(&s), currentLocals) { hasFoundRet = true},
+            Instruction::EXPAND_WHILE_SCOPE(s) => if type_check_scope(build, program, TCScopeType::NORMAL(&s), currentLocals) { hasFoundRet = true},
+            //TODO: add typechecking for this:
+            Instruction::MORETHAN(_, _)       => {},
+            Instruction::LESSTHAN(_, _)       => {},
+            Instruction::MORETHANEQUALS(_, _) => {},
+            Instruction::LESSTHANEQUALS(_, _) => {},
+            Instruction::NOTEQUALS(_, _)      => {},
+            Instruction::EQUALS(_, _)         => {},
+            
+            _ => todo!("Unreachable")
         }
-        if !typeStack.is_empty() {
-            eprintln!("Error: {}: types left on the stack in function body: {}\n   Type stack trace: ",func.location.loc_display(),name);
-            for typ in typeStack.iter() {
-                eprintln!("   {}",typ.to_string(false).to_uppercase());
-            }
-            exit(1)
+    }
+    if scope.is_func() {
+        if !scope.get_contract(build).unwrap().Outputs.is_empty() {
+            //println!("Got here!\nhasFoundRet: {}",hasFoundRet);
+            typ_assert!(scope.get_location(build).unwrap(),hasFoundRet,"Error: Expected return value but function didn't return anything!");
         }
-        if rs_stack != func.contract.Outputs {
-            com_warn!(func.location,"Error: Mismatched types for output");
-            for typ in rs_stack.iter() {
-                eprintln!("   {}",typ.to_string(false).to_uppercase());
-            }
+        // if rs_stack != scope.get_contract(build).unwrap().Outputs {
+        //     typ_warn!(scope.get_location(build).unwrap(),"Error: Mismatched types for output");
+        //     for typ in rs_stack.iter() {
+        //         eprintln!("   {}",typ.to_string(false).to_uppercase());
+        //     }
 
-            eprintln!("Expected: ");
-            for typ in func.contract.Outputs.iter() {
-                eprintln!("   {}",typ.to_string(false).to_uppercase());
-            }
-            exit(1)
-        }
+        //     eprintln!("Expected: ");
+        //     for typ in scope.get_contract(build).unwrap().Outputs.iter() {
+        //         eprintln!("   {}",typ.to_string(false).to_uppercase());
+        //     }
+        //     exit(1)
+        // }
+    }
+    hasFoundRet
+}
+fn type_check_build(build: &mut BuildProgram, program: &CmdProgram) {
+    
+    for name in build.functions.keys() {
+        let mut currentLocals:Vec<Locals>  = Vec::new();
+        type_check_scope(build, program,TCScopeType::FUNCTION(name.clone()),&mut currentLocals);
     }
 }
 
@@ -4150,22 +4808,19 @@ fn type_check_build(build: &mut BuildProgram, program: &CmdProgram) {
 
 fn usage(program: &String) {
     println!("--------------------------------------------");
-    println!("{} (output language) (input path) [flags]",program);
-    println!("     Output Language: ");
-    println!("         - nasm_x86_64");
+    println!("{} [flags]",program);
+    list_targets(9);
     println!("     flags: ");
+    println!("         -t (target)                         -> compiles to the given target (default is nasm_x86_64)");
     println!("         -o (output path)                    -> outputs to that file (example: hello.asm in nasm_x86_64 mode). If the output path is not specified it defaults to the modes default (for nasm_x86_64 thats a.asm)");
-    println!("         -r                                  -> builds the program for you if the option is available for that language mode (for example in nasm_x86_64 it calls nasm with gcc to link it to an executeable)");
-    println!("         -noRaxWarn                          -> removes the RAX usage warning for nasm");
+    println!("         -r                                  -> runs the program for you if the option is available for that language mode (for example in nasm_x86_64 it calls nasm with gcc to link it to an executeable)");
+    println!("         -b                                  -> builds the program for you if the option is available for that language mode");
     println!("         -release                            -> builds the program in release mode");
     println!("         -ntc                                -> (NoTypeChecking) Disable type checking");
-    println!("         -nou (all, funcs, externs, strings) -> Disable unused warns for parameter");
+    println!("         -warn (all, funcs, externs, strings)-> Enable unused warns for parameter");
     println!("         -ruf                                -> Remove unused functions");
-    println!("         -callstack (size)                   -> Set callstack size.\n{}\n{}",
-             "                                                The name is very deceiving but callstack is now only used for locals as of 0.0.6A (checkout versions.md)",
-             "                                                [NOTE] it is planned for -callstack to be deprecated for instead using the stack as a way to store variables with the new function system");
     println!("         -arc (builtin arc)                  -> builds for a builtin architecture");
-    println!("         -arc | (path to custom arc)         -> builds for a custom architecture following the syntax described in ./examples/arcs");
+    println!("         -arc - (path to custom arc)         -> builds for a custom architecture following the syntax described in ./examples/arcs");
     println!("--------------------------------------------");
 }
 fn dump_tokens(lexer: &mut Lexer) {
@@ -4205,37 +4860,59 @@ fn json_to_arc(json: &serde_json::Map<String, Value>) -> Architecture {
         },
         func_prefix: json.get("func_prefix").expect("Error: expected func_prefix but found nothing!").as_str().expect("Value of func_prefix must be string").to_string(),
         cextern_prefix: json.get("cextern_prefix").expect("Error: expected cextern_prefix but found nothing!").as_str().expect("Value of cextern_prefix must be string").to_string(),
+        obj_extension: json.get("obj-extension").expect("Error: expected obj_extension but found nothing!").as_str().expect("Value of obj_extension must be string").to_string(),
+        flags: {
+            let mut o: ArcFlags = ArcFlags { nasm: vec![] };
+            let flagsObj = json.get("flags").expect("Error: expected flags but found nothing!").as_object().expect("Error: Value of flags must be an object!");
+            o.nasm = {
+                let mut o: Vec<String> = Vec::new();
+                let nasm_flags = flagsObj.get("nasm").expect("Error: expected nasm flags but found nothing!").as_array().expect("Error: Value of nasm flags must be an array");
+                for val in nasm_flags {
+                    o.push(val.as_str().expect("Value of flag in nasm must be a string!").to_owned());
+                }
+                o
+            };
+            o
+        },
     };
     oarc
+}
+fn list_targets(indent: usize){
+    let indent = " ".repeat(indent);
+    println!("{}- nasm_x86_64",indent);
 }
 fn main() {
     #[cfg(not(debug_assertions))]
     std::panic::set_hook(Box::new(|panic_info| {
+        
         if let Some(e) = panic_info.payload().downcast_ref::<String>() {
             eprintln!("{}",e);
             exit(1);
         }
+        else if let Some(e) = panic_info.payload().downcast_ref::<&str>() {
+            eprintln!("{}",e);
+            exit(1);
+        }
         else {
-            eprintln!("Error occured at! {:?}",panic_info.location());
+            eprintln!("Error occured at {:?}",panic_info.location());
             exit(1);
         }
     }));
     let mut args: Vec<_> = env::args().collect();
     let program_n = args.remove(0);
-    if args.len() < 2 {
-        usage(&program_n);
-        exit(1);
-    }
+    // if args.len() < 2 {
+    //     usage(&program_n);
+    //     exit(1);
+    // }
     let mut program = CmdProgram::new();
-    program.typ  = args.remove(0);
-    program.path = args.remove(0);
+    //program.path = args.remove(0);
     program.opath = Path::new(&program.path).with_extension(".asm").to_str().unwrap().to_string();
     let mut Architectures: HashMap<String, Architecture> = HashMap::new();
     use Register::*;
-    Architectures.insert("windows_x86_64".to_owned(), Architecture { bits: 64, platform: "windows".to_string(), cextern_prefix: "".to_owned(), func_prefix:"".to_owned(), options: ArcOps { argumentPassing: ArcPassType::CUSTOM(ArcCustomOps { nums_ptrs: Some(vec![RCX, RDX,R8,R9]), floats: Some(vec![XMM0,XMM1,XMM2,XMM3]), returns: Some(vec![RAX]), on_overflow_stack: true, shadow_space: 32}) } });
-    Architectures.insert("windows_x86".to_owned(),    Architecture { bits: 32, platform: "windows".to_string(), cextern_prefix: "_".to_owned(), func_prefix:"_".to_owned(), options: ArcOps { argumentPassing: ArcPassType::PUSHALL }});
-    Architectures.insert("linux_x86_64".to_owned(),   Architecture { bits: 64, platform: "linux".to_string()  , cextern_prefix: "".to_owned(), func_prefix:"".to_owned(), options: ArcOps { argumentPassing: ArcPassType::CUSTOM(ArcCustomOps { nums_ptrs: Some(vec![RDI, RSI,RDX,RCX,R8,R9]), floats: Some(vec![XMM0,XMM1,XMM2,XMM3]), returns: Some(vec![RAX]), on_overflow_stack: true, shadow_space: 0 }) } });
-    Architectures.insert("linux_x86".to_owned(),      Architecture { bits: 32, platform: "linux".to_string()  , cextern_prefix: "_".to_owned(), func_prefix:"_".to_owned(), options: ArcOps { argumentPassing: ArcPassType::PUSHALL }});
+    Architectures.insert("windows_x86_64".to_owned(), Architecture { bits: 64, platform: "windows".to_string(), cextern_prefix: "".to_owned(),  func_prefix:"".to_owned(),  options: ArcOps { argumentPassing: ArcPassType::CUSTOM(ArcCustomOps { nums_ptrs: Some(vec![RCX, RDX,R8,R9]), floats: Some(vec![XMM0,XMM1,XMM2,XMM3]), returns: Some(vec![RAX]), on_overflow_stack: true, shadow_space: 32}) }        , obj_extension: "obj".to_owned(), flags: ArcFlags { nasm: vec!["-f".to_string(),"win64".to_string()] }});
+    Architectures.insert("windows_x86".to_owned(),    Architecture { bits: 32, platform: "windows".to_string(), cextern_prefix: "_".to_owned(), func_prefix:"_".to_owned(), options: ArcOps { argumentPassing: ArcPassType::PUSHALL }                                                                                                                                                                            , obj_extension: "obj".to_owned(), flags: ArcFlags { nasm: vec!["-f".to_string(),"win32".to_string()] }});
+    Architectures.insert("linux_x86_64".to_owned(),   Architecture { bits: 64, platform: "linux".to_string()  , cextern_prefix: "".to_owned(),  func_prefix:"".to_owned(),  options: ArcOps { argumentPassing: ArcPassType::CUSTOM(ArcCustomOps { nums_ptrs: Some(vec![RDI, RSI,RDX,RCX,R8,R9]), floats: Some(vec![XMM0,XMM1,XMM2,XMM3]), returns: Some(vec![RAX]), on_overflow_stack: true, shadow_space: 0 }) }, obj_extension: "o".to_owned()  , flags: ArcFlags { nasm: vec!["-f".to_string(),"elf64".to_string()] }});
+    Architectures.insert("linux_x86".to_owned(),      Architecture { bits: 32, platform: "linux".to_string()  , cextern_prefix: "_".to_owned(), func_prefix:"_".to_owned(), options: ArcOps { argumentPassing: ArcPassType::PUSHALL }                                                                                                                                                                            , obj_extension: "o".to_owned()  , flags: ArcFlags { nasm: vec!["-f".to_string(),"elf64".to_string()] }});
     //short calls
     Architectures.insert("win_x86_64".to_owned(), Architectures.get("windows_x86_64").unwrap().clone());
     Architectures.insert("win_x86".to_owned(), Architectures.get("windows_x86").unwrap().clone());
@@ -4245,123 +4922,109 @@ fn main() {
     else {
         println!("[NOTE] No architecture found for {}_{}! Please specify the output architecture!",env::consts::OS,env::consts::ARCH);
     }
-//     match env::var("SOPLARCS") {
-//         Ok(val) => {
-//             //println!("{}\n", val);
-//             let dir = fs::read_dir(val.clone()).expect(&format!("Error: unknown SOPLARCS directory: '{}'",val));
-//             for item in dir {
-//                 if item.is_err() {continue;}
-//                 let item = item.unwrap();
-//                 let p = item.path();
-//                 if p.extension().unwrap_or_default() == "json" {
-//                     Architectures.insert(p.file_stem().unwrap().to_str().unwrap().to_owned(), todo!("Finish implementing SOPLARCS syntax"));
-//                 }
-//             }
-//         },
-//         Err(_) => {
-//             println!("[NOTE] SOPLARCS not found! defaulting to current os architecture '{}':'{}'...",env::consts::OS,env::consts::ARCH);
-//             if Architectures.contains_key(&("".to_owned()+env::consts::OS+env::consts::ARCH)) {
-//                 println!("Defaulting to: '{}_{}'",env::consts::OS,env::consts::ARCH);
-//             }
-//             else {
-//                 eprintln!("Error: no built in architecture for {}_{}.\nSorry :(",env::consts::OS,env::consts::ARCH);
-//                 println!("[NOTE] Try adding SOPLARCS as an environment variable with your architecture")
-//             }
-// //            println!("")
-//         }
-//     }
-    {
-        let mut i: usize = 0;
-        while i < args.len(){
-            let flag = args.get(i).unwrap();
-            match flag.as_str() {
-                "-o" => {
-                    program.opath = args.get(i+1).unwrap_or_else(|| {
-                        eprintln!("Error: Could not get output path for -o flag!");
-                        exit(1);
-                    }).clone();
-                    i += 1;
-                },
-                "-r" => {
-                    program.should_build = true
+    cfor!(let mut i: usize = 0; i < args.len(); i+=1; {
+        let flag = args.get(i).unwrap();
+        match flag.as_str() {
+            "-o" => {
+                program.opath = args.get(i+1).unwrap_or_else(|| {
+                    eprintln!("Error: Could not get output path for -o flag!");
+                    exit(1);
+                }).clone();
+                i += 1;
+            },
+            "-b" => {
+                program.should_build = true
+            }
+            "-r" => {
+                program.should_build = true;
+                program.should_run = true
+                
+            }
+            "-release" => {
+                program.in_mode = OptimizationMode::RELEASE
+            }
+            "-ntc" => {
+                program.use_type_checking = false
+            }
+            "-t" => {
+                program.target = args.get(i+1).expect("Error: Expected target but found nothing!").to_owned();
+                if program.target == "list" {
+                    list_targets(0);
+                    exit(0);
                 }
-                "-release" => {
-                    program.in_mode = OptimizationMode::RELEASE
-                }
-                "-noRaxWarn" => {
-                    program.warn_rax_usage = false
-                }
-                "-ntc" => {
-                    program.use_type_checking = false
-                }
-                "-nou" => {
-                    let typ = args.get(i+1).expect("Error: Expected `all, funcs,externs,strings`");
-                    match typ.as_str() {
-                        "all" => {
-                            program.print_unused_warns = false
-                        }
-                        "funcs" => {
-                            program.print_unused_funcs = false
-                        }
-                        "externs" => {
-                            program.print_unused_externs = false
-                        }
-                        "strings" => {
-                            program.print_unused_strings = false
-                        }
-                        _ => {
-                            eprintln!("Unexpected parameter: {}, Expected: `all,funcs,externs,strings`",typ)
-                        }
+                i+=1;
+            }
+            "-warn" => {
+                let typ = args.get(i+1).expect("Error: Expected `all, funcs,externs,strings`");
+                match typ.as_str() {
+                    "all" => {
+                        program.print_unused_warns = true
                     }
-                    i += 1;
-                }
-                "-ruf" => {
-                    program.remove_unused_functions = true;
-                }
-                "-callstack" => {
-                    let val = args.get(i+1).expect("Unexpected flag -callstack, Please specify a size!").parse::<usize>().expect("Value not a valid usize!");
-                    program.call_stack_size = val;
-                    i += 1;
-                }
-                "-arc" => {
-                    let val = args.get(i+1).expect("Error: Unexpected built-in target or path to json");
-                    if val == "|" {
-                        let path = Path::new(args.get(i+1).expect("Error: Path not specified for -arc"));
-                        let ext = path.extension().expect("Error: Path provided doesn't have an extension!");
-                        let ext = ext.to_str().unwrap();
-                        assert!(ext=="json","Error: only accepting arc files with the json format!");
-                        assert!(path.is_file() && path.exists(), "Error: path provided '{:?}' is not a file or does not exist!",path);
-                        let f = fs::read_to_string(path).expect("Error: file does not exist or can't be opened!");
-                        let arc: Value = serde_json::from_str(&f).expect("Contents of file not a json!");
-                        let arc = arc.as_object().unwrap();
-                        program.architecture = json_to_arc(arc);
-                        i+=2;
+                    "funcs" => {
+                        program.print_unused_funcs = true
                     }
-                    else {
-                        assert!(Architectures.contains_key(val),"Error: Unknown Architecture: {}. It is probably not built in!",val);
-                        program.architecture = Architectures.get(val).unwrap().clone();
-                        //println!("Building for architecture: {}, where: '{}' and '{}'",val,program.architecture.cextern_prefix,program.architecture.func_prefix);
-                        i+=1;
+                    "externs" => {
+                        program.print_unused_externs = true
+                    }
+                    "strings" => {
+                        program.print_unused_strings = true
+                    }
+                    _ => {
+                        eprintln!("Unexpected parameter: {}, Expected: `all,funcs,externs,strings`",typ)
                     }
                 }
-                flag => {
-                    eprintln!("Error: undefined flag: {flag}\nUsage: ");
+                i += 1;
+            }
+            "-ruf" => {
+                program.remove_unused_functions = true;
+            }
+            "-usage" => {
+                usage(&program_n);
+                exit(0);
+            }
+            "-arc" => {
+                let val = args.get(i+1).expect("Error: Unexpected built-in target or path to json");
+                if val == "-" {
+                    let path = Path::new(args.get(i+2).expect("Error: Path not specified for -arc"));
+                    let ext = path.extension().expect(&format!("Error: Path provided doesn't have an extension! Path: '{:?}'",path));
+                    let ext = ext.to_str().unwrap();
+                    assert!(ext=="json","Error: only accepting arc files with the json format!");
+                    assert!(path.is_file() && path.exists(), "Error: path provided '{:?}' is not a file or does not exist!",path);
+                    let f = fs::read_to_string(path).expect("Error: file does not exist or can't be opened!");
+                    let arc: Value = serde_json::from_str(&f).expect("Contents of file not a json!");
+                    let arc = arc.as_object().unwrap();
+                    program.architecture = json_to_arc(arc);
+                    i+=2;
+                }
+                else {
+                    assert!(Architectures.contains_key(val),"Error: Unknown Architecture: {}. It is probably not built in!",val);
+                    program.architecture = Architectures.get(val).unwrap().clone();
+                    i+=1;
+                }
+            }
+            flag => {
+                if program.path.is_empty() && &flag[0..1] != "-" {
+                    program.path = flag.to_string();
+                }
+                else {
+                    eprintln!("Error: undefined flag: {flag}");
                     usage(&program_n);
                     exit(1);
                 }
             }
-            i+=1;
         }
-    }
-    match program.typ.as_str() {
+    });
+    match program.target.as_str() {
         "nasm_x86_64" => {}
         _ => {
-            assert!(false, "Undefined type: {}",program.typ);          
+            eprintln!("Undefined target: {}\nSee supported targets by doing -t list",program.target);          
+            exit(1);
         }
     }
     let mut Intrinsics: HashMap<String,IntrinsicType> = HashMap::new();
     Intrinsics.insert("extern".to_string(), IntrinsicType::Extern);
-    Intrinsics.insert("rs".to_string(), IntrinsicType::RS);
+    Intrinsics.insert("dll_import".to_string(), IntrinsicType::DLL_IMPORT);
+    Intrinsics.insert("dll_export".to_string(), IntrinsicType::DLL_EXPORT);
     Intrinsics.insert("let".to_string(), IntrinsicType::Let);
     Intrinsics.insert("func".to_string()  , IntrinsicType::Func);
     Intrinsics.insert("include".to_string(), IntrinsicType::INCLUDE);
@@ -4369,83 +5032,128 @@ fn main() {
     Intrinsics.insert("interrupt".to_string(), IntrinsicType::INTERRUPT);
     Intrinsics.insert("(".to_string(),IntrinsicType::OPENPAREN);
     Intrinsics.insert(")".to_string(),IntrinsicType::CLOSEPAREN);
+    Intrinsics.insert("{".to_string(),IntrinsicType::OPENCURLY);
+    Intrinsics.insert("}".to_string(),IntrinsicType::CLOSECURLY);
     Intrinsics.insert(":".to_string(),IntrinsicType::DOUBLE_COLIN);
     Intrinsics.insert(",".to_string(),IntrinsicType::COMA);
     Intrinsics.insert(";".to_string(),IntrinsicType::DOTCOMA);
-    Intrinsics.insert("{".to_string(),IntrinsicType::OPENCURLY);
-    Intrinsics.insert("}".to_string(),IntrinsicType::CLOSECURLY);
-    Intrinsics.insert("push".to_string(),IntrinsicType::PUSH);
-    Intrinsics.insert("pop".to_string(),IntrinsicType::POP);
-    Intrinsics.insert("=".to_string(),IntrinsicType::SET);
-    Intrinsics.insert("+".to_string(),IntrinsicType::ADD);
-    Intrinsics.insert("-".to_string(),IntrinsicType::SUB);
-    Intrinsics.insert("*".to_string(),IntrinsicType::MUL);
-    Intrinsics.insert("/".to_string(),IntrinsicType::DIV);
-    Intrinsics.insert("ret".to_string(),IntrinsicType::RET);
+    Intrinsics.insert("return".to_string(),IntrinsicType::RET);
     Intrinsics.insert("if".to_string(), IntrinsicType::IF);
     Intrinsics.insert("else".to_string(), IntrinsicType::ELSE);
-    Intrinsics.insert("==".to_string(),IntrinsicType::EQ);
-    Intrinsics.insert("top".to_string(),IntrinsicType::TOP);
+    Intrinsics.insert("while".to_string(), IntrinsicType::WHILE);
+    Intrinsics.insert("cast".to_string(), IntrinsicType::CAST);
+    
+
     let mut Definitions: HashMap<String,VarType> = HashMap::new();
     Definitions.insert("int".to_string(), VarType::INT);
     Definitions.insert("char".to_string(), VarType::CHAR);
     Definitions.insert("long".to_string(), VarType::LONG);
     Definitions.insert("bool".to_string(), VarType::BOOLEAN);
-    Definitions.insert("ptr".to_string(), VarType::PTR(PtrTyp::VOID));
+    Definitions.insert("ptr".to_string(), VarType::PTR(Ptr{ typ: PtrTyp::VOID, inner_ref: 0}));
     Definitions.insert("short".to_string(), VarType::SHORT);
-    //Definitions.insert("str".to_string(), VarType::STR);
-    
-
-
-    let info = fs::read_to_string(&program.path).expect("Error: could not open file!");
-    let mut lexer = Lexer::new(&info, & Intrinsics, &Definitions, HashSet::new());
-    // dump_tokens(&mut lexer);
-    // exit(1);
+    //assert!(!program.path.is_empty(),"Error: expected program.path but found nothing!");
+    if program.path.is_empty() {
+        println!("Error: Unspecified input file!");
+        usage(&program_n);
+        exit(1); 
+    }
+    let info = fs::read_to_string(&program.path);
+    if let Err(info) = info {
+        eprintln!("Error: Could not read file \"{}\"!",program.path);
+        eprintln!("{}",info.to_string());
+        exit(1);
+    }
+    let oinfo = info.unwrap();
+    let mut lexer = Lexer::new(&oinfo, & Intrinsics, &Definitions, HashSet::new());
     lexer.currentLocation.file = Rc::new(program.path.clone());
-    let mut build = parse_tokens_to_build(&mut lexer, &mut program);
-    //panic!("Build: {:#?}",build);
+    let mut build = parse_tokens_to_build(&mut lexer, &mut program);    
     if program.use_type_checking {
         type_check_build(&mut build, &program);
     }
-    match program.typ.as_str() {
+    match program.target.as_str() {
         "nasm_x86_64" => {
             to_nasm_x86_64(&mut build, &program).expect("Could not build to nasm_x86_64");
             if program.should_build {
                 println!("-------------");
-                println!("   * nasm -f elf64 {}",program.opath.as_str());
-                let nasm = Command::new("nasm").args(["-f","elf64",program.opath.as_str()]).output().expect("Could not build nasm!");
-                println!("   * gcc -m64 {}",[Path::new(program.opath.as_str()).with_extension("o").to_str().unwrap(),"-m64","-o",Path::new(program.opath.as_str()).with_extension("").to_str().unwrap()].join(" "));
-                let gcc  = Command::new("gcc").args([Path::new(program.opath.as_str()).with_extension("o").to_str().unwrap(),"-o",Path::new(program.opath.as_str()).with_extension("").to_str().unwrap()]).output().expect("Could not build gcc!");
-                //println!("   * ld {}",Path::new(program.opath.as_str()).with_extension("").to_str().unwrap());
-                //let _ld  = Command::new("ld".to_string()).arg(Path::new(program.opath.as_str()).with_extension("").to_str().unwrap()).output().expect("Could not build your program!");
+                let mut args = program.architecture.flags.nasm.clone();
+                args.append(&mut vec![program.opath.as_str().to_owned()]);
+                println!("   * nasm {}",args.join(" "));
+                let nasm = Command::new("nasm").args(args).output().expect("Could not build nasm!");
+                let v = Path::new(program.opath.as_str()).with_extension(&program.architecture.obj_extension);
+                let v2 = Path::new(program.opath.as_str()).with_extension("");
+                let args = [v.to_str().unwrap(),"-o",v2.to_str().unwrap(), if program.architecture.bits==64 { "-m64"} else {"-m32"}];
+                println!("   * gcc -m64 {}",args.join(" "));
+                let gcc  = Command::new("gcc").args(args).output().expect("Could not build gcc!");
                 if !nasm.status.success() {
                     println!("--------------");
                     println!("Nasm: \n{:?}\n-----------",nasm);
                     println!("--------------");
+                    exit(nasm.status.code().unwrap_or(0));
                 }
                 else if !gcc.status.success() {
                     println!("--------------");
                     println!("Gcc:  \n{:?}",gcc);
                     println!("--------------");
+                    exit(nasm.status.code().unwrap_or(0));
                 }
                 else {
                     println!("--------------");
                     println!("   - Finished build successfully");
                     println!("--------------");
-                    let exe_path = Path::new(program.opath.as_str()).with_extension("");
-                    println!("   * {}", exe_path.to_str().unwrap());
-                    println!("--------------");
-                    let mut prog = Command::new(exe_path.to_str().unwrap()).stdout(Stdio::inherit()).stdin(Stdio::inherit()).stderr(Stdio::inherit()).spawn().unwrap();
-                    let status = prog.wait().unwrap();
-                    println!("--------------");
-                    println!("Program exited with: {}",status.code().unwrap());
-                    println!("--------------");
-                    
                 }
+            }
+            if program.should_run {
+                let exe_path = Path::new(program.opath.as_str()).with_extension("");
+                println!("   * {}", exe_path.to_str().unwrap());
+                println!("--------------");
+                let mut prog = Command::new(exe_path.to_str().unwrap()).stdout(Stdio::inherit()).stdin(Stdio::inherit()).stderr(Stdio::inherit()).spawn().unwrap();
+                let status = prog.wait().unwrap();
+                println!("--------------");
+                println!("Program exited with: {}",status.code().unwrap());
+                println!("--------------");
             }
         }
         _ => {
-            todo!("Unimplemented type {}",program.typ);
+            // todo!("Unimplemented type {}",program.target);
+            eprintln!("Target {} is either unsupported or a target is not provided!\n",program.target)
         }
     }
+    
 }
+
+
+
+
+
+/*
+- [x] TODO: No point in keeping params and localvars seperate once we set LOCALVAR onto the stack instead of the CALLSTACK
+- [x] TODO: remove warn_rax_usage
+- [x] TODO: Fix checking for UUID overloading in includes
+- [x] TODO: implement macros for assert, expect etc. for type checking
+- [x] TODO: implement pointers for the lexer (like *char *int **void etc.)
+- [x] TODO: Add dynamic linking with dlls with dll_import dll_export
+- [x] TODO: Implement the rest of the floating point arithmetic registers
+- [x] TODO: Implement local variables for normal scopes
+- [x] TODO: implement booleans
+- [x] TODO: Implement if statements as well as else statements
+- [x] TODO: Implement conditions and 'evaluate_condition'
+- [x] TODO: Add expressions like a+b*c etc. 
+
+- [x] TODO: Remove -callstack
+- [x] TODO: Fix returning from functions
+- [x] TODO: Add 'result' as a part of OfP for calling the function and getting its result
+- [x] TODO: Add more examples like OpenGL examples, native Windows examples with linking to kernel.dll etc.
+
+- [x] TODO: Implement while loops
+
+- [ ] TODO: Update all of readme and add more documentation
+- [ ] TODO: Add more useful examples
+- [ ] TODO: Add some quality of life things such as __FILE__ __LINE__
+- [ ] TODO: Update README.md flags
+- [ ] TODO: Push to master
+
+- [ ] TODO: Make it so that get_body returns None if scope has not been opened yet
+- [ ] TODO: Remove some dependencies like UUID since we don't exactly need it (also bench mark it to see the improvement in speed!)
+- [/] TODO: Make callraw use reference to UUID and name instead of raw when typechecking
+- [/] TODO: Make call use reference to UUID and name instead of raw
+*/
