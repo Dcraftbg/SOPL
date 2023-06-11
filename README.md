@@ -32,6 +32,7 @@ Made for easy navigation around the README.md
   - [Externals](#extern)
   - [Interrupts](#interrupts)
   - [Registers](#registers)
+  - [Dlls](#dlls)
 
 
 ## Quickstart
@@ -448,3 +449,12 @@ Currently supported register operations:
 
 
 
+### Dlls
+SOPL has support for dlls. You can import a function from a dll:
+```
+dll_import "kernel.dll" CreateWindow(...);
+```
+Or export to a dll:
+```
+dll_export "mylib.dll" myfunc(...);
+```
