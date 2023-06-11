@@ -1,9 +1,10 @@
 **(Latest patch versions in github history and at the top of Change Log)**
 
-Newest Version: [0.12A](#012a)
+Newest Version: [0.12.1A](#0121a)
 # Manual:
-  - [0.12A](#012a)
-    - [0.11.12A](#01112a)
+  - [0.12.1A](#0121a)
+    - [0.12A](#012a)
+  - [0.11.12A](#01112a)
     - [0.11.11A](#01111a)
     - [0.11.10A](#01110a)
     - [0.11.9A](#0119a)
@@ -36,6 +37,14 @@ Newest Version: [0.12A](#012a)
   - [0.2A](#02a)
   - [0.1A](#01a)
 # Change Log
+ ## 0.12.1A 
+   - Added 'result' as part of OfP
+   - Fixed bugs and minor issues
+   - Updated examples to now include 'result' instead of = RAX
+   - Made 'return' actually return a value from a function now (you are forced to return if you specify return value!)
+   - Removed return stack - it was never really something that was planned to stick around, but was more like a temporary patch for returning back when we were migrating over to C x86 standards
+   - More examples comming soon :D
+
  ## 0.12A 
    - Added +=, -=, *=, /= as SETOperations
    - Added evaluation (updated examples)

@@ -10,7 +10,7 @@ use std::{env, process::{exit, Command, Stdio}, path::{Path, PathBuf}, ffi::OsSt
 use linked_hash_map::LinkedHashMap;
 use serde_json::Value;
 use uuid::Uuid; 
-
+mod cfor;
 
 
 
@@ -302,11 +302,10 @@ struct CmdProgram {
     remove_unused_functions: bool,
     in_mode: OptimizationMode,
     architecture: Architecture,
-    call_stack_size: usize,
 }
 impl CmdProgram {
     fn new() -> Self {
-        Self { path: String::new(), opath: String::new(), should_build: false, should_run: false, target: "nasm_x86_64".to_string(), call_stack_size: 64000, in_mode: OptimizationMode::DEBUG, use_type_checking: true, print_unused_warns: false,  remove_unused_functions: false, print_unused_funcs: false, print_unused_externs: false, print_unused_strings: false, architecture: Architecture::new() }
+        Self { path: String::new(), opath: String::new(), should_build: false, should_run: false, target: "nasm_x86_64".to_string(), in_mode: OptimizationMode::DEBUG, use_type_checking: true, print_unused_warns: false,  remove_unused_functions: false, print_unused_funcs: false, print_unused_externs: false, print_unused_strings: false, architecture: Architecture::new() }
     }
 }
 #[repr(u32)]
@@ -317,7 +316,6 @@ enum IntrinsicType {
     DLL_IMPORT,
     DLL_EXPORT,
     Func,
-    RS,
     Let,
     CONSTANT,
     OPENPAREN,
@@ -328,9 +326,6 @@ enum IntrinsicType {
     OPENCURLY,
     CLOSECURLY,
     INTERRUPT,
-    // REGISTER OPERATIONS
-    POP,
-    PUSH,
 
     // REGISTER MATH
     // ADD,
@@ -408,12 +403,7 @@ impl IntrinsicType {
             IntrinsicType::CLOSECURLY => {
                 if isplural {"Close Curly".to_string()} else {"Close Curly".to_string()}
             }
-            IntrinsicType::POP => {
-                if isplural {"Pop".to_string()} else {"Pop".to_string()}
-            }
-            IntrinsicType::PUSH => {
-                if isplural {"Push".to_string()} else {"Push".to_string()}
-            }
+           
             IntrinsicType::RET => {
                 if isplural {"Ret".to_string()} else {"Ret".to_string()}
             },
@@ -438,9 +428,6 @@ impl IntrinsicType {
             },
             IntrinsicType::INTERRUPT => {
                 if isplural {"Interrupts".to_string()} else {"Interrupt".to_string()}
-            },
-            IntrinsicType::RS => {
-                if isplural {"Return Stacks".to_string()} else {"Return Stack".to_string()}
             },
             IntrinsicType::TOP => {
                 if isplural {"Tops".to_string()} else {"Top".to_string()}
@@ -586,6 +573,14 @@ impl Expression {
             _ => false
         }
     }
+    fn result_of(&self,program: &CmdProgram,build: &BuildProgram,local_vars: &HashMap<String, LocalVariable>) -> Option<VarType> {
+        todo!()
+        // match self {
+        //     Self::val(v) => {
+        //         v.var_type(program, build, local_vars)?
+        //     }
+        // }
+    }
 }
 impl Expression {
     fn LEIRnasm(&self,regs: Vec<Register>,f: &mut File, program: &CmdProgram,build: &BuildProgram,local_vars: &HashMap<String, LocalVariable>,stack_size: usize,loc: &ProgramLocation) -> std::io::Result<Vec<Register>>{
@@ -608,6 +603,7 @@ struct ExprTree {
 }
 impl ExprTree {
     fn eval_nasm(&self,regs: Vec<Register>,f: &mut File,program: &CmdProgram,build: &BuildProgram,local_vars: &HashMap<String, LocalVariable>,stack_size: usize,loc: &ProgramLocation) -> std::io::Result<Vec<Register>>{
+        #[allow(unused_assignments)]
         let mut o: Vec<Register> = Vec::new();
         match self.op {
             Op::NONE  => com_error!(loc,"Error: Cannot evaluate NONE operation!"),
@@ -750,14 +746,14 @@ impl ExprTree {
             },
             Op::NOT   => {
                 todo!("Not is not yet implemented");
-                let left = com_expect!(loc,self.left.as_ref(),"Error: Cannot evaluate Op '{}' without left parameter",Op::NOT  .to_string());
-                let leftregs1 = left.LEIRnasm(regs.clone(), f, program, build, local_vars, stack_size, loc)?;
-                com_assert!(loc,leftregs1.len() == 1, "TODO: Handle multi-parameter loading for expressions!");
-                let right = com_expect!(loc,self.right.as_ref(),"Error: Cannot evaluate Op '{}' without left parameter",Op::NOT  .to_string());
-                let rightregs1 = right.LEIRnasm(regs[1..].to_vec(), f, program, build, local_vars, stack_size, loc)?;
-                com_assert!(loc,rightregs1.len() == 1, "TODO: Handle multi-parameter loading for expressions!");
-                writeln!(f, "   add {}, {}",leftregs1[0].to_string(),rightregs1[0].to_string())?;
-                o = leftregs1;
+                // let left = com_expect!(loc,self.left.as_ref(),"Error: Cannot evaluate Op '{}' without left parameter",Op::NOT  .to_string());
+                // let leftregs1 = left.LEIRnasm(regs.clone(), f, program, build, local_vars, stack_size, loc)?;
+                // com_assert!(loc,leftregs1.len() == 1, "TODO: Handle multi-parameter loading for expressions!");
+                // let right = com_expect!(loc,self.right.as_ref(),"Error: Cannot evaluate Op '{}' without left parameter",Op::NOT  .to_string());
+                // let rightregs1 = right.LEIRnasm(regs[1..].to_vec(), f, program, build, local_vars, stack_size, loc)?;
+                // com_assert!(loc,rightregs1.len() == 1, "TODO: Handle multi-parameter loading for expressions!");
+                // writeln!(f, "   add {}, {}",leftregs1[0].to_string(),rightregs1[0].to_string())?;
+                // o = leftregs1;
 
             },
         }
@@ -776,6 +772,34 @@ fn tokens_to_expression(body: &[Token],build: &mut BuildProgram, program: &CmdPr
     }
     if body.len() == 1 {
         return Expression::val(par_expect!(&body[0],OfP::from_token(&body[0], build, program, locals),"Error: Expected Ofp but found {}",&body[0].typ.to_string(false)));
+    }
+    if let TokenType::Function(f) = &body[0].typ {
+        let mut i2 = 0;
+        let cbody = {
+            while i2 < body.len() && body[i2].typ != TokenType::IntrinsicType(IntrinsicType::CLOSEPAREN){
+                i2+=1
+            }
+            let res = &body[1..i2];
+            res
+        };
+        if body.len() == i2+1 {
+            return Expression::val(OfP::RESULT(f.clone(), parse_argument_contract_from_body(cbody, build, locals, &body[0].location)));
+        }
+    }
+    if let TokenType::WordType(f) = &body[0].typ {
+        if build.externals.contains_key(f) {
+            let mut i2 = 0;
+            let cbody = {
+                while i2 < body.len() && body[i2].typ != TokenType::IntrinsicType(IntrinsicType::CLOSEPAREN){
+                    i2+=1
+                }
+                let res = &body[1..i2];
+                res
+            };
+            if body.len() == i2+1 {
+                return Expression::val(OfP::RESULT(f.clone(), parse_argument_contract_from_body(cbody, build, locals, &body[0].location)));
+            }   
+        }
     }
     //panic!("If you get here it is probably going to error since its inside an infinite loop!");
     let mut currentETree: ExprTree = ExprTree::new();
@@ -797,6 +821,29 @@ fn tokens_to_expression(body: &[Token],build: &mut BuildProgram, program: &CmdPr
             }
             else if currentETree.right.is_none() && hasFoundOp {
                 currentETree.right = Some(Expression::val(val))
+            }
+            else {
+                par_error!(token, "Error: Cannot assign value of an expression where both are the sides are fufilled or an operator was not provided before the right side!");
+            }
+        }
+        else if let TokenType::Function(f) = &token.typ {
+
+            par_assert!(token,currentETree.left.is_none() || (hasFoundOp && currentETree.right.is_none()),"Error: Cannot have multiple Ofp values consecutively!");
+            let cbody = {
+                let mut i2 = i;
+                while i2 < body.len() && body[i2].typ != TokenType::IntrinsicType(IntrinsicType::CLOSEPAREN){
+                    i2+=1
+                }
+                let res = &body[i..i2];
+                i += i2;
+                res
+            };
+            
+            if currentETree.left.is_none() {
+                currentETree.left = Some(Expression::val(OfP::RESULT(f.to_owned(), parse_argument_contract_from_body(cbody, build, locals, &token.location))))
+            }
+            else if currentETree.right.is_none() && hasFoundOp {
+                currentETree.right = Some(Expression::val(OfP::RESULT(f.to_owned(), parse_argument_contract_from_body(cbody, build, locals, &token.location))))
             }
             else {
                 par_error!(token, "Error: Cannot assign value of an expression where both are the sides are fufilled or an operator was not provided before the right side!");
@@ -847,6 +894,21 @@ fn tokens_to_expression(body: &[Token],build: &mut BuildProgram, program: &CmdPr
                 hasFoundOp = true
             }
             i = i2
+        }
+        else if let TokenType::WordType(f) = &body[0].typ {
+            if build.externals.contains_key(f) {
+                let mut i2 = 0;
+                let cbody = {
+                    while i2 < body.len() && body[i2].typ != TokenType::IntrinsicType(IntrinsicType::CLOSEPAREN){
+                        i2+=1
+                    }
+                    let res = &body[1..i2];
+                    res
+                };
+                if body.len() == i2+1 {
+                    return Expression::val(OfP::RESULT(f.clone(), parse_argument_contract_from_body(cbody, build, locals, &body[0].location)));
+                }   
+            }
         }
         else {
             par_error!(token, "Error: unknown token type in expression: {}",token.typ.to_string(false))
@@ -1900,13 +1962,22 @@ enum OfP {
     REGISTER (Register),
     //PARAM    (String),
     LOCALVAR (String),
-    CONST    (RawConstValueType)
+    CONST    (RawConstValueType),
+    RESULT   (String,CallArgs)
     // RAW      (i64),
     // STR      (Uuid, ProgramStringType)
     // etc.
 }
 impl OfP { 
-    fn LOIRGNasm(&self, regs: Vec<Register>, f: &mut File, program: &CmdProgram,build: &BuildProgram, local_vars: &HashMap<String, LocalVariable>, stack_size: usize, loc: &ProgramLocation) -> std::io::Result<Vec<Register>>{
+    fn var_type(&self, build: &BuildProgram, local_vars: &HashMap<String, LocalVariable>) -> Option<VarType> {
+        match self {
+            Self::REGISTER(reg) => Some(reg.to_var_type()),
+            Self::CONST(v) => Some(v.to_type(build)[0].clone()),
+            Self::LOCALVAR(v) => Some(local_vars.get(v).unwrap().typ.clone()),
+            Self::RESULT(f, _) => build.functions.get(f).unwrap().contract.Outputs.get(0).cloned()
+        }
+    }
+    fn LOIRGNasm(&self, regs: Vec<Register>, f: &mut File, program: &CmdProgram,build: &BuildProgram, local_vars: &HashMap<String, LocalVariable>, mut stack_size: usize, loc: &ProgramLocation) -> std::io::Result<Vec<Register>>{
         let mut out: Vec<Register> = Vec::with_capacity(regs.len());
         match self {
             OfP::REGISTER(reg2) => {
@@ -1914,18 +1985,6 @@ impl OfP {
                 writeln!(f, "   mov {}, {}",reg.to_string(),reg2.to_string())?;
                 out.push(reg.clone());
             },
-            // OfP::PARAM(val) => {
-            //     todo!("this");
-            //     // let (offset,osize) = func.contract.get_offset_of_param(val,stack_size,&func.contract,program);
-            //     // let reg = &regs[0].to_byte_size(osize);
-            //     // out.push(reg.clone());
-            //     // if offset > 0 {
-            //     //     writeln!(f, "   mov {}, {} [rsp+{}]",reg.to_string(),size_to_nasm_type(osize),offset)?;
-            //     // }
-            //     // else {
-            //     //     writeln!(f, "   mov {}, {} [rsp]",reg.to_string(),size_to_nasm_type(osize))?;
-            //     // }
-            // },
             OfP::LOCALVAR(val) => {
                 //println!("Got to here!");
                 let lvar = local_vars.get(val).unwrap();
@@ -1977,6 +2036,22 @@ impl OfP {
                     },
                 }
             },
+            OfP::RESULT(func, args) => {
+                //println!("Trying to get contract of {}: {:?} with build:\n {:#?}",func,build.get_contract_of_symbol(func),build.externals);
+                nasm_x86_64_prep_args(program, build, f, build.get_contract_of_symbol(func).unwrap().clone(), args, &mut stack_size, loc.clone(), &local_vars)?;
+                writeln!(f, "   call {}{}",program.architecture.func_prefix,func)?;
+                if let Some(ops) = program.architecture.options.argumentPassing.custom_get() {
+                    if ops.shadow_space > 0 {
+                        writeln!(f, "   add rsp, {}",ops.shadow_space)?;
+                    }
+                }
+                let reg = &regs[0].to_byte_size(build.get_contract_of_symbol(func).unwrap().Outputs.get(0).unwrap_or(&VarType::LONG).get_size(program));
+                if reg.to_byte_size(8) != Register::RAX {
+                    let oreg = Register::RAX.to_byte_size(reg.size());
+                    writeln!(f, "   mov {}, {}",reg.to_string(),oreg.to_string())?;
+                }
+                out.push(reg.clone());
+            },
         }
         Ok(out)
     }
@@ -2003,7 +2078,6 @@ impl OfP {
 }
 #[derive(Debug)]
 enum Instruction {
-    RSPUSH  (OfP),
     //PUSH    (OfP),
     DEFVAR  (String),
     MOV     (OfP, Expression),
@@ -2015,7 +2089,7 @@ enum Instruction {
     CALL    (String, CallArgs),
     CALLRAW (String, CallArgs),
     FNBEGIN (),
-    RET     (),
+    RET     (Expression),
     SCOPEBEGIN,
     SCOPEEND,
     
@@ -2344,12 +2418,15 @@ impl BuildProgram {
     fn contains_symbol(&self, str: &String) -> bool {
         self.constdefs.contains_key(str) || self.dll_imports.contains_key(str) || self.externals.contains_key(str) || self.functions.contains_key(str)
     }
-    fn get_contract_of_symbol(&self, str: &String) -> Option<&AnyContract> {
+    fn get_contract_of_symbol(&self, str: &String) -> Option<AnyContract> {
         if let Some(ext) = self.externals.get(str) {
-            return ext.contract.as_ref()
+            return ext.contract.clone()
         }
         else if let Some(dll_import) = self.dll_imports.get(str) {
-            return Some(&dll_import.contract)
+            return Some(dll_import.contract.clone())
+        }
+        else if let Some(func) = self.functions.get(str) {
+            return Some(func.contract.to_any_contract())
         }
         None
     }
@@ -2670,6 +2747,36 @@ fn eval_const_def(lexer: &mut Lexer, build: &mut BuildProgram, until: TokenType)
     let top = varStack.pop().unwrap();
     
     ConstValue {typ: top, loc: orgLoc}
+}
+fn parse_argument_contract_from_body(body: &[Token], build: &mut BuildProgram,currentLocals: &Vec<Locals>,loc: &ProgramLocation) -> CallArgs {
+    let mut out: CallArgs = CallArgs::new();
+    let mut expectNextSY = false;
+    let mut lexer = body.iter();
+    par_assert!(loc, par_expect!(loc,lexer.next(), "Error: abruptly ran out of tokens in argument contract definition").typ == TokenType::IntrinsicType(IntrinsicType::OPENPAREN), "Error: argument contract must begin with (");
+    while let Some(token) = lexer.next() {
+        match token.typ {
+            TokenType::IntrinsicType(Typ) => {
+                match Typ {
+                    IntrinsicType::COMA => {
+                        par_assert!(token.location,expectNextSY, "undefined coma placed inside argument contract! Comas only seperate Input parameters");
+                        expectNextSY = false;
+                    }
+                    IntrinsicType::CLOSEPAREN => {
+                        return out},
+                    IntrinsicType::TOP => {
+                        expectNextSY = true;
+                        out.push(par_expect!(token, CallArg::from_token(build,&token, currentLocals),"Unexpected Token Type in argument Contract. Expected Definition but found: {}",token.typ.to_string(false)));
+                    }
+                    other => par_error!(token, "Unexpected intrinsic in argument contract! {}",other.to_string(false))
+                }
+            }
+            _ => {
+                out.push(par_expect!(token, CallArg::from_token(build,&token, currentLocals),"Unexpected Token Type in argument Contract. Expected Definition but found: {}",token.typ.to_string(false)));
+                expectNextSY = true;
+            }
+        }
+    }
+    out
 }
 fn parse_argument_contract(lexer: &mut Lexer, build: &mut BuildProgram, currentLocals: &Vec<Locals>) -> CallArgs {
     let mut out: CallArgs = CallArgs::new();
@@ -3099,13 +3206,18 @@ fn parse_token_to_build_inst(token: Token,lexer: &mut Lexer, program: &mut CmdPr
                         par_error!(token, "Scope closed but never opened!!!");
                     }
                 }
-                IntrinsicType::PUSH | IntrinsicType::POP => {
-                    par_error!(token,"Unexpected token {}",Type.to_string(false));   
-                }
                 IntrinsicType::RET => {
                     par_assert!(token, scopeStack.len()> 0 && getTopMut(scopeStack).unwrap().body_is_some(), "Error: Unexpected return intrinsic outside of scope! Scopes of type {} do not support instructions!",getTopMut(scopeStack).unwrap().typ.to_string(false));
                     let body = getTopMut(scopeStack).unwrap().body_unwrap_mut().unwrap();
-                    body.push((token.location.clone(),Instruction::RET()));
+                    let result_body: Vec<Token> = lexer.map_while(|t| {
+                        if t.typ != TokenType::IntrinsicType(IntrinsicType::DOTCOMA) {
+                            Some(t)
+                        }
+                        else {
+                            None
+                        }
+                    }).collect();
+                    body.push((token.location.clone(),Instruction::RET(tokens_to_expression(&result_body, build, program, &currentLocals))));
                 },
                 IntrinsicType::INCLUDE => {
                     let includeName = par_expect!(lexer.currentLocation,lexer.next(),"Error: abruptly ran out of tokens");
@@ -3339,38 +3451,6 @@ fn parse_token_to_build_inst(token: Token,lexer: &mut Lexer, program: &mut CmdPr
                     }
                     
                 },
-                IntrinsicType::RS => {
-                    par_assert!(token, scopeStack.len() > 0 && getTopMut(scopeStack).unwrap().body_is_some(), "Error: Unexpected rs intrinsic outside of scope! Scopes of type {} do not support instructions!",getTopMut(scopeStack).unwrap().typ.to_string(false));
-                    let body = getTopMut(scopeStack).unwrap().body_unwrap_mut().unwrap();
-                    
-                    let lexerNext = par_expect!(lexer.currentLocation,lexer.next(),"Stream of tokens ended abruptly at RS call");
-                    match lexerNext.typ {
-                        TokenType::Register(reg) => {
-                            let optyp = par_expect!(lexer.currentLocation,lexer.next(),"Stream of tokens ended abruptly at RS push call");
-                            match optyp.typ {
-                                TokenType::IntrinsicType(typ) => {
-                                match typ {
-                                    IntrinsicType::PUSH => {
-                                        
-                                        body.push((lexer.currentLocation.clone(), Instruction::RSPUSH(OfP::REGISTER(reg))))            
-                                    }
-                                    _ => {
-                                        par_error!(lexerNext.location, "Error: Unexpected Intrinsic Type: {}",typ.to_string(false))
-                                    }
-                                }
-                                }
-                                _ => {
-                                    par_error!(lexerNext.location, "Error: Expected Intrinsic but found {}",lexerNext.typ.to_string(false))
-                                }
-                            }
-                            
-                        }
-                        _ => {
-                            par_error!(lexerNext.location, "Error: Expected Register but found {}",lexerNext.typ.to_string(false))                
-                        }
-                        
-                    }
-                },
                 IntrinsicType::TOP => todo!(),
                 IntrinsicType::CAST => todo!(),
                 IntrinsicType::DLL_IMPORT => {
@@ -3515,11 +3595,11 @@ fn parse_tokens_to_build(lexer: &mut Lexer, program: &mut CmdProgram) -> BuildPr
     while let Some(token) = lexer.next() {
         parse_token_to_build_inst(token, lexer, program, &mut build, &mut scopeStack, &mut currentLocals);
     }
-    for (fn_name, fn_fn)in build.functions.iter_mut() {
-        if fn_name != "main" && fn_fn.location.file == lexer.currentLocation.file {
-            fn_fn.body.push((fn_fn.location.clone(),Instruction::RET()))
-        }
-    }
+    // for (fn_name, fn_fn)in build.functions.iter_mut() {
+    //     if fn_name != "main" && fn_fn.location.file == lexer.currentLocation.file {
+    //         fn_fn.body.push((fn_fn.location.clone(),Instruction::RET()))
+    //     }
+    // }
     build
 }
 
@@ -3977,6 +4057,7 @@ fn nasm_x86_64_handle_scope(f: &mut File, build: &BuildProgram, program: &CmdPro
                         }
                     },
                     OfP::CONST(_) => todo!(),
+                    OfP::RESULT(_, _) => todo!(),
                 }   
             }
             Instruction::SUBSET(op1, op2) => {
@@ -4000,6 +4081,7 @@ fn nasm_x86_64_handle_scope(f: &mut File, build: &BuildProgram, program: &CmdPro
                         }
                     },
                     OfP::CONST(_) => todo!(),
+                    OfP::RESULT(_, _) => todo!(),
                 }
             }
             Instruction::MULSET(op1, op2) => {
@@ -4063,8 +4145,11 @@ fn nasm_x86_64_handle_scope(f: &mut File, build: &BuildProgram, program: &CmdPro
                 
                 
             }
-            Instruction::RET() => {
+            Instruction::RET(expr) => {
                 let dif = stack_size-stack_size_org;
+                let _regs = expr.LEIRnasm(vec![Register::RAX,Register::RBX,Register::RCX], f, program, build, &local_vars, stack_size, loc)?;
+                let oreg = Register::RAX.to_byte_size(_regs[0].size());
+                writeln!(f, "   mov {}, {}",oreg.to_string(),_regs[0].to_string())?;
                 writeln!(f, "   add rsp, {}",dif)?;
                 writeln!(f, "   ret")?;
             }
@@ -4081,19 +4166,6 @@ fn nasm_x86_64_handle_scope(f: &mut File, build: &BuildProgram, program: &CmdPro
             },
             Instruction::INTERRUPT(val) => {
                 writeln!(f, "   int 0x{:x}",val)?;
-            },
-            Instruction::RSPUSH(val) => {
-                match val {
-                    OfP::REGISTER(_) => {
-                        // let offset = rs_stack_offset as i64+stack_size;
-                        // rs_stack_offset -= reg.size();
-                        // writeln!(f, "   mov {} [rsp+{}], {}",size_to_nasm_type(reg.size()),offset,reg.to_string())?;
-                        todo!("Unreachable")
-                    },
-                   
-                    OfP::LOCALVAR(_) => todo!(),
-                    OfP::CONST(_) => todo!(),
-                }
             },
             Instruction::EXPAND_SCOPE(s) => nasm_x86_64_handle_scope(f, build, program, TCScopeType::NORMAL(&s),local_vars.clone(),stack_size)?,
             Instruction::EXPAND_IF_SCOPE(s)   => {
@@ -4121,6 +4193,7 @@ fn nasm_x86_64_handle_scope(f: &mut File, build: &BuildProgram, program: &CmdPro
                         OfP::CONST(val) => {
                             writeln!(f, "   cmp {}, 0",val.get_num_data())?;
                         },
+                        OfP::RESULT(_, _) => todo!(),
                     }
                 }
                 else {
@@ -4386,18 +4459,19 @@ impl TCScopeType<'_> {
         }
     }
 }
-fn type_check_scope(build: &BuildProgram, program: &CmdProgram, scope: TCScopeType, currentLocals: &mut Vec<Locals>) {
-    let mut rs_stack: Vec<VarType> = Vec::new();
+fn type_check_scope(build: &BuildProgram, program: &CmdProgram, scope: TCScopeType, currentLocals: &mut Vec<Locals>) -> bool {
     if let Some(locals) = scope.get_locals(build) {
         currentLocals.push(locals.clone());
     }
+    let mut hasFoundRet = false;
     // TODO: Add current locals (&Vec<Locals>)
+    
     for (loc, instruction) in scope.get_body(build).iter() {
         match instruction {
             Instruction::DEFVAR(_)           => {},
             Instruction::MOV(_, _)           => {},
             Instruction::CALLRAW(name,contract)        => {
-                let mut externContract = build.get_contract_of_symbol(name).unwrap_or(&AnyContract { InputPool: vec![], Outputs: vec![] }).clone();//build.externals.get(name).unwrap().contract.as_ref().unwrap_or(&AnyContract { InputPool: vec![], Outputs: vec![] }).clone();
+                let mut externContract = build.get_contract_of_symbol(name).unwrap_or(AnyContract { InputPool: vec![], Outputs: vec![] }).clone();//build.externals.get(name).unwrap().contract.as_ref().unwrap_or(&AnyContract { InputPool: vec![], Outputs: vec![] }).clone();
                 externContract.InputPool.reverse();
                 //println!("externContract: {:?}",externContract);
                 typ_assert!(loc, externContract.InputPool.len() == contract.len(), "Error: Expected: {} amount of arguments but found {}",externContract.InputPool.len(), contract.len());
@@ -4449,24 +4523,13 @@ fn type_check_scope(build: &BuildProgram, program: &CmdProgram, scope: TCScopeTy
                 }
             },
             Instruction::FNBEGIN()           => {},
-            Instruction::RET()               => {},
+            Instruction::RET(_)=> {hasFoundRet=true}, // TODO: typecheck expression
             Instruction::SCOPEBEGIN          => {},
             Instruction::SCOPEEND            => {},
             Instruction::INTERRUPT(_)        => {},
-            Instruction::RSPUSH(typ)           => {
-                match typ {
-                    OfP::REGISTER(Reg) => {
-                        rs_stack.push(Reg.to_var_type());
-                    },
-                    OfP::LOCALVAR(_) => todo!(),
-                    OfP::CONST(val) => {
-                        rs_stack.extend(val.to_type(build))
-                    }
-                }
-            },
-            Instruction::EXPAND_SCOPE(s)      => type_check_scope(build, program, TCScopeType::NORMAL(&s), currentLocals),
-            Instruction::EXPAND_IF_SCOPE(s)   => type_check_scope(build, program, TCScopeType::NORMAL(&s), currentLocals), //TODO: Typecheck condition
-            Instruction::EXPAND_ELSE_SCOPE(s) => type_check_scope(build, program, TCScopeType::NORMAL(&s), currentLocals),
+            Instruction::EXPAND_SCOPE(s)      => if type_check_scope(build, program, TCScopeType::NORMAL(&s), currentLocals) { hasFoundRet = true},
+            Instruction::EXPAND_IF_SCOPE(s)   => if type_check_scope(build, program, TCScopeType::NORMAL(&s), currentLocals) { hasFoundRet = true}, //TODO: Typecheck condition
+            Instruction::EXPAND_ELSE_SCOPE(s) => if type_check_scope(build, program, TCScopeType::NORMAL(&s), currentLocals) { hasFoundRet = true},
             //TODO: add typechecking for this:
             Instruction::MORETHAN(_, _)       => {},
             Instruction::LESSTHAN(_, _)       => {},
@@ -4474,22 +4537,28 @@ fn type_check_scope(build: &BuildProgram, program: &CmdProgram, scope: TCScopeTy
             Instruction::LESSTHANEQUALS(_, _) => {},
             Instruction::NOTEQUALS(_, _)      => {},
             Instruction::EQUALS(_, _)         => {},
+            _ => todo!("Unreachable")
         }
     }
     if scope.is_func() {
-        if rs_stack != scope.get_contract(build).unwrap().Outputs {
-            typ_warn!(scope.get_location(build).unwrap(),"Error: Mismatched types for output");
-            for typ in rs_stack.iter() {
-                eprintln!("   {}",typ.to_string(false).to_uppercase());
-            }
-
-            eprintln!("Expected: ");
-            for typ in scope.get_contract(build).unwrap().Outputs.iter() {
-                eprintln!("   {}",typ.to_string(false).to_uppercase());
-            }
-            exit(1)
+        if !scope.get_contract(build).unwrap().Outputs.is_empty() {
+            //println!("Got here!\nhasFoundRet: {}",hasFoundRet);
+            typ_assert!(scope.get_location(build).unwrap(),hasFoundRet,"Error: Expected return value but function didn't return anything!");
         }
+        // if rs_stack != scope.get_contract(build).unwrap().Outputs {
+        //     typ_warn!(scope.get_location(build).unwrap(),"Error: Mismatched types for output");
+        //     for typ in rs_stack.iter() {
+        //         eprintln!("   {}",typ.to_string(false).to_uppercase());
+        //     }
+
+        //     eprintln!("Expected: ");
+        //     for typ in scope.get_contract(build).unwrap().Outputs.iter() {
+        //         eprintln!("   {}",typ.to_string(false).to_uppercase());
+        //     }
+        //     exit(1)
+        // }
     }
+    hasFoundRet
 }
 fn type_check_build(build: &mut BuildProgram, program: &CmdProgram) {
     
@@ -4514,9 +4583,6 @@ fn usage(program: &String) {
     println!("         -ntc                                -> (NoTypeChecking) Disable type checking");
     println!("         -warn (all, funcs, externs, strings)-> Enable unused warns for parameter");
     println!("         -ruf                                -> Remove unused functions");
-    println!("         -callstack (size)                   -> Set callstack size.\n{}\n{}",
-             "                                                The name is very deceiving but callstack is now only used for locals as of 0.0.6A (checkout versions.md)",
-             "                                                [NOTE] it is planned for -callstack to be deprecated for instead using the stack as a way to store variables with the new function system");
     println!("         -arc (builtin arc)                  -> builds for a builtin architecture");
     println!("         -arc - (path to custom arc)         -> builds for a custom architecture following the syntax described in ./examples/arcs");
     println!("--------------------------------------------");
@@ -4620,107 +4686,98 @@ fn main() {
     else {
         println!("[NOTE] No architecture found for {}_{}! Please specify the output architecture!",env::consts::OS,env::consts::ARCH);
     }
-    {
-        let mut i: usize = 0;
-        while i < args.len(){
-            let flag = args.get(i).unwrap();
-            match flag.as_str() {
-                "-o" => {
-                    program.opath = args.get(i+1).unwrap_or_else(|| {
-                        eprintln!("Error: Could not get output path for -o flag!");
-                        exit(1);
-                    }).clone();
-                    i += 1;
-                },
-                "-b" => {
-                    program.should_build = true
-                }
-                "-r" => {
-                    program.should_build = true;
-                    program.should_run = true
-                    
-                }
-                "-release" => {
-                    program.in_mode = OptimizationMode::RELEASE
-                }
-                "-ntc" => {
-                    program.use_type_checking = false
-                }
-                "-t" => {
-                    program.target = args.get(i+1).expect("Error: Expected target but found nothing!").to_owned();
-                    if program.target == "list" {
-                        list_targets(0);
-                        exit(0);
-                    }
-                    i+=1;
-                }
-                "-warn" => {
-                    let typ = args.get(i+1).expect("Error: Expected `all, funcs,externs,strings`");
-                    match typ.as_str() {
-                        "all" => {
-                            program.print_unused_warns = true
-                        }
-                        "funcs" => {
-                            program.print_unused_funcs = true
-                        }
-                        "externs" => {
-                            program.print_unused_externs = true
-                        }
-                        "strings" => {
-                            program.print_unused_strings = true
-                        }
-                        _ => {
-                            eprintln!("Unexpected parameter: {}, Expected: `all,funcs,externs,strings`",typ)
-                        }
-                    }
-                    i += 1;
-                }
-                "-ruf" => {
-                    program.remove_unused_functions = true;
-                }
-                "-callstack" => {
-                    let val = args.get(i+1).expect("Unexpected flag -callstack, Please specify a size!").parse::<usize>().expect("Value not a valid usize!");
-                    program.call_stack_size = val;
-                    i += 1;
-                }
-                "-usage" => {
-                    usage(&program_n);
+    cfor!(let mut i: usize = 0; i < args.len(); i+=1; {
+        let flag = args.get(i).unwrap();
+        match flag.as_str() {
+            "-o" => {
+                program.opath = args.get(i+1).unwrap_or_else(|| {
+                    eprintln!("Error: Could not get output path for -o flag!");
+                    exit(1);
+                }).clone();
+                i += 1;
+            },
+            "-b" => {
+                program.should_build = true
+            }
+            "-r" => {
+                program.should_build = true;
+                program.should_run = true
+                
+            }
+            "-release" => {
+                program.in_mode = OptimizationMode::RELEASE
+            }
+            "-ntc" => {
+                program.use_type_checking = false
+            }
+            "-t" => {
+                program.target = args.get(i+1).expect("Error: Expected target but found nothing!").to_owned();
+                if program.target == "list" {
+                    list_targets(0);
                     exit(0);
                 }
-                "-arc" => {
-                    let val = args.get(i+1).expect("Error: Unexpected built-in target or path to json");
-                    if val == "-" {
-                        let path = Path::new(args.get(i+2).expect("Error: Path not specified for -arc"));
-                        let ext = path.extension().expect(&format!("Error: Path provided doesn't have an extension! Path: '{:?}'",path));
-                        let ext = ext.to_str().unwrap();
-                        assert!(ext=="json","Error: only accepting arc files with the json format!");
-                        assert!(path.is_file() && path.exists(), "Error: path provided '{:?}' is not a file or does not exist!",path);
-                        let f = fs::read_to_string(path).expect("Error: file does not exist or can't be opened!");
-                        let arc: Value = serde_json::from_str(&f).expect("Contents of file not a json!");
-                        let arc = arc.as_object().unwrap();
-                        program.architecture = json_to_arc(arc);
-                        i+=2;
+                i+=1;
+            }
+            "-warn" => {
+                let typ = args.get(i+1).expect("Error: Expected `all, funcs,externs,strings`");
+                match typ.as_str() {
+                    "all" => {
+                        program.print_unused_warns = true
                     }
-                    else {
-                        assert!(Architectures.contains_key(val),"Error: Unknown Architecture: {}. It is probably not built in!",val);
-                        program.architecture = Architectures.get(val).unwrap().clone();
-                        i+=1;
+                    "funcs" => {
+                        program.print_unused_funcs = true
+                    }
+                    "externs" => {
+                        program.print_unused_externs = true
+                    }
+                    "strings" => {
+                        program.print_unused_strings = true
+                    }
+                    _ => {
+                        eprintln!("Unexpected parameter: {}, Expected: `all,funcs,externs,strings`",typ)
                     }
                 }
-                flag => {
-                    if program.path.is_empty() && &flag[0..1] != "-" {
-                        program.path = flag.to_string();
-                    }
-                    else {
-                        eprintln!("Error: undefined flag: {flag}");
-                        usage(&program_n);
-                        exit(1);
-                    }
+                i += 1;
+            }
+            "-ruf" => {
+                program.remove_unused_functions = true;
+            }
+            "-usage" => {
+                usage(&program_n);
+                exit(0);
+            }
+            "-arc" => {
+                let val = args.get(i+1).expect("Error: Unexpected built-in target or path to json");
+                if val == "-" {
+                    let path = Path::new(args.get(i+2).expect("Error: Path not specified for -arc"));
+                    let ext = path.extension().expect(&format!("Error: Path provided doesn't have an extension! Path: '{:?}'",path));
+                    let ext = ext.to_str().unwrap();
+                    assert!(ext=="json","Error: only accepting arc files with the json format!");
+                    assert!(path.is_file() && path.exists(), "Error: path provided '{:?}' is not a file or does not exist!",path);
+                    let f = fs::read_to_string(path).expect("Error: file does not exist or can't be opened!");
+                    let arc: Value = serde_json::from_str(&f).expect("Contents of file not a json!");
+                    let arc = arc.as_object().unwrap();
+                    program.architecture = json_to_arc(arc);
+                    i+=2;
+                }
+                else {
+                    assert!(Architectures.contains_key(val),"Error: Unknown Architecture: {}. It is probably not built in!",val);
+                    program.architecture = Architectures.get(val).unwrap().clone();
+                    i+=1;
                 }
             }
-            i+=1;
+            flag => {
+                if program.path.is_empty() && &flag[0..1] != "-" {
+                    program.path = flag.to_string();
+                }
+                else {
+                    eprintln!("Error: undefined flag: {flag}");
+                    usage(&program_n);
+                    exit(1);
+                }
+            }
         }
-    }
+    });
     match program.target.as_str() {
         "nasm_x86_64" => {}
         _ => {
@@ -4844,16 +4901,17 @@ fn main() {
 - [x] TODO: Implement conditions and 'evaluate_condition'
 - [x] TODO: Add expressions like a+b*c etc. 
 
-- [ ] TODO: Remove -callstack
+- [x] TODO: Remove -callstack
+- [x] TODO: Fix returning from functions
+- [x] TODO: Add 'result' as a part of OfP for calling the function and getting its result
+- [x] TODO: Add more examples like OpenGL examples, native Windows examples with linking to kernel.dll etc.
+
+- [ ] TODO: Implement while loops
+
 - [ ] TODO: Update all of readme and add more documentation
 - [ ] TODO: Add more useful examples
-- [ ] TODO: Fix returning from functions
-- [ ] TODO: Add 'result' as a part of OfP for calling the function and getting its result
-- [ ] TODO: Implement while loops
-- [x] TODO: Add more examples like OpenGL examples, native Windows examples with linking to kernel.dll etc.
 - [ ] TODO: Add some quality of life things such as __FILE__ __LINE__
-- [ ] TODO: Add EOL (End of line) token
-
+- [ ] TODO: Push to master
 
 - [ ] TODO: Make it so that get_body returns None if scope has not been opened yet
 - [ ] TODO: Remove some dependencies like UUID since we don't exactly need it (also bench mark it to see the improvement in speed!)

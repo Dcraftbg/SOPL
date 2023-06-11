@@ -1,5 +1,5 @@
-extern "C" printf(ptr, long : int);
-extern "C" puts(ptr : int);
+extern "C" printf(*char, long : int);
+extern "C" puts(*char : int);
 const A = 5l ;
 const B = 4l ;
 const C = 4l 5l + ;

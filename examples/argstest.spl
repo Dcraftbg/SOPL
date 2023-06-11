@@ -1,6 +1,6 @@
 //TODO: fix tests with printf, since printf no longer works
 
-extern "C" printf(ptr, int : int);
+extern "C" printf(*char, int : int);
 func main(argc: int,argv: ptr) {
     // RAX = argc1
     // RAX 1 +
