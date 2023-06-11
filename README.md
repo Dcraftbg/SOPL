@@ -21,16 +21,17 @@ Made for easy navigation around the README.md
 - [Plans](#plans)
 - [How-to-use](#how-to-use)
   - [Hello-World](#hello-world)
+  - [Locals](#locals)
+  - [Constants](#constants)
+  - [Expressions](#expressions)
+  - [Including](#including)
+  - [Functions](#functions)
+  - [Control-flow](#control-flow)
+  - [Strings](#strings)
+  - [Managing-c-functions](#managing-c-functions-and-their-return-values)
   - [Externals](#extern)
-  - [functions](#functions)
-  - [including](#including)
-  - [registers](#registers)
-  - [managing-c-functions](#managing-c-functions-and-their-return-values)
-  - [strings](#strings)
-  - [control-flow](#control-flow)
-  - [constants](#constants)
-  - [locals](#locals)
-  - [interrupts](#interrupts)
+  - [Interrupts](#interrupts)
+  - [Registers](#registers)
 
 
 ## Quickstart
@@ -79,7 +80,7 @@ It also gives you a timeline of the most recent changes (newest -> oldest).
 
 Flags are really important and if not updated here, you can always check out what flag support there is by just running the compiler without anything (This will display information such as the usage, the currently supported builds and any flags you might want to use).
 
-As of [0.12A](version.md#012a) flags consist of:
+As of [0.12.2A](version.md#0122a) flags consist of:
 ```
 --------------------------------------------
 sopl [flags]
@@ -93,11 +94,8 @@ sopl [flags]
          -ntc                                -> (NoTypeChecking) Disable type checking
          -warn (all, funcs, externs, strings)-> Enable unused warns for parameter
          -ruf                                -> Remove unused functions
-         -callstack (size)                   -> Set callstack size.
-                                                The name is very deceiving but callstack is now only used for locals as of 0.0.6A (checkout versions.md)
-                                                [NOTE] it is planned for -callstack to be deprecated for instead using the stack as a way to store variables with the new function system
          -arc (builtin arc)                  -> builds for a builtin architecture
-         -arc | (path to custom arc)         -> builds for a custom architecture following the syntax described in ./examples/arcs
+         -arc - (path to custom arc)         -> builds for a custom architecture following the syntax described in ./examples/arcs
 --------------------------------------------
 ```
 
@@ -112,8 +110,8 @@ sopl [flags]
 - [ ] control flow
   - [x] if statements
   - [x] else statements
+  - [x] while statements
   - [ ] else if statements
-  - [ ] while statements
   - [ ] for statements
 - [x] locals
 - [x] type checking
@@ -121,8 +119,11 @@ sopl [flags]
 - [ ] structs
 - [ ] struct methods
 - [ ] interfaces
+
 ## How to use?
 *Note that documentation may not cover all of the latest features tho you might expect updates on them shortly after implementation*
+*If you want to learn most of the details checkout theversions*
+
 ### Hello World!
 ```sopl
 extern "C" printf(*char : int)
@@ -131,32 +132,91 @@ func main() {
   printf("Hello World!"c);
 }
 ```
-### Extern
-  * Changed syntax in [0.11A](version.md#011a)
-  * Added Files related in [0.7A](version.md#07a):
-    - [stdio.spl](src/C/stdio.spl)
-    - [stdlib.spl](src/C/stdlib.spl)
-  * Added in Pre 0.1A
-**Syntax**:
-```
-extern [TYPE] (name) <(extern contract)>;
-```
-Extern is a way to access outside features of the language or link to functions from other languages such as IO implementations from C etc.
-It has to be noted here that using extern on its own can sometimes lead to unexpected behavior ~~or program slowdowns as most externs don't get type checked automatically~~ (as of 0.11A externs ARE typechecked) and
-might not be available for the current mode you are running in like if you try to link to standard C functions when you are in JAVA mode.
+### Locals
+[0.12A](version.md#012a) Added expressions
+[0.11.6A](version.md#0116a) Made local variables be on the stack and merged parameters with variables
+Pre 0.1A Added local variables
 
-Thats also a reason why externs are generally not recommended for direct use (although depending on your version it might be required to use them raw (currently its not required - use stdio.spl, stdlib.spl directly instead of listing externs every time :D. If you want to implement any C library you can do that and share the information online)).
-
-Externs are really powerful if you want to link to libraries that aren't previously implement and are generally really good to use for building things that require platform specific things such as Windows applications etc.
-
-**Example(s)**:
+**Syntax:**
+```sopl
+let (name): (type)
 ```
-extern "C" puts(*char : int); // Links with puts from C
-func main(){
-  puts("Hello World"c) // uses it to print a string to the console
+
+Local variables are a core part of any programming language. SOPL is no exception. Define a variable like this and then you can use it throughout your code later.
+**Example(s)**
+```sopl
+let a: int;
+let b: int;
+a = 5+4;
+b = 4+3;
+if a == b {
+  let c: int;
+  c = a+b;
+  printf("a=%d, b=%d, c=%d",a,b,c)
+}
+else {
+  printf("a=%d, b=%d and they are not equal!",a,b)
 }
 ```
-### functions
+### Constants
+[0.11.4A](version.md#0114a) Added types for constants as well as casting
+Pre 0.1A
+
+**Syntax:**
+```sopl
+const (name)<:(type)> = (your constant expersion goes here) ;
+```
+
+As in many other languages, Sopl also has a constant system. Constants are expressions that are evaluated at compile time and are therefor very useful. The expression is a set of operations that the program will evaluate. The quickest way to understand how they work is to check out the examples:
+
+```sopl
+const World = "World"
+const HelloWorld = "Hello" World +      // Concatenates strings and expressions can use constants
+const A = 4;
+const B = 5;
+const C = A B + ;                       
+const HelloWorldNine = HelloWorld C + ; // Concatenates the integers and strings together
+```
+
+In a constants expression can only be things that can be evaluated at compile time, such as Strings, Integers, Longs and other constants. If you try to use something like a function it would tell you that it doesn't recognize it as a constant value. 
+Whilst local variables had a major revamp to their Expression system in 0.12A, constants are still stuck in the old ways of handling things. That is planned to change in the near future
+
+### Expressions
+[0.12A](version.md#012a) Added expressions
+
+Expressions in SOPL are like those in mathematics. We use expressions in all kinds of things like the conditions in if statements or the result of a setoperation.
+Any OfP by definition is an Expression of type 'value'. If you add an operation it becomes an 'expression tree'. An example of this is the following:
+```sopl
+a = b; // b is an Expression of type 'value'
+a = b+c*d; // b+c*d is an Expression of type 'expression tree'
+```
+Expressions are really useful but are also unstable currently if they are too complicated. Most of the expressions you'll see are going to be simple and can easily be evaluated, however if the expression is too complicated the program won't compile and it will require you to put the values under temporary variables.
+
+### Including
+[0.5.1A](version.md#051a) Fixed bug where constants weren't being included 
+Pre 0.1A Added including
+
+**Syntax**
+```spl
+include "Path/To/File"
+```
+Functions.spl:
+```spl
+extern "C" puts(*char : int)
+func sayHello() {
+  printf("Hello World!"c)
+}
+```
+HelloWorld.spl:
+```spl
+include "./Functions.spl"
+func main() {
+  sayHello()
+}
+```
+
+### Functions
+* 0.12.1A Added 'result' as an OfP
 * 0.11A Changed how functions are called with the introduction of argument contracts
 * 0.6A Changed to now have named parameters
 * Pre 0.1A
@@ -167,13 +227,14 @@ func (name) ((contract)) {
 
 }
 ```
-Functions, just like in other languages have a name and a body. In sopl however you have to provide a contract:
+Functions, just like in other languages have a name and a body. In sopl, you have to provide a contract:
 
-A contract is a way to tell the type checker what to expect to have passed to it before calling it.
-The contract contains:
+A contract is a way to tell the type checker what to expect to have passed to it before calling the function.
+The function contract contains:
 (Input parameters separated by , : Output parameters separated by ,)
 
-Inside of functions you can use the "return" keyword to return although it is automatically done for you at the end of the functions declaration.
+Some things that should be noted are that you really really really shouldn't be using more than one Output parameter type, since the language doesn't support multiple returns (Outputs were kept this way because of the old x86 days and the return stack).
+Inside of functions you can use the "return" keyword to return although it is automatically done for you at the end of the functions declaration that don't have a return type.
 
 **Example(s)**:
 ```sopl
@@ -181,39 +242,133 @@ func sayHello() {
   printf("Hello World!\n"c)
 }
 func counter(c: long : long) {
-  c -= 1
-  counter(n) 
-  rs RAX push
+  c -= 1;
+  counter(c) 
+  return c;
 }
 ```
-As of 0.12A, expression evaluation has been added so the code above does 'theoretically' work
+As of 0.12A, expression evaluation has been added so the code above does work
 As of 0.11A, the 'rs' keyword is planned to be deprecated, and instead replaced with the new syntax and C standard
 As of 0.6A, there is a new keyword called 'rs' short for "Return stack"
 
-### including
-* Fixed bug where constants weren't being included [0.5.1A](version.md#051a)
-* Pre 0.1A
+### Control flow
+[0.12.2A](version.md#012a) Added while loops
+[0.12A](version.md#012a) Finally settled the syntax of ifs
+[0.11.11A](version.md#01111a) Added 'temporary' ifs
+[0.5A](version.md#05a) Disabled for revamping
+Pre 0.1A Added ifs
+Pre 0.1A Added elses
 
-**Syntax**
-```spl
-include "Path/To/File"
+**Syntax:**
+```sopl
+if (condition) {(Body)}
 ```
-Functions.spl:
-```spl
-extern "C" puts(ptr : int)
-func sayHello() {
-  printf("Hello World!")
+
+**Examples:**
+```sopl
+let a: int;
+let b: int;
+let c: bool;
+a = 5;
+b = 4;
+if a==b {
+  printf("Nice!"c);
+}
+else {
+  printf("Not nice!"c);
 }
 ```
-HelloWorld.spl:
-```spl
-include "./Functions.spl"
+```sopl
+let i: int;
+i = 0;
+while i < 10 {
+  printf("Hello World!"c);
+}
+```
+### Strings
+> Strings  -> Pre 0.1A 
+
+> CStrings -> 0.2A
+
+In sopl there are 2 different types of strings. There are:
+```
+cstrings 
+strings
+```
+With the main difference being that cstrings don't push their length after the pointer to the string unlike normal strings.
+To define a string we use "" (escaping is supported). To define a cstring just add the letter c after the string.
+
+**Examples**
+
+```sopl
 func main() {
-  sayHello()
+  printf("Hello World!"c)
+  printf("Foo Bar!"c)
 }
 ```
-### registers
 
+**[NOTE] It is generally recommended to use cstrings whenever possible if the function doesn't use the length as a parameter. In < 0.1A strings had to be pushed and then the length of them popped which is no longer sufficient and may cause your code to be inefficient**
+
+
+### Managing C functions and their return values
+
+SOPL is made to be compatible with the C functions and using them throughout your code is totally acceptable.
+To link with external C funcions you can use the 'extern' keyword. If a result is expected to be returned by the function, you can use the = before the function to assign it to a variable.
+
+**Example(s)**:
+```sopl
+extern "C" fopen(*char, *char);
+extern "C" fclose(ptr);
+func main(){
+  let f: ptr;
+  f = fopen("hello.txt"c, "w"c);
+  fwrite("Hello World!"c, 12, 1, f);
+  fclose(f);
+}
+```
+
+
+
+### Extern
+  * Changed syntax in [0.11A](version.md#011a)
+  * Added Files related in [0.7A](version.md#07a):
+    - [stdio.spl](src/C/stdio.spl)
+    - [stdlib.spl](src/C/stdlib.spl)
+  * Added in Pre 0.1A
+
+**Syntax**:
+```
+extern [TYPE] (name) <(extern contract)>;
+```
+Extern is a way to access outside features inside the language or link to functions from other languages such as IO implementations from C etc.
+It has to be noted here that using extern on its own can sometimes lead to unexpected behavior and
+might not be available for the current mode you are running in like if you try to link to standard C functions when you are in JAVA mode.
+
+Thats also a reason why externs are generally not recommended for direct use (although depending on your version it might be required to use them raw (currently its not **exactly** required - use stdio.spl, stdlib.spl directly instead of listing externs every time :D. If you want to implement any C library you can do that and share the information online)).
+
+Externs are really powerful and are generally really good to use for building things that require platform specific functions such as Windows applications etc.
+
+**Example(s)**:
+
+```
+extern "C" puts(*char : int); // Links with puts from C
+func main(){
+  puts("Hello World"c) // uses it to print a string to the console
+}
+```
+
+
+### Interrupts
+[0.4A](version.md#04a) Added interrupts
+  
+Interrupts are essential for anything you build on platforms such as linux if you don't want to use libc. Whilst they aren't useful as much on windows machines WSL could be used to make linux syscalls into something which can run on windows.
+
+To use interrupts you can do 'interrupt' followed by the number of the interrupt. So syscall (int 128) is 
+```sopl
+interrupt 128
+```
+
+### Registers
 * Added float registers and the last remaining r\<n\> registers in [0.11A](version.md#011a)
 * Added the majority of the registers Pre 0.1A
 
@@ -279,136 +434,17 @@ All of their sub types respectfully:
 
 Currently supported register operations:
 ```
-(REG1) + (REG2)  -> adds the two registers together 
-(REG1) - (REG2)  -> subtracts the second register from the first register 
-(REG1) * (REG2)  -> multiples the two registers     
+(REG1) +  (REG2)  -> adds the two registers together 
+(REG1) -  (REG2)  -> subtracts the second register from the first register 
+(REG1) *  (REG2)  -> multiples the two registers     
 (REG1) == (REG2) -> compares two registers 
 
-(REG1) = (Expression)  -> Moves the value of the expression to REG1
+(REG1) =  (Expression)  -> Moves the value of the expression to REG1
 (REG1) += (Expression)  -> Adds the value of the expression to REG1
 (REG1) -= (Expression)  -> Subtracts the value of the expression to REG1
 (REG1) *= (Expression)  -> Multiplies the value of the expression to REG1
 (REG1) /= (Expression)  -> Divides the value of the expression to REG1
 ```
-### managing C functions and their return values
-
-SOPL is made to be compatible with the C functions and using them throughout your code is totally acceptable.
-To link with external C funcions you can use the 'extern' keyword. For right now values are returned into the RAX register and you need to move them into your variable manually. (This is planned to change in the future)
 
 
-### strings
-> Strings  -> Pre 0.1A 
 
-> CStrings -> 0.2A
-
-In sopl there are 2 different types of strings. There are:
-```
-cstrings 
-strings
-```
-With the main difference being that cstrings don't push their length after the pointer to the string unlike normal strings.
-To define a string we use "" (escaping is supported). To define a cstring just add the letter c after the string.
-
-**Examples**
-
-```sopl
-func main() {
-  printf("Hello World!"c)
-  printf("Foo Bar!"c)
-}
-```
-
-**[NOTE] It is generally recommended to use cstrings whenever possible if the function doesn't use the length as a parameter. In < 0.1A strings had to be pushed and then the length of them popped which is no longer sufficient and may cause your code to be inefficient**
-
-
-### control flow
-[0.12A](version.md#012a) Finally settled the syntax of ifs
-[0.11.11A](version.md#01111a) Added 'temporary' ifs
-> If     -> Pre 0.1A
-
-> Else   -> Pre 0.1A
-
-**Syntax:**
-```sopl
-if (condition) {(Body)}
-```
-
-**Examples:**
-```sopl
-let a: int;
-let b: int;
-let c: bool;
-a = 5;
-b = 4;
-c = a==b;
-if RBX == RCX {
-  printf("Nice!"c);
-}
-else {
-  printf("Not nice!"c);
-}
-```
-
-
-### constants
-* 0.11.4A Added types for constants as well as casting
-* Pre 0.1A
-
-**Syntax:**
-```sopl
-const (name) = (your constant expersion goes here) ;
-```
-
-As in many other languages, Sopl also has a constant system. Constants are expressions that are evaluated at compile time and are therefor very useful for anything that can be evaluated at compile time. The name can be any normal name and the expression is a set of operations that the program can evaluate. The quickest way to understand how they work is to check out the examples:
-
-```sopl
-const World = "World"
-const HelloWorld = "Hello" World +      // Concatenates strings and expressions can use constants
-const A = 4;
-const B = 5;
-const C = A B + ;                       
-const HelloWorldNine = HelloWorld C + ; // Concatenates the integers and strings together
-```
-
-In a constants expression can only be things that can be evaluated at compile time, such as Strings, Integers, Longs and other constants. If you try to use something like a function it would tell you that it doesn't recognize it as a constant value. 
-
-### locals
-* 0.12A Added expressions
-* 0.11.6A Made local variables be on the stack and merged parameters with variables
-* Pre 0.1A
-  * Add  -> Pre 0.1A
-  * Set  -> Pre 0.1A
-  * (DEPRECATED) Push -> Pre 0.1A
-  * (DEPRECATED) Pop  -> Pre 0.1A
-
-**Syntax:**
-```sopl
-let (name): (type)
-```
-
-Local variables are a core part of any programming language. SOPL is no exception. Define a variable like this and then you can use it throughout your code later.
-**Example(s)**
-```sopl
-let a: int;
-let b: int;
-a = 5+4;
-b = 4+3;
-if a == b {
-  let c: int;
-  c = a+b;
-  printf("a=%d, b=%d, c=%d",a,b,c)
-}
-else {
-  printf("a=%d, b=%d and they are not equal!",a,b)
-}
-```
-
-### interrupts
-* 0.4A
-  
-Interrupts are essential for anything you build on platforms such as linux if you don't want to use libc. Whilst they aren't useful as much on windows machines WSL could be used to make linux syscalls into something which can run on windows.
-
-To use interrupts you can do 'interrupt' followed by the number of the interrupt. So syscall (int 128) is 
-```sopl
-interrupt 128
-```
