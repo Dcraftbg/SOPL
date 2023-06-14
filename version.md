@@ -39,6 +39,9 @@ Newest Version: [0.12.3A](#0123a)
   - [0.2A](#02a)
   - [0.1A](#01a)
 # Change Log
+ ## 0.12.4A
+   - Fixed minor bugs. Added 'result of' so now conditions are typechecked
+   - Removed all contents of std.spl as it is outdated
  ## 0.12.3A
    - Fixed minor bugs to do with 64 bit division and multiplication
    - Added examples for euler problems.

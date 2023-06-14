@@ -580,8 +580,36 @@ impl Expression {
             _ => false
         }
     }
-    fn result_of(&self,program: &CmdProgram,build: &BuildProgram,local_vars: &HashMap<String, LocalVariable>) -> Option<VarType> {
-        todo!()
+    fn result_of(&self,program: &CmdProgram,build: &BuildProgram, local_vars: &Vec<Locals>) -> Option<VarType> {
+        match self {
+            Self::val(v) => v.var_type_t(build, local_vars),
+            Self::expr(s) => {
+                if let Some(v1) = &s.left {
+                    let res1 = v1.result_of(program, build, local_vars);
+                    if let Some(v2) = &s.right {
+                        let res2 = v2.result_of(program, build, local_vars);
+                        if res1.is_some() && res2.is_some() && res1.as_ref().unwrap().weak_eq(&res2.as_ref().unwrap()) {
+                            res1
+                        }
+                        else if res1.is_none() {
+                            res2
+                        }
+                        else {
+                            panic!("Unreachable")
+                        }
+                    }
+                    else {
+                        res1
+                    }
+                }
+                else if let Some(v2) = &s.right {
+                    v2.result_of(program, build, local_vars)
+                }
+                else {
+                    panic!("Unreachable")
+                }
+            }
+        }
         // match self {
         //     Self::val(v) => {
         //         v.var_type(program, build, local_vars)?
@@ -2031,6 +2059,14 @@ enum OfP {
     // etc.
 }
 impl OfP { 
+    fn var_type_t(&self, build: &BuildProgram, local_vars: &Vec<Locals>) -> Option<VarType> {
+        match self {
+            Self::REGISTER(reg) => Some(reg.to_var_type()),
+            Self::CONST(v) => Some(v.to_type(build)[0].clone()),
+            Self::LOCALVAR(v) => Some(get_local(local_vars,v).unwrap().clone()),
+            Self::RESULT(f, _) => build.functions.get(f).unwrap().contract.Outputs.get(0).cloned()
+        }
+    }
     fn var_type(&self, build: &BuildProgram, local_vars: &HashMap<String, LocalVariable>) -> Option<VarType> {
         match self {
             Self::REGISTER(reg) => Some(reg.to_var_type()),
@@ -2207,6 +2243,9 @@ struct Function {
 
 #[derive(Debug, PartialEq, Clone)]
 enum ConstValueType {
+    BOOLEAN(bool),
+    CHAR(i8),
+    SHORT(i16),
     INT(i32),
     LONG(i64),
     STR(String, ProgramStringType),
@@ -2219,15 +2258,37 @@ struct ConstValue {
     loc: ProgramLocation
 }
 impl ConstValueType {
+    fn unwrap_int_data(&self) -> Option<i64> {
+        match self {
+            Self::INT(d) => Some(d.clone() as i64),
+            Self::LONG(d) => Some(d.clone() as i64),
+            Self::SHORT(d) => Some(d.clone() as i64),
+            Self::CHAR(d) => Some(d.clone() as i64),
+            Self::BOOLEAN(d) => Some(d.clone() as i64),
+            _ => None
+        }
+    }
+    fn unwrap_str_data(&self) -> Option<&String>  {
+        match self {
+            ConstValueType::STR(d, _) => Some(d),
+            _ => None
+        }
+    }
+    fn is_int(&self) -> bool {
+        match self {
+            Self::INT(_) | Self::LONG(_) | Self::SHORT(_) | Self::CHAR(_) | Self::BOOLEAN(_) | Self::PTR(_,_) => true,
+            _ => false
+        }
+    }
     fn weak_cast(&self, typ: &VarType) -> Option<ConstValueType> {
         match self {
             ConstValueType::INT(data) => {
                 match typ {
-                    VarType::CHAR => None,
-                    VarType::SHORT => None,
-                    VarType::BOOLEAN => None,
-                    VarType::INT => Some(self.clone()),
-                    VarType::LONG => Some(ConstValueType::LONG(data.clone() as i64)),
+                    VarType::CHAR           => Some(ConstValueType::CHAR(data.clone() as i8)),
+                    VarType::SHORT          => Some(ConstValueType::SHORT(data.clone() as i16)),
+                    VarType::BOOLEAN        => Some(ConstValueType::BOOLEAN(*data != 0)),
+                    VarType::INT            => Some(self.clone()),
+                    VarType::LONG           => Some(ConstValueType::LONG(data.clone() as i64)),
                     VarType::PTR(typ) => Some(ConstValueType::PTR(typ.clone(), data.clone() as i64)),
                     VarType::CUSTOM(_) => None,
                 }
@@ -2252,6 +2313,9 @@ impl ConstValueType {
             },
             ConstValueType::STR(_, _) => None,
             ConstValueType::PTR(_, _) => {None}
+            ConstValueType::BOOLEAN(_) => todo!(),
+            ConstValueType::CHAR(_) => todo!(),
+            ConstValueType::SHORT(_) => todo!(),
         }
     }
     fn to_var_type(&self) -> Option<VarType> {
@@ -2260,45 +2324,43 @@ impl ConstValueType {
             ConstValueType::LONG(_) => Some(VarType::LONG),
             ConstValueType::STR(_, typ) => if *typ == ProgramStringType::CSTR { Some(VarType::PTR(Ptr{ typ: PtrTyp::TYP(Box::new(VarType::CHAR)), inner_ref: 0})) } else { None },
             ConstValueType::PTR(typ, _) => Some(VarType::PTR(typ.clone())),
+            ConstValueType::BOOLEAN(_) => Some(VarType::BOOLEAN),
+            ConstValueType::CHAR(_)    => Some(VarType::CHAR),
+            ConstValueType::SHORT(_)   => Some(VarType::SHORT),
         }
     }
     fn is_eq_vartype(&self, vartyp: &VarType) -> bool {
         match self {
-            ConstValueType::INT(_) => vartyp.weak_eq(&VarType::INT),
-            ConstValueType::LONG(_) => vartyp.weak_eq(&VarType::LONG),
+            ConstValueType::INT(_)            => vartyp.weak_eq(&VarType::INT),
+            ConstValueType::LONG(_)           => vartyp.weak_eq(&VarType::LONG),
             ConstValueType::STR(_, typ) => if *typ == ProgramStringType::CSTR { vartyp.weak_eq(&VarType::PTR(Ptr {typ: PtrTyp::TYP(Box::new(VarType::CHAR)), inner_ref: 0})) } else {false},
             ConstValueType::PTR(typ, _) => vartyp.weak_eq(&VarType::PTR(typ.clone())),
+            ConstValueType::BOOLEAN(_)        => vartyp.weak_eq(&VarType::BOOLEAN),
+            ConstValueType::CHAR(_)           => todo!(),
+            ConstValueType::SHORT(_)          => todo!(),
         }
     }
     fn mul(&self, Other: &ConstValueType) -> Result<ConstValueType,String> {
         match self {
             ConstValueType::INT(val) => {
-                match Other {
-                    ConstValueType::INT(nval) => {
-                        return Ok(ConstValueType::INT(val*nval));
+                if let Some(v) = Other.unwrap_int_data() {
+                    if v <= i32::MAX as i64 && v >= i32::MIN as i64 {
+                        return Ok(ConstValueType::INT(*val*v as i32));
                     }
-                    ConstValueType::LONG(nval) => {
-                        return Ok(ConstValueType::LONG((*val as i64)*nval));
+                    else {
+                        return Err("Error: Value of operation overflows i32 limit!".to_string());    
                     }
-                    ConstValueType::STR(_nval, _) => {
-                        return Err("Error: Unexpected - operation on int and string".to_string());
-                    },
-                    ConstValueType::PTR(_,_) => { todo!("ConstValueType::PTR")}
+                }
+                else {
+                    return Err("Error: Unexpected - operation on int and string".to_string());
                 }
             }
             ConstValueType::LONG(val) => {
-                match Other {
-                    ConstValueType::INT(nval) => {
-                        return Ok(ConstValueType::LONG(val*(*nval as i64)));
-                    }
-                    ConstValueType::LONG(nval) => {
-                        return Ok(ConstValueType::LONG(val*nval));
-                    }
-                    ConstValueType::STR(_nval, _) => {
-                        return Err("Error: Unexpected * operation on long and string".to_string());
-                    },
-                    ConstValueType::PTR(_,_) => { todo!("ConstValueType::PTR")}
- 
+                if let Some(v) = Other.unwrap_int_data() {
+                    return Ok(ConstValueType::LONG(*val*v));
+                }
+                else {
+                    return Err("Error: Unexpected - operation on int and string".to_string());
                 }
             }
             ConstValueType::STR(_, _) => {
@@ -2309,6 +2371,33 @@ impl ConstValueType {
                 }
             },
             ConstValueType::PTR(_,_) => {todo!("ConstValueType::PTR")}
+            ConstValueType::BOOLEAN(_) => todo!(),
+            ConstValueType::CHAR(val) => {
+                if let Some(v) = Other.unwrap_int_data() {
+                    if v <= i8::MAX as i64 && v >= i8::MIN as i64 {
+                        return Ok(ConstValueType::CHAR(*val*v as i8));
+                    }
+                    else {
+                        return Err("Error: Value of operation overflows i32 limit!".to_string());    
+                    }
+                }
+                else {
+                    return Err("Error: Unexpected - operation on int and string".to_string());
+                }
+            },
+            ConstValueType::SHORT(val) => {
+                if let Some(v) = Other.unwrap_int_data() {
+                    if v <= i16::MAX as i64 && v >= i16::MIN as i64 {
+                        return Ok(ConstValueType::SHORT(*val*v as i16));
+                    }
+                    else {
+                        return Err("Error: Value of operation overflows i32 limit!".to_string());    
+                    }
+                }
+                else {
+                    return Err("Error: Unexpected - operation on int and string".to_string());
+                }
+            },
         }
     }
     fn sub(&self, Other: &ConstValueType) -> Result<ConstValueType,String> {
@@ -2325,6 +2414,9 @@ impl ConstValueType {
                         return Err("Error: Unexpected - operation on int and string".to_string());
                     },
                     ConstValueType::PTR(_,_) => { todo!("ConstValueType::PTR")}
+                    ConstValueType::BOOLEAN(_) => todo!(),
+                    ConstValueType::CHAR(_) => todo!(),
+                    ConstValueType::SHORT(_) => todo!(),
  
                 }
             }
@@ -2340,6 +2432,9 @@ impl ConstValueType {
                         return Err("Error: Unexpected - operation on long and string".to_string());
                     },
                     ConstValueType::PTR(_,_) => { todo!("ConstValueType::PTR")}
+                    ConstValueType::BOOLEAN(_) => todo!(),
+                    ConstValueType::CHAR(_) => todo!(),
+                    ConstValueType::SHORT(_) => todo!(),
  
                 }
             }
@@ -2351,6 +2446,9 @@ impl ConstValueType {
                 }
             },
             ConstValueType::PTR(_,_) => { todo!("ConstValueType::PTR")}
+            ConstValueType::BOOLEAN(_) => todo!(),
+            ConstValueType::CHAR(_) => todo!(),
+            ConstValueType::SHORT(_) => todo!(),
              
         }
     }
@@ -2368,6 +2466,9 @@ impl ConstValueType {
                         return Ok(ConstValueType::STR(val.to_string()+nval, typ.clone()));
                     },
                     ConstValueType::PTR(_,_) => { todo!("ConstValueType::PTR")}
+                    ConstValueType::BOOLEAN(_) => todo!(),
+                    ConstValueType::CHAR(_) => todo!(),
+                    ConstValueType::SHORT(_) => todo!(),
  
                 }
             }
@@ -2383,6 +2484,9 @@ impl ConstValueType {
                         return Ok(ConstValueType::STR(val.to_string()+nval, typ.clone()));
                     },
                     ConstValueType::PTR(_,_) => { todo!("ConstValueType::PTR")}
+                    ConstValueType::BOOLEAN(_) => todo!(),
+                    ConstValueType::CHAR(_) => todo!(),
+                    ConstValueType::SHORT(_) => todo!(),
  
                 }
             }
@@ -2399,10 +2503,16 @@ impl ConstValueType {
                         return Ok(ConstValueType::STR(out,typ.clone()));
                     },
                     ConstValueType::PTR(_,_) => { todo!("ConstValueType::PTR")}
+                    ConstValueType::BOOLEAN(_) => todo!(),
+                    ConstValueType::CHAR(_) => todo!(),
+                    ConstValueType::SHORT(_) => todo!(),
                      
                 }
             },
             ConstValueType::PTR(_,_) => { todo!("ConstValueType::PTR")}
+            ConstValueType::BOOLEAN(_) => todo!(),
+            ConstValueType::CHAR(_) => todo!(),
+            ConstValueType::SHORT(_) => todo!(),
              
         }
     }
@@ -2560,9 +2670,9 @@ impl VarType {
                     _ => false
                 }
             }
-            Self::INT | Self::LONG=> {
+            Self::INT | Self::LONG | Self::SHORT | Self::CHAR | Self::BOOLEAN => {
                 match other {
-                    Self::INT | Self::LONG | Self::SHORT => true,
+                    Self::INT | Self::LONG | Self::SHORT | Self::CHAR | Self::BOOLEAN  => true,
                     _ => false
                 }
             }
@@ -2600,6 +2710,16 @@ enum NormalScopeType {
     ELSE,
     WHILE(Expression),
     EMPTY
+}
+impl NormalScopeType {
+    fn unwrap_expr(&self) -> &Expression {
+        match self {
+            NormalScopeType::IF(c) => c,
+            NormalScopeType::ELSE => panic!("This should be unreachable"),
+            NormalScopeType::WHILE(c) => c,
+            NormalScopeType::EMPTY => panic!("This should be unreachable"),
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -3422,6 +3542,9 @@ fn parse_token_to_build_inst(token: Token,lexer: &mut Lexer, program: &mut CmdPr
                         ConstValueType::PTR(typ,v) => { 
                             RawConstValue {typ: RawConstValueType::PTR(typ, v), loc: val.loc}
                         }
+                        ConstValueType::BOOLEAN(_) => todo!(),
+                        ConstValueType::CHAR(_) => todo!(),
+                        ConstValueType::SHORT(_) => todo!(),
 
                     };
                     if let Some(constdef) = build.constdefs.get(&name) {
@@ -4238,6 +4361,7 @@ fn nasm_x86_64_handle_scope(f: &mut File, build: &BuildProgram, program: &CmdPro
             },
             Instruction::EXPAND_SCOPE(s) => nasm_x86_64_handle_scope(f, build, program, TCScopeType::NORMAL(&s),local_vars.clone(),stack_size,func_stack_begin,inst_count)?,
             Instruction::EXPAND_IF_SCOPE(s)   => {
+                let binst = inst_count.clone();
                 let condition = match s.typ {
                     NormalScopeType::IF(ref c) => c,
                     _ => panic!("Unreachable")
@@ -4265,7 +4389,7 @@ fn nasm_x86_64_handle_scope(f: &mut File, build: &BuildProgram, program: &CmdPro
                         },
                         OfP::RESULT(_, _) => todo!(),
                     }
-                    writeln!(f, "   jnz .IF_SCOPE_{}",inst_count)?;
+                    writeln!(f, "   jnz .IF_SCOPE_{}",binst)?;
                 }
                 else {
                     let val = condition.unwrap_expr();
@@ -4277,7 +4401,7 @@ fn nasm_x86_64_handle_scope(f: &mut File, build: &BuildProgram, program: &CmdPro
                             writeln!(f, "   mov {}, {}",tmp.to_string(),oreg1[0].to_string())?;
                             let oreg2 = val.right.as_ref().unwrap().LEIRnasm(vec![Register::RAX, Register::RBX, Register::RCX], f, program, build, &local_vars, stack_size, loc)?;
                             writeln!(f, "   cmp {}, {}",tmp.to_string(),oreg2[0].to_string())?;
-                            writeln!(f, "   jz .IF_SCOPE_{}",inst_count)?;
+                            writeln!(f, "   jz .IF_SCOPE_{}",binst)?;
                         },
                         Op::NEQ  => {
                             let oreg1 = val.left.as_ref().unwrap().LEIRnasm(vec![Register::RAX, Register::RBX, Register::RCX], f, program, build, &local_vars, stack_size, loc)?;
@@ -4285,7 +4409,7 @@ fn nasm_x86_64_handle_scope(f: &mut File, build: &BuildProgram, program: &CmdPro
                             writeln!(f, "   mov {}, {}",tmp.to_string(),oreg1[0].to_string())?;
                             let oreg2 = val.right.as_ref().unwrap().LEIRnasm(vec![Register::RAX, Register::RBX, Register::RCX], f, program, build, &local_vars, stack_size, loc)?;
                             writeln!(f, "   cmp {}, {}",tmp.to_string(),oreg2[0].to_string())?;
-                            writeln!(f, "   jnz .IF_SCOPE_{}",inst_count)?;
+                            writeln!(f, "   jnz .IF_SCOPE_{}",binst)?;
                         },
                         Op::GT   => {
                             let oreg1 = val.left.as_ref().unwrap().LEIRnasm(vec![Register::RAX, Register::RBX, Register::RCX], f, program, build, &local_vars, stack_size, loc)?;
@@ -4293,7 +4417,7 @@ fn nasm_x86_64_handle_scope(f: &mut File, build: &BuildProgram, program: &CmdPro
                             writeln!(f, "   mov {}, {}",tmp.to_string(),oreg1[0].to_string())?;
                             let oreg2 = val.right.as_ref().unwrap().LEIRnasm(vec![Register::RAX, Register::RBX, Register::RCX], f, program, build, &local_vars, stack_size, loc)?;
                             writeln!(f, "   cmp {}, {}",tmp.to_string(),oreg2[0].to_string())?;
-                            writeln!(f, "   jg .IF_SCOPE_{}",inst_count)?;
+                            writeln!(f, "   jg .IF_SCOPE_{}",binst)?;
                         },
                         Op::GTEQ => {
                             let oreg1 = val.left.as_ref().unwrap().LEIRnasm(vec![Register::RAX, Register::RBX, Register::RCX], f, program, build, &local_vars, stack_size, loc)?;
@@ -4301,7 +4425,7 @@ fn nasm_x86_64_handle_scope(f: &mut File, build: &BuildProgram, program: &CmdPro
                             writeln!(f, "   mov {}, {}",tmp.to_string(),oreg1[0].to_string())?;
                             let oreg2 = val.right.as_ref().unwrap().LEIRnasm(vec![Register::RAX, Register::RBX, Register::RCX], f, program, build, &local_vars, stack_size, loc)?;
                             writeln!(f, "   cmp {}, {}",tmp.to_string(),oreg2[0].to_string())?;
-                            writeln!(f, "   jge .IF_SCOPE_{}",inst_count)?;
+                            writeln!(f, "   jge .IF_SCOPE_{}",binst)?;
                         },
                         Op::LT   => {
                             let oreg1 = val.left.as_ref().unwrap().LEIRnasm(vec![Register::RAX, Register::RBX, Register::RCX], f, program, build, &local_vars, stack_size, loc)?;
@@ -4309,7 +4433,7 @@ fn nasm_x86_64_handle_scope(f: &mut File, build: &BuildProgram, program: &CmdPro
                             writeln!(f, "   mov {}, {}",tmp.to_string(),oreg1[0].to_string())?;
                             let oreg2 = val.right.as_ref().unwrap().LEIRnasm(vec![Register::RAX, Register::RBX, Register::RCX], f, program, build, &local_vars, stack_size, loc)?;
                             writeln!(f, "   cmp {}, {}",tmp.to_string(),oreg2[0].to_string())?;
-                            writeln!(f, "   jl .IF_SCOPE_{}",inst_count)?;
+                            writeln!(f, "   jl .IF_SCOPE_{}",binst)?;
                         },
                         Op::LTEQ => {
                             let oreg1 = val.left.as_ref().unwrap().LEIRnasm(vec![Register::RAX, Register::RBX, Register::RCX], f, program, build, &local_vars, stack_size, loc)?;
@@ -4317,7 +4441,7 @@ fn nasm_x86_64_handle_scope(f: &mut File, build: &BuildProgram, program: &CmdPro
                             writeln!(f, "   mov {}, {}",tmp.to_string(),oreg1[0].to_string())?;
                             let oreg2 = val.right.as_ref().unwrap().LEIRnasm(vec![Register::RAX, Register::RBX, Register::RCX], f, program, build, &local_vars, stack_size, loc)?;
                             writeln!(f, "   cmp {}, {}",tmp.to_string(),oreg2[0].to_string())?;
-                            writeln!(f, "   jle .IF_SCOPE_{}",inst_count)?;
+                            writeln!(f, "   jle .IF_SCOPE_{}",binst)?;
                         },
                         Op::NOT  => todo!(),
                         _ => panic!("Unreachable")
@@ -4332,12 +4456,14 @@ fn nasm_x86_64_handle_scope(f: &mut File, build: &BuildProgram, program: &CmdPro
                         _ => {}
                     }
                 }
-                let binst = inst_count.clone();
+                
+                println!("Binst: {}",binst);
                 writeln!(f, "   jmp .IF_SCOPE_END_{}",binst)?;
                 writeln!(f, "   .IF_SCOPE_{}:",binst)?;
                 *inst_count += 1;
                 nasm_x86_64_handle_scope(f, build, program, TCScopeType::NORMAL(&s), local_vars.clone(), stack_size,func_stack_begin,inst_count)?;
                 *inst_count -= 1;
+                println!("Binst: {}",binst);
                 writeln!(f, "   .IF_SCOPE_END_{}:",binst)?;
                 //TODO: Implement actual conditions
             },
@@ -4762,9 +4888,17 @@ fn type_check_scope(build: &BuildProgram, program: &CmdProgram, scope: TCScopeTy
             Instruction::SCOPEEND            => {},
             Instruction::INTERRUPT(_)        => {},
             Instruction::EXPAND_SCOPE(s)       => if type_check_scope(build, program, TCScopeType::NORMAL(&s), currentLocals) { hasFoundRet = true},
-            Instruction::EXPAND_IF_SCOPE(s)    => if type_check_scope(build, program, TCScopeType::NORMAL(&s), currentLocals) { hasFoundRet = true}, //TODO: Typecheck condition
+            Instruction::EXPAND_IF_SCOPE(s)    => {
+                let res = s.typ.unwrap_expr().result_of(program, build, &currentLocals);
+                typ_assert!(loc,res.is_some() && res.as_ref().unwrap().weak_eq(&VarType::BOOLEAN), "Error: Expected result of expression to be boolean but found: {}",if let Some(res) = res { res.to_string(false)} else { "None".to_owned()});
+                if type_check_scope(build, program, TCScopeType::NORMAL(&s), currentLocals) { hasFoundRet = true} //TODO: Typecheck condition
+            }
             Instruction::EXPAND_ELSE_SCOPE(s)  => if type_check_scope(build, program, TCScopeType::NORMAL(&s), currentLocals) { hasFoundRet = true},
-            Instruction::EXPAND_WHILE_SCOPE(s) => if type_check_scope(build, program, TCScopeType::NORMAL(&s), currentLocals) { hasFoundRet = true},
+            Instruction::EXPAND_WHILE_SCOPE(s) => {
+                let res = s.typ.unwrap_expr().result_of(program, build, &currentLocals);
+                typ_assert!(loc,res.is_some() && res.as_ref().unwrap().weak_eq(&VarType::BOOLEAN), "Error: Expected result of expression to be boolean but found: {}",if let Some(res) = res { res.to_string(false)} else { "None".to_owned()});
+                if type_check_scope(build, program, TCScopeType::NORMAL(&s), currentLocals) { hasFoundRet = true}
+            }
             //TODO: add typechecking for this:
             Instruction::MORETHAN(_, _)       => {},
             Instruction::LESSTHAN(_, _)       => {},

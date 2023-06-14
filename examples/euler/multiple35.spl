@@ -5,7 +5,6 @@ func main() {
     i = 0;
     sum = 0;
     while i < 1000 {
-        //printf("Iter: %d\n"c,i);
         if i % 3 == 0 {
             sum += i;
         }
