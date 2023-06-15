@@ -5,9 +5,9 @@ func main() {
     let b: long;
     a = 8;
     b = 4;
-    a /= b;
-    printf("Division: %ld\n"c, a)
-    printf("Mod: %ld\n"c, b)
+    a = a/b;
+    printf("Division: %ld\n", a)
+    printf("Mod: %ld\n", b)
 
     // let a: long
     // let b: long

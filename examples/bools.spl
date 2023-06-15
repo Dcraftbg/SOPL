@@ -6,7 +6,7 @@ func main(){
     b = 5;
     c = 4;
     a = b == c;
-    printf("b=%d, c=%d b==c: %x\n"c,b,c,a);
+    printf("b=%d, c=%d b==c: %x\n",b,c,a);
     a = b >= c;
-    printf("b=%d, c=%d b>=c: %x\n"c,b,c,a);
+    printf("b=%d, c=%d b>=c: %x\n",b,c,a);
 }

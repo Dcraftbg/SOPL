@@ -1,4 +1,0 @@
-extern "C" puts(ptr : int);
-func main() {
-    puts("Hello World!"c)
-}

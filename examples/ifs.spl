@@ -6,9 +6,9 @@ func main(){
     a = 5;
     b = 5;
     if a==b {
-        printf("Al: %x\n"c,1);
+        printf("Al: %x\n",1);
     }
     else {
-        puts("Bye!!!"c);
+        puts("Bye!!!");
     }
 }

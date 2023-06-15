@@ -2,7 +2,9 @@
 
 Newest Version: [0.12.3A](#0123a)
 # Manual:
-  - [0.12.3A](#0123a) 
+  - [0.12.5A](#0125a) 
+    - [0.12.4A](#0124a) 
+    - [0.12.3A](#0123a) 
     - [0.12.2A](#0122a) 
     - [0.12.1A](#0121a)
     - [0.12A](#012a)
@@ -39,6 +41,9 @@ Newest Version: [0.12.3A](#0123a)
   - [0.2A](#02a)
   - [0.1A](#01a)
 # Change Log
+ ## 0.12.5A
+   - Changed CStrings to now be automatically in place of sized strings. AKA "Hello" is no longer a sized string but instead a normal cstring.
+   - Added ability to have the 's' letter after the string to make it sized
  ## 0.12.4A
    - Fixed minor bugs. Added 'result of' so now conditions are typechecked
    - Removed all contents of std.spl as it is outdated

@@ -1102,7 +1102,7 @@ impl Token {
     }
     fn unwrap_string(&self) -> Option<&String> {
         match &self.typ {
-            TokenType::StringType(data) => Some(data),
+            TokenType::StringType(data) | TokenType::CStringType(data) => Some(data),
             _ => None
         }
     }
@@ -1248,8 +1248,13 @@ impl Iterator for Lexer<'_> {
                             self.currentLocation.character += 1;
                             return Some(Token { typ: TokenType::CStringType(outstr), location: self.currentLocation.clone() });
                         }
-                        else {
+                        else if self.cchar() == 's' {
+                            self.cursor += 1;
+                            self.currentLocation.character += 1;
                             return Some(Token { typ: TokenType::StringType(outstr), location: self.currentLocation.clone() });
+                        }
+                        else {
+                            return Some(Token { typ: TokenType::CStringType(outstr), location: self.currentLocation.clone() });
                         }
                     }
                 }
@@ -3250,7 +3255,7 @@ fn parse_token_to_build_inst(token: Token,lexer: &mut Lexer, program: &mut CmdPr
                             }
                             build.externals.insert(Word,External { typ: ExternalType::RawExternal, loc: externType.location.clone(), contract});
                         }
-                        TokenType::StringType(Type) => {
+                        TokenType::StringType(Type) | TokenType::CStringType(Type) => {
                             match Type.as_str() {
                                 "C" => {
                                     let externWord = lexer.next();
@@ -3417,7 +3422,7 @@ fn parse_token_to_build_inst(token: Token,lexer: &mut Lexer, program: &mut CmdPr
                 IntrinsicType::INCLUDE => {
                     let includeName = par_expect!(lexer.currentLocation,lexer.next(),"Error: abruptly ran out of tokens");
                     match includeName.typ {
-                        TokenType::StringType(path) => {
+                        TokenType::StringType(path) | TokenType::CStringType(path) => {
                             let p = PathBuf::from(&program.path);
                             let p = p.parent().unwrap();
                             let include_p  = PathBuf::from(path);
@@ -4682,6 +4687,7 @@ fn to_nasm_x86_64(build: &mut BuildProgram, program: &CmdProgram) -> io::Result<
             writeln!(&mut f,"global {}{}",program.architecture.func_prefix,function_name)?;
         }
         else {
+            writeln!(&mut f,"global {}{}",program.architecture.func_prefix,function_name)?;
             // if program.in_mode == OptimizationMode::DEBUG || !program.remove_unused_functions || optimization.usedFuncs.contains(function_name){
             //     writeln!(&mut f,"global {}{}",program.architecture.func_prefix,function_name)?;
             // }
@@ -4712,7 +4718,7 @@ fn to_nasm_x86_64(build: &mut BuildProgram, program: &CmdProgram) -> io::Result<
         
         if function_name == "main" {
             writeln!(&mut f, "{}{}:",program.architecture.func_prefix,function_name)?;
-            writeln!(&mut f, "   sub rsp, {}",program.architecture.bits/8)?;
+            //writeln!(&mut f, "   sub rsp, {}",program.architecture.bits/8)?;
         }
         else {
             writeln!(&mut f, "{}{}:",program.architecture.func_prefix,function_name)?;
@@ -4725,7 +4731,7 @@ fn to_nasm_x86_64(build: &mut BuildProgram, program: &CmdProgram) -> io::Result<
                 argsize += local.get_size(program);
             }
             argsize += argsize%8;
-            writeln!(&mut f, "   add rsp, {}",8+argsize)?;
+            writeln!(&mut f, "   add rsp, {}",argsize)?;
             writeln!(&mut f, "   xor rax,rax")?;
             writeln!(&mut f, "   ret")?;
         }
@@ -4763,7 +4769,7 @@ impl TCScopeType<'_> {
             Self::FUNCTION(name) => {
                 &build.functions.get(name).as_ref().unwrap().body
             }
-            Self::NORMAL(s) => {
+            Self::NORMAL(s) => {                
                 &s.body
             }
         }
@@ -5284,7 +5290,7 @@ fn main() {
 - [ ] TODO: Add more useful examples
 - [ ] TODO: Add some quality of life things such as __FILE__ __LINE__
 - [ ] TODO: Update README.md flags
-- [ ] TODO: Push to master
+- [x] TODO: Push to master
 
 - [ ] TODO: Make it so that get_body returns None if scope has not been opened yet
 - [ ] TODO: Remove some dependencies like UUID since we don't exactly need it (also bench mark it to see the improvement in speed!)

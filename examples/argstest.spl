@@ -7,5 +7,5 @@ func main(argc: int,argv: ptr) {
     // RAX 8 *
     // argc1 = RAX
     // argc1 = (argc + 1) * 8
-    printf("Amount of arguments: %d\n"c, argc);
+    printf("Amount of arguments: %d\n", argc);
 }

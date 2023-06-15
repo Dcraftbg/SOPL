@@ -1,6 +1,16 @@
-extern "C" MessageBox(ptr, ptr, ptr, int : int);
+extern "C" MessageBoxA(ptr, ptr, ptr, int : int);
+extern "C" puts(*char);
+extern "C" printf(*char, int);
 const NULL: long = 0;
 const nullptr: ptr = cast<ptr>(NULL);
-func WinMain(){
-    MessageBox(nullptr, "Hello World!"c, "Hello!"c, 0);
+const MB_YESNO: int = 0x00000004;
+func main(){
+    let result: int;
+    result = MessageBoxA(nullptr, "Hello World!", "Hello!", MB_YESNO);
+    if result == 6 {
+        puts("Hello World!");
+    }
+    else {
+        puts("Goodbye World!");
+    }
 }

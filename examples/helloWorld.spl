@@ -3,5 +3,5 @@ func printstr(a: *char) {
     puts(a)
 }
 func main() {
-    printstr("Hello World!"c)
+    printstr("Hello World!")
 }

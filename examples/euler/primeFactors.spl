@@ -24,8 +24,8 @@ func primeFactMax(num: long : long){
 }
 func main(){
     let result: long;
-    puts("Began"c);
+    puts("Began");
     //600851475143l is way too huge and gets absolutely destroyed
     result = primeFactMax(600851475143l);
-    printf("Result: %lld\n"c,result);
+    printf("Result: %lld\n",result);
 }

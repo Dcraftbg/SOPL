@@ -287,6 +287,7 @@ while i < 10 {
 }
 ```
 ### Strings
+> Changed Strings to automatically be CStrings and added s as a way to have sized strings once again
 > Strings  -> Pre 0.1A 
 
 > CStrings -> 0.2A
@@ -297,14 +298,14 @@ cstrings
 strings
 ```
 With the main difference being that cstrings don't push their length after the pointer to the string unlike normal strings.
-To define a string we use "" (escaping is supported). To define a cstring just add the letter c after the string.
+To define a cstring we use "" (escaping is supported). To define a sized string just add the letter s after the string.
 
 **Examples**
 
 ```sopl
 func main() {
-  printf("Hello World!"c)
-  printf("Foo Bar!"c)
+  printf("Hello World!")
+  printf("Foo Bar!")
 }
 ```
 
@@ -322,8 +323,8 @@ extern "C" fopen(*char, *char);
 extern "C" fclose(ptr);
 func main(){
   let f: ptr;
-  f = fopen("hello.txt"c, "w"c);
-  fwrite("Hello World!"c, 12, 1, f);
+  f = fopen("hello.txt", "w");
+  fwrite("Hello World!", 12, 1, f);
   fclose(f);
 }
 ```

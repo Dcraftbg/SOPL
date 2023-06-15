@@ -8,5 +8,5 @@ func main(){
     b = 4;
     c = 5;
     d = a+b*c;
-    printf("d=%d\n"c,d);
+    printf("d=%d\n",d);
 }

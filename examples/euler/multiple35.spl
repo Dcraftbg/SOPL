@@ -15,5 +15,5 @@ func main() {
         }
         i += 1;
     }
-    printf("Sum: %d\n"c, sum);
+    printf("Sum: %d\n", sum);
 }

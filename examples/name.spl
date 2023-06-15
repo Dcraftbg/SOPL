@@ -21,10 +21,10 @@ func main() {
     malloc(NAMELEN)
     name = RAX
     memset(name, 0, NAMELEN);
-    printf("What is your name? "c);
+    printf("What is your name? ");
     gets(name);
-    printf("Hello "c);
+    printf("Hello ");
     printf(name);
-    printf("!\n"c);
+    printf("!\n");
     free(name)
 }

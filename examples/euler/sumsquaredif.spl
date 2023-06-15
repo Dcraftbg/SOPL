@@ -15,9 +15,9 @@ func main(){
         }
         sq_sum = sq_sum*sq_sum;
     }
-    printf("sum_sq: %d\n"c,sum_sq);
-    printf("sq_sum: %d\n"c,sq_sum);
+    printf("sum_sq: %d\n",sum_sq);
+    printf("sq_sum: %d\n",sq_sum);
     let result: int;
     result = sq_sum - sum_sq;
-    printf("sq_sum-sum_sq: %d\n"c,result);
+    printf("sq_sum-sum_sq: %d\n",result);
 }
