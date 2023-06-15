@@ -1,8 +1,7 @@
 extern "C" printf(*char, long : int);
 extern "C" puts(*char);
 func primeFactMax(num: long : long){
-    let i: long;
-    i = 2l;
+    let i: long = 2l;
     //puts("Here!"c);
     //printf("Number: %lld\n"c,num);
     //printf("I: %lld\n"c,i);

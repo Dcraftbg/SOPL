@@ -322,8 +322,7 @@ To link with external C funcions you can use the 'extern' keyword. If a result i
 extern "C" fopen(*char, *char);
 extern "C" fclose(ptr);
 func main(){
-  let f: ptr;
-  f = fopen("hello.txt", "w");
+  let f: ptr = fopen("hello.txt", "w");
   fwrite("Hello World!", 12, 1, f);
   fclose(f);
 }

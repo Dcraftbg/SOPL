@@ -1,13 +1,10 @@
 const num: int = 100;
 extern "C" printf(*char, int);
 func main(){
-    let sum_sq: int;
-    let sq_sum: int;
-    sum_sq = 0;
-    sq_sum = 0;
+    let sum_sq: int = 0;
+    let sq_sum: int = 0;
     {
-        let i: int;
-        i = 0;
+        let i: int = 0;
         while i <= num {
             sum_sq += i*i;
             sq_sum += i;
@@ -17,7 +14,6 @@ func main(){
     }
     printf("sum_sq: %d\n",sum_sq);
     printf("sq_sum: %d\n",sq_sum);
-    let result: int;
-    result = sq_sum - sum_sq;
+    let result: int = sq_sum - sum_sq;
     printf("sq_sum-sum_sq: %d\n",result);
 }

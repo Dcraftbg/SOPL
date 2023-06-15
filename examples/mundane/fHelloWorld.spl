@@ -2,8 +2,7 @@ extern "C" fopen(ptr, ptr : ptr);
 extern "C" fwrite(ptr,long,long,ptr : long);
 extern "C" fclose(ptr : int);
 func main() {
-    let f: ptr;
-    f = fopen("hello.txt"c,"w"c)
-    fwrite("Hello World!", 1, f);
+    let f: ptr = fopen("hello.txt","w");
+    fwrite("Hello World!",12, 1, f);
     fclose(f);
 }

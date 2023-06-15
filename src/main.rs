@@ -1117,6 +1117,15 @@ struct Lexer<'a> {
 }
 
 impl<'a> Lexer<'a> {
+    fn is_newline(&mut self) -> bool {
+        if let Some(c) = self.cchar_s() {
+            c=='\n' || c=='\r'
+        }
+        else {
+            true
+        }
+
+    }
     fn trim_left(&mut self) -> bool {
         if !self.is_not_empty(){
             return false;
@@ -3567,7 +3576,7 @@ fn parse_token_to_build_inst(token: Token,lexer: &mut Lexer, program: &mut CmdPr
                     let nametok = par_expect!(lexer.currentLocation, lexer.next(), "Error: abruptly ran out of tokens for Let");
                     let loc = nametok.location.clone();
                     match nametok.typ {
-                        TokenType::WordType(name) => {
+                        TokenType::WordType(ref name) => {
                             par_assert!(loc, !build.contains_symbol(&name), "Error: Redifinition of existing symbol {}",name);
                             par_assert!(token, scopeStack.len() > 0 && getTopMut(scopeStack).unwrap().body_is_some(), "Error: Unexpected multiply intrinsic outside of scope! Scopes of type {} do not support instructions!",getTopMut(scopeStack).unwrap().typ.to_string(false));
                             let currentScope = getTopMut(scopeStack).unwrap();
@@ -3577,7 +3586,7 @@ fn parse_token_to_build_inst(token: Token,lexer: &mut Lexer, program: &mut CmdPr
                             match typ.typ {
                                 TokenType::Definition(def) => {
                                     currentLocals.last_mut().unwrap().insert(name.clone(), def);
-                                    currentScope.body_unwrap_mut().unwrap().push((lexer.currentLocation.clone(),Instruction::DEFVAR(name)))
+                                    currentScope.body_unwrap_mut().unwrap().push((lexer.currentLocation.clone(),Instruction::DEFVAR(name.clone())))
                                 }
                                 _ => {
                                     par_error!(typ, "Error: unexpected token type in let definition. Expected VarType but found {}",typ.typ.to_string(false))
@@ -3587,6 +3596,21 @@ fn parse_token_to_build_inst(token: Token,lexer: &mut Lexer, program: &mut CmdPr
                         _ => {
                             par_error!(nametok, "Unexpected name type, Expected Word but found {}", nametok.typ.to_string(false))
                         }
+                    }
+                    if !lexer.is_newline() {
+                        let ntok = par_expect!(lexer.currentLocation, lexer.next(), "Error: abruptly ran out of tokens for Let set instruction");
+                        if ntok.typ==TokenType::IntrinsicType(IntrinsicType::DOTCOMA) { return }
+                        par_assert!(ntok,ntok.typ==TokenType::SETOperation(SetOp::SET),"Error: Expected set or dotcoma but found something else!");
+                        let body: Vec<Token> = lexer.map_while(|t| {
+                            if t.typ == TokenType::IntrinsicType(IntrinsicType::DOTCOMA) {
+                                None
+                            }
+                            else{
+                                Some(t)
+                            }
+                        }).collect();
+                        let currentScope = getTopMut(scopeStack).unwrap();
+                        currentScope.body_unwrap_mut().unwrap().push((lexer.currentLocation.clone(),Instruction::MOV(OfP::LOCALVAR(nametok.unwrap_word().unwrap().clone()),tokens_to_expression(&body, build, program, &currentLocals))))
                     }
                 },
                 IntrinsicType::INTERRUPT => {
@@ -4165,6 +4189,7 @@ fn nasm_x86_64_load_args(f: &mut File, scope: &TCScopeType, build: &BuildProgram
     Ok(offset)
 }
 fn nasm_x86_64_handle_scope(f: &mut File, build: &BuildProgram, program: &CmdProgram, scope: TCScopeType, mut local_vars: HashMap<String, LocalVariable>, mut stack_size: usize, func_stack_begin: usize, inst_count: &mut usize) -> io::Result<()> {
+    *inst_count += 1;
     let expect_loc_t = LinkedHashMap::new();
     let contract_loc_t = FunctionContract { Inputs: LinkedHashMap::new(), Outputs: Vec::new()};
     let expect_locals = scope.get_locals(build).unwrap_or(&expect_loc_t);
@@ -4462,13 +4487,13 @@ fn nasm_x86_64_handle_scope(f: &mut File, build: &BuildProgram, program: &CmdPro
                     }
                 }
                 
-                println!("Binst: {}",binst);
+                
                 writeln!(f, "   jmp .IF_SCOPE_END_{}",binst)?;
                 writeln!(f, "   .IF_SCOPE_{}:",binst)?;
                 *inst_count += 1;
                 nasm_x86_64_handle_scope(f, build, program, TCScopeType::NORMAL(&s), local_vars.clone(), stack_size,func_stack_begin,inst_count)?;
                 *inst_count -= 1;
-                println!("Binst: {}",binst);
+                
                 writeln!(f, "   .IF_SCOPE_END_{}:",binst)?;
                 //TODO: Implement actual conditions
             },
@@ -4860,10 +4885,30 @@ fn type_check_scope(build: &BuildProgram, program: &CmdProgram, scope: TCScopeTy
                     }
                 }
             },
-            Instruction::ADDSET(_, _)           => {},
-            Instruction::SUBSET(_, _)           => {},
-            Instruction::MULSET(_, _)           => {},
-            Instruction::DIVSET(_, _)           => {},
+            Instruction::ADDSET(o, e)           => {
+                let ot = o.var_type_t(build, &currentLocals);
+                let et = e.result_of(program, build, &currentLocals);
+                typ_assert!(loc,ot.is_some() && et.is_some(), "Error: Expected result but found nothing!");
+                typ_assert!(loc,ot.as_ref().unwrap().weak_eq(&et.as_ref().unwrap()), "Error: Types did not match Expected: {} but found {}",ot.unwrap().to_string(false),et.unwrap().to_string(false));
+            },
+            Instruction::SUBSET(o, e)           => {
+                let ot = o.var_type_t(build, currentLocals);
+                let et = e.result_of(program, build, currentLocals);
+                typ_assert!(loc,ot.is_some() && et.is_some(), "Error: Expected result but found nothing!");
+                typ_assert!(loc,ot.as_ref().unwrap().weak_eq(&et.as_ref().unwrap()), "Error: Types did not match Expected: {} but found {}",ot.unwrap().to_string(false),et.unwrap().to_string(false));
+            },
+            Instruction::MULSET(o, e)           => {
+                let ot = o.var_type_t(build, currentLocals);
+                let et = e.result_of(program, build, currentLocals);
+                typ_assert!(loc,ot.is_some() && et.is_some(), "Error: Expected result but found nothing!");
+                typ_assert!(loc,ot.as_ref().unwrap().weak_eq(&et.as_ref().unwrap()), "Error: Types did not match Expected: {} but found {}",ot.unwrap().to_string(false),et.unwrap().to_string(false));
+            },
+            Instruction::DIVSET(o, e)           => {
+                let ot = o.var_type_t(build, currentLocals);
+                let et = e.result_of(program, build, currentLocals);
+                typ_assert!(loc,ot.is_some() && et.is_some(), "Error: Expected result but found nothing!");
+                typ_assert!(loc,ot.as_ref().unwrap().weak_eq(&et.as_ref().unwrap()), "Error: Types did not match Expected: {} but found {}",ot.unwrap().to_string(false),et.unwrap().to_string(false));
+            },
             
             Instruction::CALL(funcn, args)             => {
                 let function = typ_expect!(loc, build.functions.get(funcn), "Error: unknown function call to {}, Function may not exist!",funcn);
@@ -5289,7 +5334,7 @@ fn main() {
 - [ ] TODO: Update all of readme and add more documentation
 - [ ] TODO: Add more useful examples
 - [ ] TODO: Add some quality of life things such as __FILE__ __LINE__
-- [ ] TODO: Update README.md flags
+- [x] TODO: Update README.md flags
 - [x] TODO: Push to master
 
 - [ ] TODO: Make it so that get_body returns None if scope has not been opened yet

@@ -1,9 +1,7 @@
 extern "C" printf(*char, int : int);
 func main() {
-    let i: int;
-    let sum: int;
-    i = 0;
-    sum = 0;
+    let i:   int = 0;
+    let sum: int = 0;
     while i < 1000 {
         if i % 3 == 0 {
             sum += i;

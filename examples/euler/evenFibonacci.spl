@@ -1,19 +1,13 @@
 extern "C" printf(*char, long : long);
 func main(){
-    let valOne: int;
-    let valTwo: int;
-    let sum: int;
-    let i: int;
-    valOne = 1;
-    valTwo = 2;
-    sum = 2;
-    i = 0;
+    let valOne: int = 1;
+    let valTwo: int = 2;
+    let sum: int = 2;
+    let i: int = 0;
     while valOne+valTwo < 4000000 {
-        let tmp: int;
-        tmp = valOne;
+        let tmp: int = valOne;
         valOne = valTwo;
-        let t: int;
-        t = tmp+valTwo;
+        let t: int = tmp+valTwo;
         if t % 2 == 0 {
             sum += t;
         }
