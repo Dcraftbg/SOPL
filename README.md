@@ -75,7 +75,7 @@ interrupt 128
 - Any linker or executable builder (gcc, ld, etc.)
 ## Flags and Versions
 
-Whenever something gets added you will see that in 99% of the time [version.md](version.md) gets updated. Thats because it contains the necessary information about any new versions that come out.
+Whenever something gets added you will see that 99% of the time [version.md](version.md) gets updated. Thats because it contains the necessary information about any new versions that come out.
 Whilst the README is updated oftenly, for the most modern features you might have to check out the [version.md](version.md) since it contains any information on the latest patches and updates. 
 It also gives you a timeline of the most recent changes (newest -> oldest).
 
