@@ -1,0 +1,10 @@
+extern "C" printf(*char, char);
+func printfc(str: *char) {
+    let c: char = *str;
+    printf("%c",c);
+}
+func main(){
+    let p: *char = "Hello";
+    printfc(p);
+
+}

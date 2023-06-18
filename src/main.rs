@@ -539,10 +539,7 @@ impl Op {
             Self::NOT =>  0,
             Self::EQ   | Self::NEQ | Self::GT | Self::LT | Self::GTEQ | Self::LTEQ => 1,
             Self::PLUS | Self::MINUS                                               => 2,
-            Self::STAR => {
-                if currentETree.left.is_none() { 0 }
-                else {3}
-            }
+            Self::STAR => {3}
             Self::DIV | Self::REMAINDER                               => 3,
             Self::NONE  => panic!("This should not occur"),
         }
@@ -611,7 +608,15 @@ impl Expression {
                     }
                 }
                 else if let Some(v2) = &s.right {
-                    v2.result_of(program, build, local_vars)
+                    if s.op == Op::STAR {
+                        let res = v2.result_of(program, build, local_vars);
+                        let res = res.unwrap();
+                        assert!(res.is_some_ptr());
+                        res.get_ptr_val()
+                    }
+                    else{
+                        v2.result_of(program, build, local_vars)
+                    }
                 }
                 else {
                     panic!("Unreachable")
@@ -745,31 +750,39 @@ impl ExprTree {
                 
             },
             Op::STAR   => {
-                com_assert!(loc,regs[0].to_byte_size(8) == Register::RAX,"Error: Cannot do division with output register different from RAX");
-                let left = com_expect!(loc,self.left.as_ref(),"Error: Cannot evaluate Op '{}' without left parameter",Op::DIV  .to_string());
-                if left.is_ofp() {
-                    let leftregs1 = left.LEIRnasm(regs.clone(), f, program, build, local_vars, stack_size, loc)?;
-                    com_assert!(loc,leftregs1.len() == 1, "TODO: Handle multi-parameter loading for expressions!");
-                    let right = com_expect!(loc,self.right.as_ref(),"Error: Cannot evaluate Op '{}' without left parameter",Op::DIV  .to_string());
-                    let rightregs1 = right.LEIRnasm(regs[1..].to_vec(), f, program, build, local_vars, stack_size, loc)?;
-                    com_assert!(loc,rightregs1.len() == 1, "TODO: Handle multi-parameter loading for expressions!");
-                    //writeln!(f, "   xor rdx, rdx")?;
-                    writeln!(f, "   cqo")?;
-                    writeln!(f, "   imul {}",rightregs1[0].to_string())?;
-                    o = leftregs1;
+                if let Some(left) = self.left.as_ref() {
+                    com_assert!(loc,regs[0].to_byte_size(8) == Register::RAX,"Error: Cannot do division with output register different from RAX");
+                    if left.is_ofp() {
+                        let leftregs1 = left.LEIRnasm(regs.clone(), f, program, build, local_vars, stack_size, loc)?;
+                        com_assert!(loc,leftregs1.len() == 1, "TODO: Handle multi-parameter loading for expressions!");
+                        let right = com_expect!(loc,self.right.as_ref(),"Error: Cannot evaluate Op '{}' without left parameter",Op::DIV  .to_string());
+                        let rightregs1 = right.LEIRnasm(regs[1..].to_vec(), f, program, build, local_vars, stack_size, loc)?;
+                        com_assert!(loc,rightregs1.len() == 1, "TODO: Handle multi-parameter loading for expressions!");
+                        //writeln!(f, "   xor rdx, rdx")?;
+                        writeln!(f, "   cqo")?;
+                        writeln!(f, "   imul {}",rightregs1[0].to_string())?;
+                        o = leftregs1;
+                    }
+                    else {
+                        let right = com_expect!(loc,self.right.as_ref(),"Error: Cannot evaluate Op '{}' without left parameter",Op::DIV  .to_string());
+                        let rightregs1 = right.LEIRnasm(regs.to_vec(), f, program, build, local_vars, stack_size, loc)?;
+                        let leftregs1 = left.LEIRnasm(regs[1..].to_vec(), f, program, build, local_vars, stack_size, loc)?;
+                        com_assert!(loc,leftregs1.len() == 1, "TODO: Handle multi-parameter loading for expressions!");
+                        com_assert!(loc,rightregs1.len() == 1, "TODO: Handle multi-parameter loading for expressions!");
+                        //writeln!(f, "   xor rdx, rdx")?;
+                        writeln!(f, "   cqo")?;
+                        writeln!(f, "   imul {}",rightregs1[0].to_string())?;
+                        o = leftregs1;
+                    }
                 }
                 else {
-                    let right = com_expect!(loc,self.right.as_ref(),"Error: Cannot evaluate Op '{}' without left parameter",Op::DIV  .to_string());
+                    let right = com_expect!(loc,self.right.as_ref(),"Error: Cannot evaluate Op '{}' without right parameter",Op::DIV  .to_string());
                     let rightregs1 = right.LEIRnasm(regs.to_vec(), f, program, build, local_vars, stack_size, loc)?;
-                    let leftregs1 = left.LEIRnasm(regs[1..].to_vec(), f, program, build, local_vars, stack_size, loc)?;
-                    com_assert!(loc,leftregs1.len() == 1, "TODO: Handle multi-parameter loading for expressions!");
                     com_assert!(loc,rightregs1.len() == 1, "TODO: Handle multi-parameter loading for expressions!");
-                    //writeln!(f, "   xor rdx, rdx")?;
-                    writeln!(f, "   cqo")?;
-                    writeln!(f, "   imul {}",rightregs1[0].to_string())?;
-                    o = leftregs1;
+                    let rego = &rightregs1[0];
+                    writeln!(f, "   mov {}, {} [{}]",rego.to_string(),size_to_nasm_type(rego.size()),rego.to_string())?;
+                    o = rightregs1;
                 }
-
             },
             Op::EQ    => {
                 let left = com_expect!(loc,self.left.as_ref(),"Error: Cannot evaluate Op '{}' without left parameter",Op::EQ   .to_string());
@@ -2669,6 +2682,41 @@ enum VarType {
     CUSTOM(Uuid)   
 }
 impl VarType {
+    fn get_ptr_val(&self) -> Option<VarType> {
+        match self {
+            Self::PTR(p) => {
+                if p.typ == PtrTyp::VOID && p.inner_ref == 0 {
+                    None
+                }
+                else {
+                    if p.inner_ref > 0 {
+                        Some(VarType::PTR(Ptr { inner_ref: p.inner_ref-1, typ: p.typ.clone()}))
+                    }
+                    else {
+                        match &p.typ {
+                            PtrTyp::TYP(t) => Some(*t.clone()),
+                            _ => panic!("Unreachable"),
+                            
+                        }
+                    }
+                }
+            }
+            _ => None
+        }
+    }
+    fn is_some_ptr(&self) -> bool {
+        match self {
+            Self::PTR(p) => {
+                if p.typ == PtrTyp::VOID && p.inner_ref == 0 {
+                    false
+                }
+                else {
+                    true
+                }
+            }
+            _ => false
+        }
+    }
     fn to_string(&self, isplural: bool) -> String {
         match self {
             VarType::CHAR => {
