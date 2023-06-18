@@ -617,6 +617,9 @@ impl Expression {
                         else if res1.is_none() {
                             res2
                         }
+                        else if self.is_expr() && (self.unwrap_expr().op == Op::PLUS || self.unwrap_expr().op == Op::MINUS) && res1.as_ref().unwrap().is_ptr() && res2.as_ref().unwrap().is_numeric() {
+                            res1
+                        }
                         else {
                             panic!("Unreachable")
                         }
@@ -998,7 +1001,7 @@ impl ExprTree {
     }
 }
 fn tokens_to_expression(body: &[Token],build: &mut BuildProgram, program: &CmdProgram,locals: &Vec<Locals>) -> Expression {
-    //println!("TOP: {:?}\nLen: {}",body,body.len());
+    //println!("Body in: {:#?}\n\n\n",body);
     let mut bracketcount = 0;
     if body.len() == 0 {
         panic!("Error: Cannot evaluate empty body");
@@ -1100,11 +1103,9 @@ fn tokens_to_expression(body: &[Token],build: &mut BuildProgram, program: &CmdPr
                 continue;
             }
             let mut tmp_eTree: ExprTree = ExprTree::new();
-            for exprTok in &body[i..] {
-                //println!("exprTok: {:?} at {}",exprTok,i2);
-
+            while i2 < body.len() {
+                let exprTok = &body[i2];
                 if let Some(val) = OfP::from_token(exprTok, build, program, locals) {
-                    //par_assert!(token,tmp_eTree.left.is_none() || (hasFoundOp && tmp_eTree.right.is_none()),"Error: Cannot have multiple Ofp values consecutively!");
                     if tmp_eTree.left.is_none() {
                         tmp_eTree.left = Some(Expression::val(val))
                     }
@@ -1117,25 +1118,19 @@ fn tokens_to_expression(body: &[Token],build: &mut BuildProgram, program: &CmdPr
                     }
                 }
                 else if let TokenType::Operation(op2) = &exprTok.typ {
-                    //println!("----------\nAt token {:?}\nGotten op: {} with priority: {} and my priority: {}\nwith my op: {}\n----------",exprTok,op2.to_string(),op2.get_priority(),priority,currentETree.op.to_string());
                     if op2.get_priority(&tmp_eTree) <= priority {            
                         opo = op2;
-                        //println!("Ending at {} {:?}",i2, body[i2-1]);
                         break;
-                    }
-                    else {
-                        tmp_eTree = ExprTree::new();
-                        tmp_eTree.left = Some(Expression::val(OfP::CONST(RawConstValueType::INT(0))));
-                        tmp_eTree.op = op2.clone()
                     }
                 }
                 else if let TokenType::IntrinsicType(t) = &exprTok.typ {
                     par_assert!(exprTok, *t == IntrinsicType::OPENPAREN, "Unexpected intrinsic {}", t.to_string(false));
                     let org_count = bracketcount;
                     bracketcount += 1;
-                    i2 += 1;
                     while bracketcount > org_count {
+                        i2 += 1;
                         if let Some(tok) = body.get(i2) {
+                            //println!("Passing token: {:#?}",tok);
                             match tok.typ {
                                 TokenType::IntrinsicType(it) => {
                                     match it {
@@ -1150,7 +1145,6 @@ fn tokens_to_expression(body: &[Token],build: &mut BuildProgram, program: &CmdPr
                         else {
                             par_error!(exprTok, "Open paren opened here but never closed!");
                         }
-                        i2 += 1;
                     }
                     //let expr = tokens_to_expression(&body[index_from..index-1], build, program, locals);
                     //if tmp_eTree.left.is_none() {
@@ -1160,7 +1154,9 @@ fn tokens_to_expression(body: &[Token],build: &mut BuildProgram, program: &CmdPr
                     //    tmp_eTree.right = Some(expr);
                     //}
                     //i2 = index-2;
-                    i2 -= 2;
+                    //println!("Last left token: {:?}",body[i2]);
+                    //i2 -= 1;
+                    //i2 += 1;
                 }
                 else {
                     par_error!(exprTok, "Error: unknown token type in expression: {}",token.typ.to_string(false))        
@@ -2882,6 +2878,19 @@ enum VarType {
     CUSTOM(Uuid)   
 }
 impl VarType {
+    fn is_numeric(&self) -> bool {
+        match self {
+            Self::PTR(_) => true,
+            Self::CHAR | Self::SHORT  | Self::INT | Self::LONG => true,
+            _ => false
+        }
+    }
+    fn is_ptr(&self) -> bool {
+        match self {
+            Self::PTR(_) => true,
+            _ => false
+        }
+    }
     fn get_ptr_val(&self) -> Option<VarType> {
         match self {
             Self::PTR(p) => {

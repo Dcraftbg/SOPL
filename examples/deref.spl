@@ -1,6 +1,6 @@
 extern "C" printf(*char);
 func main(){
     let a: *char = "Hello World!\n";
-    *a = 87;
+    *(a+1) = 87;
     printf(a)
 }
