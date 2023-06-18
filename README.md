@@ -19,6 +19,7 @@ Made for easy navigation around the README.md
 - [Flags and versions](#flags-and-versions)
 - [NEWS](news.md)
 - [Plans](#plans)
+- [Highlighting](#highlighting)
 - [How-to-use](#how-to-use)
   - [Hello-World](#hello-world)
   - [Locals](#locals)
@@ -121,6 +122,14 @@ sopl [flags]
 - [ ] struct methods
 - [ ] interfaces
 
+## Highlighting
+Currently SOPL Highlighting only supports vscode but in the future I plan to add support for the majority of the most popular editors i.e.:
+- vim
+- emacs
+- neovim
+etc.
+For highlighting checkout: [this](https://github.com/Dimitar85898/SOPL-Highlighting) 
+- https://github.com/Dimitar85898/SOPL-Highlighting
 ## How to use?
 *Note that documentation may not cover all of the latest features tho you might expect updates on them shortly after implementation*
 *If you want to learn most of the details checkout theversions*
