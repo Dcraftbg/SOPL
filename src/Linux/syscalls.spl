@@ -1,6 +1,5 @@
 // Gotten from: https://chromium.googlesource.com/chromiumos/docs/+/master/constants/syscalls.md
 // Table in systable.txt
-const I_SYSCALL                        = 128;
 const SYS_read                         = 0  ;
 const SYS_write                        = 1  ;
 const SYS_open                         = 2  ;

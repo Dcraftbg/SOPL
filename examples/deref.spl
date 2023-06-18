@@ -1,0 +1,6 @@
+extern "C" printf(*char);
+func main(){
+    let a: *char = "Hello World!\n";
+    *a = 87;
+    printf(a)
+}

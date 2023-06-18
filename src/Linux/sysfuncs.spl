@@ -5,20 +5,25 @@ func sread(fd: int, buf: ptr, count: long) {
     RDI = fd
     RSI = buf
     RDX = count
-    interrupt I_SYSCALL
+    syscall
 }
 func swrite(fd: int, buf: ptr, count: long) {
     RAX = SYS_write
     RDI = fd
     RSI = buf
     RDX = count
-    interrupt I_SYSCALL
+    syscall
 }
-//example program:
-// func _start() {
-//     const stdout = 1;
-//     swrite(stdout, "Hello World!");
-// }
-// func main() {
-//     _start();
-// }
+func sexit(code: int) {
+    RAX = SYS_exit
+    RDI = code
+    syscall
+}
+func _start() {
+    const stdout = 1;
+    swrite(stdout, "Hello World!");
+    sexit(0);
+}
+func main() {
+    _start();
+}

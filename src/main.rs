@@ -326,6 +326,7 @@ enum IntrinsicType {
     OPENCURLY,
     CLOSECURLY,
     INTERRUPT,
+    SYSCALL,
 
     // REGISTER MATH
     // ADD,
@@ -445,6 +446,9 @@ impl IntrinsicType {
             IntrinsicType::WHILE => {
                 if isplural {"While".to_string()} else {"While".to_string().to_string()}
             },
+            IntrinsicType::SYSCALL => {
+                if isplural {"Syscall".to_string()} else {"Syscall".to_string().to_string()}
+            },
         }
     }
 }
@@ -485,7 +489,7 @@ enum Op {
     PLUS,
     MINUS,
     DIV,
-    MUL,
+    STAR,
     REMAINDER,
     EQ,
     NEQ,
@@ -502,7 +506,7 @@ impl Op {
             "-" => Some(Op::MINUS),
             "/" => Some(Op::DIV),
             "%" => Some(Op::REMAINDER),
-            "*" => Some(Op::MUL),
+            "*" => Some(Op::STAR),
             "=="=> Some(Op::EQ),
             "!="=> Some(Op::NEQ),
             ">" => Some(Op::GT),
@@ -519,7 +523,7 @@ impl Op {
             Op::PLUS  => "+" ,
             Op::MINUS => "-" ,
             Op::DIV   => "/" ,
-            Op::MUL   => "*" ,
+            Op::STAR   => "*" ,
             Op::EQ    => "==",
             Op::NEQ   => "!=",
             Op::GT    => ">" ,
@@ -530,12 +534,16 @@ impl Op {
             Op::REMAINDER => "%",
         }
     }
-    fn get_priority(&self) -> usize {
+    fn get_priority(&self, currentETree: &ExprTree) -> usize {
         match self {
             Self::NOT =>  0,
             Self::EQ   | Self::NEQ | Self::GT | Self::LT | Self::GTEQ | Self::LTEQ => 1,
             Self::PLUS | Self::MINUS                                               => 2,
-            Self::MUL  | Self::DIV | Self::REMAINDER                               => 3,
+            Self::STAR => {
+                if currentETree.left.is_none() { 0 }
+                else {3}
+            }
+            Self::DIV | Self::REMAINDER                               => 3,
             Self::NONE  => panic!("This should not occur"),
         }
     }
@@ -736,7 +744,7 @@ impl ExprTree {
                 }
                 
             },
-            Op::MUL   => {
+            Op::STAR   => {
                 com_assert!(loc,regs[0].to_byte_size(8) == Register::RAX,"Error: Cannot do division with output register different from RAX");
                 let left = com_expect!(loc,self.left.as_ref(),"Error: Cannot evaluate Op '{}' without left parameter",Op::DIV  .to_string());
                 if left.is_ofp() {
@@ -943,25 +951,45 @@ fn tokens_to_expression(body: &[Token],build: &mut BuildProgram, program: &CmdPr
             if *op == Op::NOT {
                 par_assert!(token, currentETree.left.is_none(), "Error: Cannot have NOT with a left side already defined!");
             }
+            else if *op == Op::STAR {//this means its a deref
+            }
             else {
                 par_assert!(token, currentETree.left.is_some(), "Error: Cannot have an Operator different from NOT without a left side!");
             }
             currentETree.op = op.clone();
             let mut opo = &Op::NONE;
-            let priority = op.get_priority();
+            let priority = op.get_priority(&currentETree);
             let mut i2 = i;
             if body.len() < i+1 {
                 continue;
             }
+            let mut tmp_eTree: ExprTree = ExprTree::new();
             for exprTok in &body[i..] {
                 //println!("exprTok: {:?} at {}",exprTok,i2);
-                if OfP::from_token(exprTok, build, program, locals).is_some() {}
+                if let Some(val) = OfP::from_token(exprTok, build, program, locals) {
+                    //par_assert!(token,tmp_eTree.left.is_none() || (hasFoundOp && tmp_eTree.right.is_none()),"Error: Cannot have multiple Ofp values consecutively!");
+                    if tmp_eTree.left.is_none() {
+                        tmp_eTree.left = Some(Expression::val(val))
+                    }
+                    else if tmp_eTree.right.is_none() && hasFoundOp {
+                        tmp_eTree.right = Some(Expression::val(val))
+                    }
+                    else {
+                        tmp_eTree = ExprTree::new();
+                        tmp_eTree.left = Some(Expression::val(val))
+                    }
+                }
                 else if let TokenType::Operation(op2) = &exprTok.typ {
                     //println!("----------\nAt token {:?}\nGotten op: {} with priority: {} and my priority: {}\nwith my op: {}\n----------",exprTok,op2.to_string(),op2.get_priority(),priority,currentETree.op.to_string());
-                    if op2.get_priority() <= priority {            
+                    if op2.get_priority(&tmp_eTree) <= priority {            
                         opo = op2;
                         //println!("Ending at {} {:?}",i2, body[i2-1]);
                         break;
+                    }
+                    else {
+                        tmp_eTree = ExprTree::new();
+                        tmp_eTree.left = Some(Expression::val(OfP::CONST(RawConstValueType::INT(0))));
+                        tmp_eTree.op = op2.clone()
                     }
                 }
                 else {
@@ -1026,6 +1054,18 @@ enum TokenType {
 }
 
 impl TokenType {
+    fn unwrap_setop(&self) -> &SetOp {
+        match self {
+            Self::SETOperation(op) => op,
+            _ => panic!("Unreachable")
+        }
+    }
+    fn is_setop(&self) -> bool {
+        match self {
+            Self::SETOperation(_) => true,
+            _ => false
+        }
+    }
     fn to_string(&self,isplural:bool) -> String {
         match self {
             TokenType::WordType(word) => {
@@ -1465,7 +1505,7 @@ impl Iterator for Lexer<'_> {
                         self.cursor -= 1;
                         self.currentLocation.character += outstr.len() as i32;
                         if outstr == "*" {
-                            return Some(Token { typ: TokenType::Operation(Op::MUL), location: self.currentLocation.clone() });
+                            return Some(Token { typ: TokenType::Operation(Op::STAR), location: self.currentLocation.clone() });
                         }
                         else {
                             let osize = outstr.chars().take_while(|&c| c == '*').count();
@@ -1481,7 +1521,7 @@ impl Iterator for Lexer<'_> {
                                 self.cursor -= outstr.len()-1;
                                 self.currentLocation.character -= (outstr.len()-1) as i32;
                                 //println!("Current char: {}\nNext char: {}",self.cchar(),self.source[self.cursor+1]);
-                                return Some(Token { typ: TokenType::Operation(Op::MUL), location: self.currentLocation.clone() });
+                                return Some(Token { typ: TokenType::Operation(Op::STAR), location: self.currentLocation.clone() });
                             }
                         }
                     }
@@ -1799,8 +1839,7 @@ impl Register {
                 Register::RBP | Register::EBP  | Register::BP => Register::RBP,
                 Register::RSI | Register::ESI | Register::SI  | Register::SIL => Register::RSI,
                 Register::RDI | Register::EDI | Register::DI  | Register::DIL => Register::RDI,
-                Register::R8  => todo!(),
-                Register::R8D => todo!(),
+                Register::R8  | Register::R8D => Register::R8,
                 Register::R9 => todo!(),
                 Register::R10 => todo!(),
                 Register::R11 => todo!(),
@@ -1842,8 +1881,7 @@ impl Register {
 
                     Register::RDI | Register::EDI | Register::DI  | Register::DIL => Register::EDI,
 
-                    Register::R8 => todo!(),
-                    Register::R8D => todo!(),
+                    Register::R8 | Register::R8D => Register::R8D,
                     Register::R9 => todo!(),
                     Register::R10 => todo!(),
                     Register::R11 => todo!(),
@@ -2192,18 +2230,19 @@ impl OfP {
 enum Instruction {
     //PUSH    (OfP),
     DEFVAR  (String),
-    MOV     (OfP, Expression),
+    MOV     (Expression, Expression),
     //POP     (OfP),
-    ADDSET     (OfP, Expression),
-    SUBSET     (OfP, Expression),
-    MULSET     (OfP, Expression),
-    DIVSET     (OfP, Expression),
+    ADDSET     (Expression, Expression),
+    SUBSET     (Expression, Expression),
+    MULSET     (Expression, Expression),
+    DIVSET     (Expression, Expression),
     CALL    (String, CallArgs),
     CALLRAW (String, CallArgs),
     FNBEGIN (),
     RET     (Expression),
     SCOPEBEGIN,
     SCOPEEND,
+    SYSCALL,
     
     // CONDITIONAL_JUMP(usize),
     // JUMP(usize),
@@ -2875,7 +2914,7 @@ fn eval_const_def(lexer: &mut Lexer, build: &mut BuildProgram, until: TokenType)
                         let valOne = par_expect!(token.location,varStack.pop(),"Stack underflow in constant definition");
                         varStack.push(par_expect!(token.location,valOne.sub(&valTwo),"Error: Failed to add the constant values together"));
                     }
-                    Op::MUL => {
+                    Op::STAR => {
                         let valTwo = par_expect!(token.location,varStack.pop(),"Stack underflow in constant definition");
                         let valOne = par_expect!(token.location,varStack.pop(),"Stack underflow in constant definition");
                         varStack.push(par_expect!(token.location,valOne.mul(&valTwo),"Error: Failed to add the constant values together"));
@@ -3158,19 +3197,19 @@ fn parse_token_to_build_inst(token: Token,lexer: &mut Lexer, program: &mut CmdPr
                 let body = currentScope.body_unwrap_mut().unwrap();
                 match &op {
                     SetOp::SET      => {
-                        body.push((token.location.clone(),Instruction::MOV(ofp1, expr)))
+                        body.push((token.location.clone(),Instruction::MOV(Expression::val(ofp1), expr)))
                     },
                     SetOp::PLUSSET  => {
-                        body.push((token.location.clone(),Instruction::ADDSET(ofp1, expr)))
+                        body.push((token.location.clone(),Instruction::ADDSET(Expression::val(ofp1), expr)))
                     },
                     SetOp::MINUSSET => {
-                        body.push((token.location.clone(),Instruction::SUBSET(ofp1, expr)))
+                        body.push((token.location.clone(),Instruction::SUBSET(Expression::val(ofp1), expr)))
                     },
                     SetOp::MULSET   => {
-                        body.push((token.location.clone(),Instruction::MULSET(ofp1, expr)))
+                        body.push((token.location.clone(),Instruction::MULSET(Expression::val(ofp1), expr)))
                     },
                     SetOp::DIVSET   => {
-                        body.push((token.location.clone(),Instruction::DIVSET(ofp1, expr)))
+                        body.push((token.location.clone(),Instruction::DIVSET(Expression::val(ofp1), expr)))
                     },
                 }
             } 
@@ -3428,6 +3467,11 @@ fn parse_token_to_build_inst(token: Token,lexer: &mut Lexer, program: &mut CmdPr
                     }).collect();
                     body.push((token.location.clone(),Instruction::RET(tokens_to_expression(&result_body, build, program, &currentLocals))));
                 },
+                IntrinsicType::SYSCALL => {
+                    par_assert!(token, scopeStack.len()> 0 && getTopMut(scopeStack).unwrap().body_is_some(), "Error: Unexpected return intrinsic outside of scope! Scopes of type {} do not support instructions!",getTopMut(scopeStack).unwrap().typ.to_string(false));
+                    let body = getTopMut(scopeStack).unwrap().body_unwrap_mut().unwrap();
+                    body.push((token.location.clone(),Instruction::SYSCALL));
+                },
                 IntrinsicType::INCLUDE => {
                     let includeName = par_expect!(lexer.currentLocation,lexer.next(),"Error: abruptly ran out of tokens");
                     match includeName.typ {
@@ -3610,7 +3654,7 @@ fn parse_token_to_build_inst(token: Token,lexer: &mut Lexer, program: &mut CmdPr
                             }
                         }).collect();
                         let currentScope = getTopMut(scopeStack).unwrap();
-                        currentScope.body_unwrap_mut().unwrap().push((lexer.currentLocation.clone(),Instruction::MOV(OfP::LOCALVAR(nametok.unwrap_word().unwrap().clone()),tokens_to_expression(&body, build, program, &currentLocals))))
+                        currentScope.body_unwrap_mut().unwrap().push((lexer.currentLocation.clone(),Instruction::MOV(Expression::val(OfP::LOCALVAR(nametok.unwrap_word().unwrap().clone())),tokens_to_expression(&body, build, program, &currentLocals))))
                     }
                 },
                 IntrinsicType::INTERRUPT => {
@@ -3636,8 +3680,7 @@ fn parse_token_to_build_inst(token: Token,lexer: &mut Lexer, program: &mut CmdPr
                         _ => {
                             par_error!(lexerNext, "Unexpected token type for INTERRUPT, {}",lexerNext.typ.to_string(false))
                         }
-                    }
-                    
+                    } 
                 },
                 IntrinsicType::TOP => todo!(),
                 IntrinsicType::CAST => todo!(),
@@ -3660,6 +3703,7 @@ fn parse_token_to_build_inst(token: Token,lexer: &mut Lexer, program: &mut CmdPr
                     let symbol_contract = parse_any_contract(lexer);
                     build.dll_exports.insert(symbol_name.clone(), DLL_export { contract: symbol_contract });
                 },
+                
                 IntrinsicType::WHILE => {
                     let condition: Vec<Token> = lexer.map_while(|t| {
                         if t.typ == TokenType::IntrinsicType(IntrinsicType::OPENCURLY) {
@@ -3688,6 +3732,7 @@ fn parse_token_to_build_inst(token: Token,lexer: &mut Lexer, program: &mut CmdPr
                 IntrinsicType::ELSE => {
                     scopeStack.push(Scope { typ: ScopeType::NORMAL(NormalScope { typ: NormalScopeType::ELSE, body: vec![], locals: Locals::new()}), hasBeenOpened: false })
                 },
+                
             }
         }
         TokenType::StringType(_) => {
@@ -3727,27 +3772,27 @@ fn parse_token_to_build_inst(token: Token,lexer: &mut Lexer, program: &mut CmdPr
                                 TokenType::Number32(data) => {
                                     if reg.size() >= 4 {
                                         let body = currentScope.body_unwrap_mut().unwrap();
-                                        body.push((token.location,Instruction::MOV(OfP::REGISTER(reg), Expression::val(OfP::CONST(RawConstValueType::INT(data))))))
+                                        body.push((token.location,Instruction::MOV(Expression::val(OfP::REGISTER(reg)), Expression::val(OfP::CONST(RawConstValueType::INT(data))))))
                                     }
                                 }
                                 TokenType::Number64(data) => {
                                     if reg.size() >= 8 {
                                         let body = currentScope.body_unwrap_mut().unwrap();
-                                        body.push((token.location,Instruction::MOV(OfP::REGISTER(reg), Expression::val(OfP::CONST(RawConstValueType::LONG(data))))));
+                                        body.push((token.location,Instruction::MOV(Expression::val(OfP::REGISTER(reg)), Expression::val(OfP::CONST(RawConstValueType::LONG(data))))));
                                     }
                                 }
                                 TokenType::Register(reg2) => {
-                                    currentScope.body_unwrap_mut().unwrap().push((token.location.clone(),Instruction::MOV(OfP::REGISTER(reg), Expression::val(OfP::REGISTER(reg2)))));
+                                    currentScope.body_unwrap_mut().unwrap().push((token.location.clone(),Instruction::MOV(Expression::val(OfP::REGISTER(reg)), Expression::val(OfP::REGISTER(reg2)))));
 
                                 }
                                 TokenType::WordType(ref data) => {
                                     if currentScope.contract_is_some() && currentScope.contract_unwrap().unwrap().Inputs.contains_key(data) {
                                         let contract = currentScope.contract_unwrap().unwrap();
                                         par_assert!(token, contract.Inputs.contains_key(data), "Error: Unexpected word for register: '{}'",data);
-                                        currentScope.body_unwrap_mut().unwrap().push((token.location.clone(), Instruction::MOV(OfP::REGISTER(reg), Expression::val(OfP::LOCALVAR(data.to_owned())))))
+                                        currentScope.body_unwrap_mut().unwrap().push((token.location.clone(), Instruction::MOV(Expression::val(OfP::REGISTER(reg)), Expression::val(OfP::LOCALVAR(data.to_owned())))))
                                     }
                                     else if let Some(cons) = build.constdefs.get(data) {
-                                        currentScope.body_unwrap_mut().unwrap().push((token.location.clone(), Instruction::MOV(OfP::REGISTER(reg), Expression::val(OfP::CONST(cons.typ.clone())))))
+                                        currentScope.body_unwrap_mut().unwrap().push((token.location.clone(), Instruction::MOV(Expression::val(OfP::REGISTER(reg)), Expression::val(OfP::CONST(cons.typ.clone())))))
                                     }
                                     else {
                                         par_error!(token,"Unexpected Type for Mov Intrinsic. Expected Number32/Number64 but found {}",token.typ.to_string(false))
@@ -3769,22 +3814,22 @@ fn parse_token_to_build_inst(token: Token,lexer: &mut Lexer, program: &mut CmdPr
                         TokenType::SETOperation(typ) => {
                             match typ {
                                 SetOp::PLUSSET => {
-                                    body.push((token.location.clone(),Instruction::ADDSET(OfP::REGISTER(reg), Expression::val(OfP::REGISTER(reg2)))))
+                                    body.push((token.location.clone(),Instruction::ADDSET(Expression::val(OfP::REGISTER(reg)), Expression::val(OfP::REGISTER(reg2)))))
                                 }
                                 SetOp::MINUSSET => {
-                                    body.push((token.location.clone(),Instruction::SUBSET(OfP::REGISTER(reg), Expression::val(OfP::REGISTER(reg2)))))
+                                    body.push((token.location.clone(),Instruction::SUBSET(Expression::val(OfP::REGISTER(reg)), Expression::val(OfP::REGISTER(reg2)))))
                                 }
                                 SetOp::MULSET => {
-                                    body.push((token.location.clone(),Instruction::MULSET(OfP::REGISTER(reg), Expression::val(OfP::REGISTER(reg2)))))
+                                    body.push((token.location.clone(),Instruction::MULSET(Expression::val(OfP::REGISTER(reg)), Expression::val(OfP::REGISTER(reg2)))))
                                 }
                                 // Op::EQ => {
                                 //     body.push((token.location.clone(),Instruction::EQUALS(OfP::REGISTER(reg), Expression::val(OfP::REGISTER(reg2)))))
                                 // }
                                 SetOp::DIVSET => {
-                                    body.push((token.location.clone(),Instruction::DIVSET(OfP::REGISTER(reg), Expression::val(OfP::REGISTER(reg2)))))
+                                    body.push((token.location.clone(),Instruction::DIVSET(Expression::val(OfP::REGISTER(reg)), Expression::val(OfP::REGISTER(reg2)))))
                                 }
                                 SetOp::SET => {
-                                    body.push((token.location.clone(),Instruction::MOV(OfP::REGISTER(reg), Expression::val(OfP::REGISTER(reg2)))))
+                                    body.push((token.location.clone(),Instruction::MOV(Expression::val(OfP::REGISTER(reg)), Expression::val(OfP::REGISTER(reg2)))))
                                 }
                                 other => par_error!(token,"Unexpected Operation! Expected Register Operation but found {}",other.to_string())
                             }
@@ -3799,7 +3844,22 @@ fn parse_token_to_build_inst(token: Token,lexer: &mut Lexer, program: &mut CmdPr
                 }
             }
         },
-        TokenType::Operation(_) => todo!(),
+        TokenType::Operation(ref op) => {
+            par_assert!(token, *op == Op::STAR, "Error: Cannot have op without a star!");
+            let mut setop: Option<SetOp> = None;
+            let mut body: Vec<Token> = vec![token.clone()];
+            body.extend(lexer.map_while(|t| {
+                if t.typ.is_setop() {
+                    setop = Some(t.typ.unwrap_setop().clone());
+                    None
+                }
+                else {
+                    Some(t)
+                }
+            }));
+            let setop = par_expect!(lexer.currentLocation, setop, "Error: Expected op but found nothing!");
+            todo!("Finish this")
+        },
         TokenType::SETOperation(_) => todo!(),
     }
 
@@ -4216,6 +4276,7 @@ fn nasm_x86_64_handle_scope(f: &mut File, build: &BuildProgram, program: &CmdPro
         //println!("Instruction at {}: {:?}",i,inst);
         match inst {
             Instruction::MOV(Op, Op2) => {
+                let Op = Op.unwrap_val();
                 match Op {
                     OfP::REGISTER(Reg1) => {
                         let oreg2 = Register::RBX.to_byte_size(Reg1.size());
@@ -4256,6 +4317,7 @@ fn nasm_x86_64_handle_scope(f: &mut File, build: &BuildProgram, program: &CmdPro
                 }
             }
             Instruction::ADDSET(op1, op2) => {
+                let op1 = op1.unwrap_val();
                 match op1 {
                     OfP::REGISTER(reg1) => {
                         let reg2 = Register::RAX.to_byte_size(reg1.size());
@@ -4280,6 +4342,7 @@ fn nasm_x86_64_handle_scope(f: &mut File, build: &BuildProgram, program: &CmdPro
                 }   
             }
             Instruction::SUBSET(op1, op2) => {
+                let op1 = op1.unwrap_val();
                 match op1 {
                     OfP::REGISTER(reg1) => {
                         let reg2 = Register::RAX.to_byte_size(reg1.size());
@@ -4304,6 +4367,7 @@ fn nasm_x86_64_handle_scope(f: &mut File, build: &BuildProgram, program: &CmdPro
                 }
             }
             Instruction::MULSET(op1, op2) => {
+                let op1 = op1.unwrap_val();
                 match op1 {
                     OfP::REGISTER(reg1) => {
                         let reg2 = Register::RAX.to_byte_size(reg1.size());
@@ -4596,7 +4660,9 @@ fn nasm_x86_64_handle_scope(f: &mut File, build: &BuildProgram, program: &CmdPro
             Instruction::EXPAND_ELSE_SCOPE(_) => {
                 // com_error!(loc,"Error: this should never happen!"w);
             },
-            
+            Instruction::SYSCALL => {
+                writeln!(f, "   syscall")?;
+            }
             //TODO: Re-enble these
             _ => todo!("Re-enable these:")
             // Instruction::MORETHAN(ofp1, ofp2) => {
@@ -4886,25 +4952,25 @@ fn type_check_scope(build: &BuildProgram, program: &CmdProgram, scope: TCScopeTy
                 }
             },
             Instruction::ADDSET(o, e)           => {
-                let ot = o.var_type_t(build, &currentLocals);
+                let ot = o.result_of(program,build, &currentLocals);
                 let et = e.result_of(program, build, &currentLocals);
                 typ_assert!(loc,ot.is_some() && et.is_some(), "Error: Expected result but found nothing!");
                 typ_assert!(loc,ot.as_ref().unwrap().weak_eq(&et.as_ref().unwrap()), "Error: Types did not match Expected: {} but found {}",ot.unwrap().to_string(false),et.unwrap().to_string(false));
             },
             Instruction::SUBSET(o, e)           => {
-                let ot = o.var_type_t(build, currentLocals);
+                let ot = o.result_of(program,build, currentLocals);
                 let et = e.result_of(program, build, currentLocals);
                 typ_assert!(loc,ot.is_some() && et.is_some(), "Error: Expected result but found nothing!");
                 typ_assert!(loc,ot.as_ref().unwrap().weak_eq(&et.as_ref().unwrap()), "Error: Types did not match Expected: {} but found {}",ot.unwrap().to_string(false),et.unwrap().to_string(false));
             },
             Instruction::MULSET(o, e)           => {
-                let ot = o.var_type_t(build, currentLocals);
+                let ot = o.result_of(program,build, currentLocals);
                 let et = e.result_of(program, build, currentLocals);
                 typ_assert!(loc,ot.is_some() && et.is_some(), "Error: Expected result but found nothing!");
                 typ_assert!(loc,ot.as_ref().unwrap().weak_eq(&et.as_ref().unwrap()), "Error: Types did not match Expected: {} but found {}",ot.unwrap().to_string(false),et.unwrap().to_string(false));
             },
             Instruction::DIVSET(o, e)           => {
-                let ot = o.var_type_t(build, currentLocals);
+                let ot = o.result_of(program,build, currentLocals);
                 let et = e.result_of(program, build, currentLocals);
                 typ_assert!(loc,ot.is_some() && et.is_some(), "Error: Expected result but found nothing!");
                 typ_assert!(loc,ot.as_ref().unwrap().weak_eq(&et.as_ref().unwrap()), "Error: Types did not match Expected: {} but found {}",ot.unwrap().to_string(false),et.unwrap().to_string(false));
@@ -4957,7 +5023,7 @@ fn type_check_scope(build: &BuildProgram, program: &CmdProgram, scope: TCScopeTy
             Instruction::LESSTHANEQUALS(_, _) => {},
             Instruction::NOTEQUALS(_, _)      => {},
             Instruction::EQUALS(_, _)         => {},
-            
+            Instruction::SYSCALL              => {}
             _ => todo!("Unreachable")
         }
     }
@@ -5227,6 +5293,7 @@ fn main() {
     Intrinsics.insert("else".to_string(), IntrinsicType::ELSE);
     Intrinsics.insert("while".to_string(), IntrinsicType::WHILE);
     Intrinsics.insert("cast".to_string(), IntrinsicType::CAST);
+    Intrinsics.insert("syscall".to_string(), IntrinsicType::SYSCALL);
     
 
     let mut Definitions: HashMap<String,VarType> = HashMap::new();
