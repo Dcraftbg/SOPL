@@ -1,0 +1,32 @@
+extern "C" printf(*char, long);
+func cstrlen(str: *char : long) {
+    let out: long = 0;
+    while *(str+out) != 0 {
+        out += 1;
+    }
+    return out;
+}
+func strcpy(dst: *char, src: *char, size: long) {
+    let i: long = 0;
+    while i < size {
+        *(dst+i) = *(src+i);
+        i += 1;
+    }
+}
+func memset(dst: *char, val: char, size: long) {
+    let i: long = 0;
+    while i < size {
+        *(dst+i) = val;
+        i += 1;
+    }
+}
+func main(){
+    let c: *char = "Hello";
+    let ca: *char = "Goody";
+    let result: long = cstrlen(c);
+    printf("Result: %lld\n",result);
+    strcpy(c,ca,result);
+    printf("c: %s\n",c);
+    memset(c,87,result);
+    printf("c: %s\n",c);
+}

@@ -563,7 +563,9 @@ impl Op {
             Self::NOT =>  0,
             Self::EQ   | Self::NEQ | Self::GT | Self::LT | Self::GTEQ | Self::LTEQ => 1,
             Self::PLUS | Self::MINUS                                               => 2,
-            Self::STAR                                                             => {if currentETree.left.is_none() {0} else {3}},
+            Self::STAR                                                             => {
+                //println!("got star {:?}",currentETree);
+                if currentETree.left.is_none() {1} else {3}},
             Self::BAND                                                             => 0,
             Self::DIV | Self::REMAINDER                                            => 3,
             Self::NONE  => panic!("This should not occur"),
@@ -904,12 +906,15 @@ impl ExprTree {
                     }
                 }
                 else {
-                    let right = com_expect!(loc,self.right.as_ref(),"Error: Cannot evaluate Op '{}' without right parameter",Op::DIV  .to_string());
+                    let right = com_expect!(loc,self.right.as_ref(),"Error: Cannot evaluate Op '{}' without right parameter",Op::STAR.to_string());
                     let rightregs1 = right.LEIRnasm(regs.to_vec(), f, program, build, local_vars, stack_size, loc)?;
                     com_assert!(loc,rightregs1.len() == 1, "TODO: Handle multi-parameter loading for expressions!");
                     let rego = &rightregs1[0];
-                    writeln!(f, "   mov {}, {} [{}]",rego.to_string(),size_to_nasm_type(rego.size()),rego.to_string())?;
-                    o = rightregs1;
+                    let resof = right.result_of_c(program, build, local_vars, loc).unwrap();
+                    com_assert!(loc, resof.is_some_ptr(), "Error: Cannot dereference void pointer!");
+                    let resof = resof.get_ptr_val().unwrap();
+                    writeln!(f, "   mov {}, {} [{}]",rego.to_byte_size(resof.get_size(program)).to_string(),size_to_nasm_type(resof.get_size(program)),rego.to_string())?;
+                    o = vec![rego.to_byte_size(resof.get_size(program))];
                 }
             },
             Op::EQ    => {
@@ -1136,6 +1141,7 @@ fn tokens_to_expression(body: &[Token],build: &mut BuildProgram, program: &CmdPr
                     }
                 }
                 else if let TokenType::Operation(op2) = &exprTok.typ {
+                    
                     if op2.get_priority(&tmp_eTree) <= priority {
                         opo = op2;
                         break;
@@ -1728,7 +1734,7 @@ impl Iterator for Lexer<'_> {
                     else if c == ';' || c==')' || c=='(' || c=='{' || c=='}' || c=='[' || c==']' || c == ',' {
                         self.cursor += 1;
                         self.currentLocation.character += 1;
-                        return Some(Token {typ: TokenType::IntrinsicType(self.Intrinsics.get(&c.to_string()).expect("Unhandled intrinsic :(").clone()), location: self.currentLocation.clone()});
+                        return Some(Token {typ: TokenType::IntrinsicType(self.Intrinsics.get(&c.to_string()).expect(&format!("Unhandled intrinsic :( {}",c)).clone()), location: self.currentLocation.clone()});
                     }
                     else if c == '*' && self.cchar_offset(1).is_some(){
                         let mut already_alphabetic = false;
@@ -2402,7 +2408,7 @@ impl OfP {
             Self::RESULT(f, _) => build.functions.get(f).unwrap().contract.Outputs.get(0).cloned()
         }
     }
-    fn LOIRGNasm(&self, regs: Vec<Register>, f: &mut File, program: &CmdProgram,build: &BuildProgram, local_vars: &HashMap<String, LocalVariable>, mut stack_size: usize, loc: &ProgramLocation) -> std::io::Result<Vec<Register>>{
+    fn LOIRGNasm(&self, regs: Vec<Register>, f: &mut File, program: &CmdProgram,build: &BuildProgram, local_vars: &HashMap<String, LocalVariable>, stack_size: usize, loc: &ProgramLocation) -> std::io::Result<Vec<Register>>{
         let mut out: Vec<Register> = Vec::with_capacity(regs.len());
         match self {
             OfP::REGISTER(reg2) => {
@@ -4682,22 +4688,22 @@ fn nasm_x86_64_load_args(f: &mut File, scope: &TCScopeType, build: &BuildProgram
         
         let mut offset_of_ins: usize = 0;
         let mut int_ptr_count: usize = 0;
-        //println!("{:?}",scope.get_contract(build).unwrap().Inputs);
+        
         for (_, iarg) in scope.get_contract(build).unwrap().Inputs.iter().rev() {
             offset+=iarg.get_size(program);
-            //println!("Gotten arg {:?} with int_ptr_count: {}",iarg, int_ptr_count);
+            
             match iarg {
                 VarType::CHAR    | VarType::SHORT   | VarType::BOOLEAN | VarType::INT     | VarType::LONG    | VarType::PTR(_)  => int_ptr_count+=1,
                 VarType::CUSTOM(_) => {},
             }
             
         }
-        println!("int_ptr_count: {}",int_ptr_count);
-        println!("{}",custom_build.nums_ptrs.as_ref().unwrap().len());
+        //println!("int_ptr_count: {}",int_ptr_count);
+        //println!("{}",custom_build.nums_ptrs.as_ref().unwrap().len());
         for (_, iarg) in scope.get_contract(build).unwrap().Inputs.iter().rev() {
-            println!("loading arg {:?}",iarg);
-            let osize = iarg.get_size(program);
+            //println!("loading arg {:?}",iarg);
             if custom_build.nums_ptrs.is_some() && custom_build.nums_ptrs.as_ref().unwrap().len() > int_ptr_count-1 {
+                let osize = iarg.get_size(program);
                 let ireg = &custom_build.nums_ptrs.as_ref().unwrap()[int_ptr_count-1].to_byte_size(osize);
                 writeln!(f, "   mov {} [rsp-{}], {}",size_to_nasm_type(osize), offset, ireg.to_string())?;
                 offset-=osize;
@@ -4796,7 +4802,7 @@ fn nasm_x86_64_handle_scope(f: &mut File, build: &BuildProgram, program: &CmdPro
     let stack_size_org: usize = stack_size;
     local_vars.reserve(contract.Inputs.len()+expect_locals.len());
     if scope.has_contract() {
-        let offset = nasm_x86_64_load_args(f, &scope, build, program)?;
+        let _ = nasm_x86_64_load_args(f, &scope, build, program)?;
         //writeln!(f, "   sub rsp, {}",offset)?;
     }
     for (name, val) in expect_locals.iter() {
@@ -5061,6 +5067,7 @@ fn nasm_x86_64_handle_scope(f: &mut File, build: &BuildProgram, program: &CmdPro
                             let tmp = Register::RSI.to_byte_size(oreg1[0].size());
                             writeln!(f, "   mov {}, {}",tmp.to_string(),oreg1[0].to_string())?;
                             let oreg2 = val.right.as_ref().unwrap().LEIRnasm(vec![Register::RAX, Register::RBX, Register::RCX], f, program, build, &local_vars, stack_size, loc)?;
+                            
                             writeln!(f, "   cmp {}, {}",tmp.to_string(),oreg2[0].to_byte_size(tmp.size()).to_string())?;
                             writeln!(f, "   jz .IF_SCOPE_{}",binst)?;
                         },
@@ -5168,15 +5175,19 @@ fn nasm_x86_64_handle_scope(f: &mut File, build: &BuildProgram, program: &CmdPro
                             let tmp = Register::RSI.to_byte_size(oreg1[0].size());
                             writeln!(f, "   mov {}, {}",tmp.to_string(),oreg1[0].to_string())?;
                             let oreg2 = val.right.as_ref().unwrap().LEIRnasm(vec![Register::RAX, Register::RBX, Register::RCX], f, program, build, &local_vars, stack_size, loc)?;
-                            writeln!(f, "   cmp {}, {}",tmp.to_string(),oreg2[0].to_string())?;
+                            writeln!(f, "   cmp {}, {}",tmp.to_string(),oreg2[0].to_byte_size(tmp.size()).to_string())?;
                             writeln!(f, "   jnz .WHILE_SCOPE_END_{}",inst_count)?;
                         },
                         Op::NEQ  => {
                             let oreg1 = val.left.as_ref().unwrap().LEIRnasm(vec![Register::RAX, Register::RBX, Register::RCX], f, program, build, &local_vars, stack_size, loc)?;
                             let tmp = Register::RSI.to_byte_size(oreg1[0].size());
+                            // println!("oregs1: {:?}",oreg1);
+                            // println!("val left: {:?}",val);
+                            // exit(1);
                             writeln!(f, "   mov {}, {}",tmp.to_string(),oreg1[0].to_string())?;
+                            
                             let oreg2 = val.right.as_ref().unwrap().LEIRnasm(vec![Register::RAX, Register::RBX, Register::RCX], f, program, build, &local_vars, stack_size, loc)?;
-                            writeln!(f, "   cmp {}, {}",tmp.to_string(),oreg2[0].to_string())?;
+                            writeln!(f, "   cmp {}, {}",tmp.to_string(),oreg2[0].to_byte_size(tmp.size()).to_string())?;
                             writeln!(f, "   jz .WHILE_SCOPE_END_{}",inst_count)?;
                         },
                         Op::GT   => {
@@ -5184,7 +5195,7 @@ fn nasm_x86_64_handle_scope(f: &mut File, build: &BuildProgram, program: &CmdPro
                             let tmp = Register::RSI.to_byte_size(oreg1[0].size());
                             writeln!(f, "   mov {}, {}",tmp.to_string(),oreg1[0].to_string())?;
                             let oreg2 = val.right.as_ref().unwrap().LEIRnasm(vec![Register::RAX, Register::RBX, Register::RCX], f, program, build, &local_vars, stack_size, loc)?;
-                            writeln!(f, "   cmp {}, {}",tmp.to_string(),oreg2[0].to_string())?;
+                            writeln!(f, "   cmp {}, {}",tmp.to_string(),oreg2[0].to_byte_size(tmp.size()).to_string())?;
                             writeln!(f, "   jle .WHILE_SCOPE_END_{}",inst_count)?;
                         },
                         Op::GTEQ => {
@@ -5192,7 +5203,7 @@ fn nasm_x86_64_handle_scope(f: &mut File, build: &BuildProgram, program: &CmdPro
                             let tmp = Register::RSI.to_byte_size(oreg1[0].size());
                             writeln!(f, "   mov {}, {}",tmp.to_string(),oreg1[0].to_string())?;
                             let oreg2 = val.right.as_ref().unwrap().LEIRnasm(vec![Register::RAX, Register::RBX, Register::RCX], f, program, build, &local_vars, stack_size, loc)?;
-                            writeln!(f, "   cmp {}, {}",tmp.to_string(),oreg2[0].to_string())?;
+                            writeln!(f, "   cmp {}, {}",tmp.to_string(),oreg2[0].to_byte_size(tmp.size()).to_string())?;
                             writeln!(f, "   jl .WHILE_SCOPE_END_{}",inst_count)?;
                         },
                         Op::LT   => {
@@ -5200,7 +5211,7 @@ fn nasm_x86_64_handle_scope(f: &mut File, build: &BuildProgram, program: &CmdPro
                             let tmp = Register::RSI.to_byte_size(oreg1[0].size());
                             writeln!(f, "   mov {}, {}",tmp.to_string(),oreg1[0].to_string())?;
                             let oreg2 = val.right.as_ref().unwrap().LEIRnasm(vec![Register::RAX, Register::RBX, Register::RCX], f, program, build, &local_vars, stack_size, loc)?;
-                            writeln!(f, "   cmp {}, {}",tmp.to_string(),oreg2[0].to_string())?;
+                            writeln!(f, "   cmp {}, {}",tmp.to_string(),oreg2[0].to_byte_size(tmp.size()).to_string())?;
                             writeln!(f, "   jge .WHILE_SCOPE_END_{}",inst_count)?;
                         },
                         Op::LTEQ => {
@@ -5208,7 +5219,7 @@ fn nasm_x86_64_handle_scope(f: &mut File, build: &BuildProgram, program: &CmdPro
                             let tmp = Register::RSI.to_byte_size(oreg1[0].size());
                             writeln!(f, "   mov {}, {}",tmp.to_string(),oreg1[0].to_string())?;
                             let oreg2 = val.right.as_ref().unwrap().LEIRnasm(vec![Register::RAX, Register::RBX, Register::RCX], f, program, build, &local_vars, stack_size, loc)?;
-                            writeln!(f, "   cmp {}, {}",tmp.to_string(),oreg2[0].to_string())?;
+                            writeln!(f, "   cmp {}, {}",tmp.to_string(),oreg2[0].to_byte_size(tmp.size()).to_string())?;
                             writeln!(f, "   jg .WHILE_SCOPE_END_{}",inst_count)?;
                         },
                         Op::NOT  => todo!(),
