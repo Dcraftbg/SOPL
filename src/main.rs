@@ -3517,6 +3517,7 @@ fn parse_token_to_build_inst(token: Token,lexer: &mut Lexer, program: &mut CmdPr
                                     None => {},
                                 }
                             }
+                            lexer.CurrentFuncs.extend(lf.CurrentFuncs);
                             build.constdefs.reserve(build2.constdefs.len());
                             for (cn_name,cn_val) in build2.constdefs{
                                 let loc = cn_val.loc.clone();
