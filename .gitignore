@@ -16,7 +16,6 @@ debug.log
 /src/std.spl
 /editor/highlighting/nvim/
 /editor/highlighting/vscode/spl/autocomplete
-
 /waterfall/
 /tools/.vscode
 /tools/sopl_test.exe
