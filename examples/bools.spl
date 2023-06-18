@@ -2,7 +2,7 @@ extern "C" printf(*char , int , int, bool : int);
 func main(){
     let b: int = 5;
     let c: int = 4;
-    let a: bool = b == c;
+    let a: int = b == c;
     printf("b=%d, c=%d b==c: %x\n",b,c,a);
     a = b >= c;
     printf("b=%d, c=%d b>=c: %x\n",b,c,a);

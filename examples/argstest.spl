@@ -1,7 +1,7 @@
 //TODO: fix tests with printf, since printf no longer works
 
 extern "C" printf(*char, int : int);
-func main(argc: int,argv: ptr) {
+func main(argc: int, argv: **char) {
     // RAX = argc1
     // RAX 1 +
     // RAX 8 *
