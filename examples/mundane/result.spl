@@ -1,4 +1,4 @@
-extern "C" printf(*char, int : int);
+include "../../libs/libc/stdio.spl"
 func add(a: int, b:int : int) {
     return a+b;
 }

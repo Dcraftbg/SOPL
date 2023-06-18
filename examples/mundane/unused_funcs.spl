@@ -1,7 +1,7 @@
-extern "C" puts(ptr : int)
+include "../../libs/libc/stdio.spl"
 func a() {
-    puts("Hello from a!"c)
+    puts("Hello from a!")
 }
 func main() {
-    puts("Hello from main!\n"c)
+    puts("Hello from main!\n")
 }

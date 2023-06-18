@@ -1,6 +1,4 @@
-extern "C" fopen(ptr, ptr : ptr);
-extern "C" fwrite(ptr,long,long,ptr : long);
-extern "C" fclose(ptr : int);
+include "../../libs/libc/stdio.spl"
 func main() {
     let f: ptr = fopen("hello.txt","w");
     fwrite("Hello World!",12, 1, f);

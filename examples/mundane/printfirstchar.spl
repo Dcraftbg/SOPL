@@ -1,4 +1,4 @@
-extern "C" printf(*char, char);
+include "../../libs/libc/stdio.spl"
 func printfc(str: *char) {
     let c: char = *str;
     printf("%c",c);

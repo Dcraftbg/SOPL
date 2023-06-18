@@ -1,4 +1,4 @@
-include "../../src/C/stdio.spl"
+include "../../libs/libc/stdio.spl"
 func main(){
 	let f: ptr;
 	f = fopen("examples/int/hello.txt"c, "w"c);

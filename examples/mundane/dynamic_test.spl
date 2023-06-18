@@ -1,0 +1,4 @@
+include "../../libs/libc/stdio.spl"
+func main(){
+    printf("Hello %s\n","World");
+}

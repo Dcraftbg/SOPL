@@ -349,6 +349,7 @@ enum IntrinsicType {
 
     TOP,
     CAST,
+    THREEDOTS,
     // BOOLEAN OPERATIONS
     // EQUALS,
     // MORETHAN,
@@ -469,6 +470,9 @@ impl IntrinsicType {
             },
             IntrinsicType::SYSCALL => {
                 if isplural {"Syscall".to_string()} else {"Syscall".to_string().to_string()}
+            },
+            IntrinsicType::THREEDOTS => {
+                if isplural {"Threedots".to_string()} else {"Threedots".to_string().to_string()}
             },
         }
     }
@@ -641,11 +645,11 @@ impl Expression {
                     if s.op == Op::STAR {
                         let res = v2.result_of_c(program, build, local_vars,loc);
                         let res = res.unwrap();
-                        typ_assert!(loc,res.is_some_ptr(),"Error: Cannot dereference void pointer!");
+                        com_assert!(loc,res.is_some_ptr(),"Error: Cannot dereference void pointer!");
                         res.get_ptr_val()
                     }
                     else if s.op == Op::BAND {
-                        typ_assert!(loc,v2.is_ofp(),"Cannot reference expression!");
+                        com_assert!(loc,v2.is_ofp(),"Cannot reference expression!");
                         let ofp = v2.unwrap_val();
                         match ofp {
                             OfP::LOCALVAR(v) => {
@@ -690,9 +694,16 @@ impl Expression {
                         else if self.is_expr() && (self.unwrap_expr().op == Op::PLUS || self.unwrap_expr().op == Op::MINUS) && res1.as_ref().unwrap().is_ptr() && res2.as_ref().unwrap().is_numeric() {
                             res1
                         }
+                        else if self.is_expr() && self.unwrap_expr().op.is_boolean() && res1.as_ref().unwrap().is_ptr() && res2.as_ref().unwrap().is_numeric() {
+                            Some(VarType::BOOLEAN)
+                        }
                         else {
                             println!("res1: {:?}",res1);
                             println!("res2: {:?}",res2);
+                            println!("op: {:?}",s.op);
+                            println!("(self.unwrap_expr().op == Op::PLUS || self.unwrap_expr().op == Op::MINUS): {}",(self.unwrap_expr().op == Op::PLUS || self.unwrap_expr().op == Op::MINUS));
+                            println!("res1.as_ref().unwrap().is_ptr(): {}",res1.as_ref().unwrap().is_ptr());
+                            println!("res2.as_ref().unwrap().is_numeric(): {}",res2.as_ref().unwrap().is_numeric());
                             println!("{:?}.weak_eq({:?}) = {}",res1,res2,res1.as_ref().unwrap().weak_eq(&res2.as_ref().unwrap()));
                             panic!("Unreachable at {}",loc.loc_display())
                         }
@@ -1192,6 +1203,8 @@ fn tokens_to_expression(body: &[Token],build: &mut BuildProgram, program: &CmdPr
             //println!("Ended at: {:?}",body[i2-1]);
             //println!("Result: {:?}",&body[i..i2]);
             //println!("------------------------");
+            //TODO: Rethink the priority system as an example like this:
+            // *(src+index) != *(srca+index)   - does not work since STAR for dereferencing has the same priority as !=
             currentETree.right = Some(tokens_to_expression(&body[i..i2],build,program,locals));
             if i2 == body.len() {}
             else {
@@ -2468,21 +2481,12 @@ impl OfP {
                 }
             },
             OfP::RESULT(func, args) => {
-                //println!("Trying to get contract of {}: {:?} with build:\n {:#?}",func,build.get_contract_of_symbol(func),build.externals);
-                //nasm_x86_64_prep_args(program, build, f, build.get_contract_of_symbol(func).unwrap().clone(), args, &mut stack_size, loc.clone(), &local_vars)?;
                 let (sp_taken, shadow_space) = nasm_x86_64_prep_args(program, build, f, args, stack_size, local_vars)?;
-                //todo!("^");
                 writeln!(f, "   call {}{}",program.architecture.func_prefix,func)?;
-                // if let Some(ops) = program.architecture.options.argumentPassing.custom_get() {
-                //     if ops.shadow_space > 0 {
-                //         writeln!(f, "   add rsp, {}",ops.shadow_space)?;
-                //     }
-                // }
                 if sp_taken-stack_size+shadow_space > 0 {
                     writeln!(f, "   add rsp, {}",sp_taken-stack_size+shadow_space)?
                 }
                 let reg = &regs[0].to_byte_size(build.get_contract_of_symbol(func).unwrap().Outputs.get(0).unwrap_or(&VarType::LONG).get_size(program));
-                //println!("Output reg: {:?}",reg.to_byte_size(8));
                 if reg.to_byte_size(8) != Register::RAX {
                     let oreg = Register::RAX.to_byte_size(reg.size());
                     writeln!(f, "   mov {}, {}",reg.to_string(),oreg.to_string())?;
@@ -2991,7 +2995,7 @@ enum VarType {
     INT,
     LONG,
     PTR(Ptr),
-    CUSTOM(Uuid)
+    CUSTOM(Uuid),
 }
 impl VarType {
     fn is_numeric(&self) -> bool {
@@ -3108,7 +3112,32 @@ impl VarType {
 }
 type ScopeBody = Vec<(ProgramLocation,Instruction)>;
 type ContractInputs = LinkedHashMap<String, VarType>;
-type ContractInputPool = Vec<VarType>;
+//type ContractInputPool = Vec<VarType>;
+
+#[derive(Debug, Clone)]
+struct ContractInputPool {
+    body: Vec<VarType>,
+    is_dynamic: bool,
+    dynamic_type: Option<VarType>
+}
+impl ContractInputPool {
+    fn len(&self) -> usize {
+        self.body.len()
+    }
+    fn push(&mut self, val: VarType) {
+        self.body.push(val)
+    }
+    fn pop(&mut self) -> Option<VarType> {
+        self.body.pop()
+    }
+    fn reverse(&mut self) {
+        self.body.reverse()
+    }
+    fn new() -> Self {
+        Self { body: vec![], is_dynamic: false, dynamic_type: None}
+    }
+}
+
 #[derive(Debug, Clone)]
 struct FunctionContract {
     Inputs: ContractInputs,
@@ -3121,7 +3150,7 @@ impl FunctionContract {
             for (_,val) in self.Inputs.iter() {
                 o.push(val.clone());
             }
-            o
+            ContractInputPool { body: o, is_dynamic: false, dynamic_type: None}
         }, Outputs: self.Outputs.clone() }
     }
 }
@@ -3423,7 +3452,7 @@ fn parse_argument_contract(lexer: &mut Lexer, build: &mut BuildProgram, program:
 IT DOES NOT CONSUME THE FIRST (
 */
 fn parse_any_contract(lexer: &mut Lexer) -> AnyContract {
-    let mut out = AnyContract { InputPool: vec![], Outputs: vec![] };
+    let mut out = AnyContract { InputPool: ContractInputPool::new(), Outputs: vec![] };
     let mut expectNextSY = false;
     let mut is_input = true;
     while let Some(token) = lexer.next() {
@@ -3440,6 +3469,25 @@ fn parse_any_contract(lexer: &mut Lexer) -> AnyContract {
                         is_input = false;
                         expectNextSY = false;
                     },
+                    IntrinsicType::THREEDOTS => {
+                        let ntok = par_expect!(lexer.currentLocation, lexer.next(), "Error: abruptly ran out of tokens for constant definition cast!");
+                        par_assert!(ntok, ntok.typ == TokenType::Operation(Op::LT),"Error: unexpected token type {} in cast! INVALID SYNTAX",ntok.typ.to_string(false));
+                        let ntok = par_expect!(lexer.currentLocation, lexer.next(), "Error: abruptly ran out of tokens for constant definition cast!");
+                        if let TokenType::WordType(w) = &ntok.typ {
+                            par_assert!(ntok, w == "Any","Error: Expected any found {}!",w);
+                            out.InputPool.is_dynamic = true;
+                            out.InputPool.dynamic_type = None
+                        }
+                        else if let TokenType::Definition(typ) = ntok.typ {
+                            out.InputPool.is_dynamic = true;
+                            out.InputPool.dynamic_type = Some(typ)
+                        }
+                        //let typ = if let TokenType::Definition(typ) = ntok.typ { typ } else {par_error!(ntok, "Error: expected definition but found {}",ntok.typ.to_string(false))};
+                        let ntok = par_expect!(lexer.currentLocation, lexer.next(), "Error: abruptly ran out of tokens for constant definition cast!");
+                        par_assert!(ntok, ntok.typ == TokenType::Operation(Op::GT),"Error: unexpected token type {} in cast! INVALID SYNTAX",ntok.typ.to_string(false));
+                    
+                    }
+
                     other => par_error!(token, "Unexpected intrinsic in any contract! {}",other.to_string(false))
                 }
             }
@@ -3885,7 +3933,7 @@ fn parse_token_to_build_inst(token: Token,lexer: &mut Lexer, program: &mut CmdPr
                                 let _loc = fn_fn.location.clone();
                                 match build.functions.insert(fn_name.clone(), fn_fn) {
                                     Some(_Other) => {
-                                        par_error!(_loc, "Error: mulitply defined symbols {}",fn_name);
+                                        par_error!(_loc, "Error: multiply defined symbols {}",fn_name);
                                     },
                                     None => {},
                                 }
@@ -3894,9 +3942,12 @@ fn parse_token_to_build_inst(token: Token,lexer: &mut Lexer, program: &mut CmdPr
                             build.constdefs.reserve(build2.constdefs.len());
                             for (cn_name,cn_val) in build2.constdefs{
                                 let loc = cn_val.loc.clone();
-                                match build.constdefs.insert(cn_name.clone(),cn_val) {
+                                match build.constdefs.insert(cn_name.clone(),cn_val.clone()) {
                                     Some(_Other) => {
-                                        par_error!(loc,"Error: mulitply defined symbols {}",cn_name);
+                                        if _Other.typ == cn_val.typ {}
+                                        else {
+                                            par_error!(loc,"Error: multiply defined symbols {}",cn_name);
+                                        }
                                     },
                                     None => {},
                                 }
@@ -4106,6 +4157,7 @@ fn parse_token_to_build_inst(token: Token,lexer: &mut Lexer, program: &mut CmdPr
                 IntrinsicType::ELSE => {
                     scopeStack.push(Scope { typ: ScopeType::NORMAL(NormalScope { typ: NormalScopeType::ELSE, body: vec![], locals: Locals::new()}), hasBeenOpened: false })
                 },
+                IntrinsicType::THREEDOTS => todo!(),
 
             }
         }
@@ -4318,6 +4370,23 @@ fn optimization_ops_scope(build: &BuildProgram, program: &CmdProgram, scope: TCS
                     }
                     _ => {}
                 }
+            }
+            Instruction::CALLRAW(r, args) => {
+                for arg in args {
+                    match arg {
+                        OfP::CONST(val) => {
+                            match val {
+                                RawConstValueType::STR(uuid) => {
+                                    out.usedStrings.insert(uuid.clone(), fn_name.clone());
+                                },
+                                _ => {}
+                            }
+                        },
+
+                        _ => {}
+                    }
+                }
+                out.usedExterns.insert(r.clone());
             }
             Instruction::CALL(r,args) => {
                 for arg in args {
@@ -5054,7 +5123,14 @@ fn nasm_x86_64_handle_scope(f: &mut File, build: &BuildProgram, program: &CmdPro
                             writeln!(f, "   mov rax, {}",val.get_num_data())?;
                             writeln!(f, "   cmp rax, 0")?;
                         },
-                        OfP::RESULT(_, _) => todo!(),
+                        OfP::RESULT(func,args) => {
+                            let (sp_taken, shadow_space) = nasm_x86_64_prep_args(program, build, f, args, stack_size, &local_vars)?;
+                            writeln!(f, "   call {}{}",program.architecture.func_prefix,func)?;
+                            if sp_taken-stack_size+shadow_space > 0 {
+                                writeln!(f, "   add rsp, {}",sp_taken-stack_size+shadow_space)?
+                            }
+                            writeln!(f, "   cmp {}, 0",Register::RAX.to_string())?;
+                        },
                     }
                     writeln!(f, "   jnz .IF_SCOPE_{}",binst)?;
                 }
@@ -5143,6 +5219,7 @@ fn nasm_x86_64_handle_scope(f: &mut File, build: &BuildProgram, program: &CmdPro
                 };
                 if condition.is_ofp() {
                     let val = condition.unwrap_val();
+                    
                     match val {
                         OfP::REGISTER(reg) => {
                             let reg = reg.to_byte_size(1);
@@ -5162,7 +5239,14 @@ fn nasm_x86_64_handle_scope(f: &mut File, build: &BuildProgram, program: &CmdPro
                             writeln!(f, "   mov rax, {}",val.get_num_data())?;
                             writeln!(f, "   cmp rax, 0")?;
                         },
-                        OfP::RESULT(_, _) => todo!(),
+                        OfP::RESULT(func, args) => {
+                            let (sp_taken, shadow_space) = nasm_x86_64_prep_args(program, build, f, args, stack_size, &local_vars)?;
+                            writeln!(f, "   call {}{}",program.architecture.func_prefix,func)?;
+                            if sp_taken-stack_size+shadow_space > 0 {
+                                writeln!(f, "   add rsp, {}",sp_taken-stack_size+shadow_space)?
+                            }
+                            writeln!(f, "   cmp {}, 0",Register::RAX.to_string())?;
+                        },
                     }
                     writeln!(f, "   jz .WHILE_SCOPE_END_{}",inst_count)?;
                 }
@@ -5330,7 +5414,7 @@ fn to_nasm_x86_64(build: &mut BuildProgram, program: &CmdProgram) -> io::Result<
                 ProgramStringType::CSTR => {},
             }
         }
-        else if program.print_unused_warns && program.print_unused_strings {
+        else if program.print_unused_warns || program.print_unused_strings {
             println!("[NOTE] Unused string:   <{}> \"{}\" - This is probably due to a constant definition that was never used or a function that may have used that strings, that got cut off from the final build",UUID, stridef.Data.escape_default());
             for (cd_name, cd) in build.constdefs.iter() {
                 match cd.typ {
@@ -5365,18 +5449,22 @@ fn to_nasm_x86_64(build: &mut BuildProgram, program: &CmdProgram) -> io::Result<
             }
         }
     }
+    //println!("current program: {:#?}",program);
     for (Word,exter) in build.externals.iter() {
         match exter.typ {
             ExternalType::CExternal| ExternalType::RawExternal => {
+    //            println!("external: {}\nprogram.in_mode == OptimizationMode::DEBUG={}\noptimization.usedExterns.contains(Word)={}",Word,program.in_mode == OptimizationMode::DEBUG,optimization.usedExterns.contains(Word));
                 if program.in_mode == OptimizationMode::DEBUG || optimization.usedExterns.contains(Word) {
+                    
                     writeln!(&mut f,"  extern {}{}{}",exter.typ.prefix(&program),Word,exter.typ.suffix())?;
                 }
-                else if program.print_unused_warns && program.print_unused_externs {
+                else if program.print_unused_warns || program.print_unused_externs {
                     println!("[NOTE] {}: Unused external: \"{}\"",exter.loc.loc_display(),Word);
                 }
             },
         }
     }
+    //println!("used externals: {:#?}",optimization.usedExterns);
     writeln!(&mut f, "section .text")?;
 
     for (function_name,function) in build.functions.iter() {
@@ -5506,24 +5594,44 @@ fn type_check_scope(build: &BuildProgram, program: &CmdProgram, scope: TCScopeTy
             Instruction::DEFVAR(_)           => {},
             Instruction::MOV(_, _)           => {},
             Instruction::CALLRAW(name,contract)        => {
-                let mut externContract = build.get_contract_of_symbol(name).unwrap_or(AnyContract { InputPool: vec![], Outputs: vec![] }).clone();//build.externals.get(name).unwrap().contract.as_ref().unwrap_or(&AnyContract { InputPool: vec![], Outputs: vec![] }).clone();
+                let mut externContract = build.get_contract_of_symbol(name).unwrap_or(AnyContract { InputPool: ContractInputPool::new(), Outputs: vec![] }).clone();//build.externals.get(name).unwrap().contract.as_ref().unwrap_or(&AnyContract { InputPool: vec![], Outputs: vec![] }).clone();
                 externContract.InputPool.reverse();
                 //println!("externContract: {:?}",externContract);
-                typ_assert!(loc, externContract.InputPool.len() == contract.len(), "Error: Expected: {} amount of arguments but found {}",externContract.InputPool.len(), contract.len());
+                //println!("externContract: {:#?}",externContract);
+                typ_assert!(loc, externContract.InputPool.len() == contract.len() || externContract.InputPool.is_dynamic, "Error: Expected: {} amount of arguments but found {}",externContract.InputPool.len(), contract.len());
                 for arg in contract {
                     //println!("arg = {:?}",arg);
+                    
                     match arg {
                         OfP::LOCALVAR(name) => {
-                            let etyp = typ_expect!(loc, externContract.InputPool.pop(), "Error: Additional arguments provided for external that doesn't take in any more arguments!");
+                            let etyp = if externContract.InputPool.len() > 0 {
+                                Some(typ_expect!(loc, externContract.InputPool.pop(), "Error: Additional arguments provided for external that doesn't take in any more arguments!"))
+                            } else if externContract.InputPool.is_dynamic {
+                                externContract.InputPool.dynamic_type.clone()
+                            }
+                            else {
+                                typ_error!(loc, "Error: Unreachable");
+                            };
                             let local = get_local(currentLocals, name).unwrap();
-                            typ_assert!(loc,etyp.weak_eq(&local),"Error: Incompatible types for contract\nExpected: {}\nFound: ({}) {}",etyp.to_string(false),name,local.to_string(false));
+                            if let Some(etyp) = etyp {
+                                typ_assert!(loc,etyp.weak_eq(&local),"Error: Incompatible types for contract\nExpected: {}\nFound: ({}) {}",etyp.to_string(false),name,local.to_string(false));
+                            }
                         },
                         OfP::REGISTER(_) => todo!("Registers are still yet unhandled!"),
                         OfP::CONST(Const) => {
                             let typs = Const.to_type(build);
                             for typ in typs {
-                                let etyp = typ_expect!(loc, externContract.InputPool.pop(), "Error: Additional arguments provided for external that doesn't take in any more arguments!\nExpected: Nothing\nFound: {}\n",typ.to_string(false));
-                                typ_assert!(loc,etyp.weak_eq(&typ),"Error: Incompatible types for contract\nExpected: {}\nFound: {}",etyp.to_string(false),typ.to_string(false));
+                                let etyp = if externContract.InputPool.len() > 0 {
+                                    Some(typ_expect!(loc, externContract.InputPool.pop(), "Error: Additional arguments provided for external that doesn't take in any more arguments!"))
+                                } else if externContract.InputPool.is_dynamic {
+                                    externContract.InputPool.dynamic_type.clone()
+                                }
+                                else {
+                                    typ_error!(loc, "Error: Unreachable");
+                                };
+                                if let Some(etyp) = etyp {
+                                    typ_assert!(loc,etyp.weak_eq(&typ),"Error: Incompatible types for contract\nExpected: {}\nFound: {}",etyp.to_string(false),typ.to_string(false));
+                                }
                             }
                         },
                         OfP::RESULT(_, _) => todo!(),
@@ -5534,7 +5642,7 @@ fn type_check_scope(build: &BuildProgram, program: &CmdProgram, scope: TCScopeTy
                 let ot = o.result_of(program,build, &currentLocals,loc);
                 let et = e.result_of(program, build, &currentLocals,loc);
                 typ_assert!(loc,ot.is_some() && et.is_some(), "Error: Expected result but found nothing!");
-                typ_assert!(loc,ot.as_ref().unwrap().weak_eq(&et.as_ref().unwrap()), "Error: Types did not match Expected: {} but found {}",ot.unwrap().to_string(false),et.unwrap().to_string(false));
+                typ_assert!(loc,ot.as_ref().unwrap().weak_eq(&et.as_ref().unwrap()) || ot.as_ref().unwrap().is_ptr() && ot.as_ref().unwrap().is_numeric(), "Error: Types did not match Expected: {} but found {}",ot.unwrap().to_string(false),et.unwrap().to_string(false));
             },
             Instruction::SUBSET(o, e)           => {
                 let ot = o.result_of(program,build, currentLocals,loc);
@@ -5874,6 +5982,7 @@ fn main() {
     Intrinsics.insert("while".to_string(), IntrinsicType::WHILE);
     Intrinsics.insert("cast".to_string(), IntrinsicType::CAST);
     Intrinsics.insert("syscall".to_string(), IntrinsicType::SYSCALL);
+    Intrinsics.insert("...".to_string(), IntrinsicType::THREEDOTS);
 
 
     let mut Definitions: HashMap<String,VarType> = HashMap::new();
@@ -5883,6 +5992,7 @@ fn main() {
     Definitions.insert("bool".to_string(), VarType::BOOLEAN);
     Definitions.insert("ptr".to_string(), VarType::PTR(Ptr{ typ: PtrTyp::VOID, inner_ref: 0}));
     Definitions.insert("short".to_string(), VarType::SHORT);
+    Definitions.insert("size_t".to_string(), if program.architecture.bits == 64 { VarType::LONG } else { VarType::SHORT});
     //assert!(!program.path.is_empty(),"Error: expected program.path but found nothing!");
     if program.path.is_empty() {
         println!("Error: Unspecified input file!");

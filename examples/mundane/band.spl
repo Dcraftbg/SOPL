@@ -1,4 +1,4 @@
-extern "C" printf(*char, int);
+include "../../libs/libc/stdio.spl"
 func addptr(a: *int, b: *int : int) {
     let aval: int = *a;
     let bval: int = *b;

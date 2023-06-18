@@ -1,5 +1,5 @@
 const a = -1;
-extern "C" printf(ptr, long : int);
+include "../../libs/libc/stdio.spl"
 func main() {
     printf("A: %d\n"c, a);
 }

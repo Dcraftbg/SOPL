@@ -1,32 +1,91 @@
-extern "C" printf(*char, long);
-func cstrlen(str: *char : long) {
-    let out: long = 0;
+func cstrlen(str: *char : size_t) {
+    let out: size_t = 0;
     while *(str+out) != 0 {
         out += 1;
     }
     return out;
 }
-func strcpy(dst: *char, src: *char, size: long) {
-    let i: long = 0;
+func strcpy(dst: *char, src: *char, size: size_t) {
+    let i: size_t = 0;
     while i < size {
         *(dst+i) = *(src+i);
         i += 1;
     }
 }
-func memset(dst: *char, val: char, size: long) {
-    let i: long = 0;
+func memset(dst: *char, val: char, size: size_t) {
+    let i: size_t = 0;
     while i < size {
         *(dst+i) = val;
         i += 1;
     }
 }
-func main(){
-    let c: *char = "Hello";
-    let ca: *char = "Goody";
-    let result: long = cstrlen(c);
-    printf("Result: %lld\n",result);
-    strcpy(c,ca,result);
-    printf("c: %s\n",c);
-    memset(c,87,result);
-    printf("c: %s\n",c);
+func memchr(src: *char, c: char, size: size_t : *char) {
+    
+    let o: *char = src;
+    while o - src < size {
+        let ce: char = *o;        
+        if *o == c {
+            size = o - src;
+        }
+        o += 1;
+    }
+    return o;
 }
+func striseq(src: *char, srca: *char, size: size_t : bool) {
+    let index: size_t = 0;
+    while index < size {
+        if *(src+index) != (*(srca+index)) {
+            return 0;
+        }
+        index += 1;
+    }
+    return 1;
+}
+const nullptr = cast<ptr>(0);
+
+func strfind(src: *char, size_src: size_t, srca: *char,size_srca: size_t : *char) {
+    let index: size_t = 0;
+    let found_index: size_t = -1;
+
+    while index+size_srca < size_src {
+        if *(src+index) == (*srca) {
+            let srcf: *char = src+index;
+            if striseq(srcf, srca, size_srca) {
+                found_index = index;
+                index = size_src;
+            }
+        }
+        index += 1;
+    }
+    if found_index == -1 {
+        return nullptr;
+    }
+    else {
+        return src+found_index;
+    }
+}
+// Testing
+//include "../libc/stdio.spl"
+//func main(){
+//    //let c: *char = "Hello";
+//    // let clen: size_t = cstrlen(c);
+//    // //printf("Got here!\n");
+//    // let res: *char = memchr(c, 108, clen);
+//    // printf("Res: %s\n",res);
+//    let a: *char = "Hello World!";
+//    
+//    let res: *char = strfind(a,12, "World",5);
+//    if res == 0 {
+//        printf("Error: Could not find World inside string!\n");
+//    }
+//    else {
+//        let expr: size_t = res - a;
+//        printf("Found it at: %lld\n",expr);
+//    }
+//    //if memiseq("Hello", "Hello", 5) {
+//    //    printf("YAY they are equal!\n");
+//    //}
+//    //else {
+//    //    printf("Noo.... They are not equal!\n");
+//    //}
+//}

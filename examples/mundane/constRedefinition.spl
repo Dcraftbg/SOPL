@@ -3,7 +3,7 @@ const a: *char = "Hello World!";
 //const a = "Hello!"c; //<- // this isn't gonna cause an issue
 const NULL: long = 0;
 const nullptr: ptr = cast<ptr>(NULL);
-extern "C" puts(*char : long);
+include "../../libs/libc/stdio.spl"
 func main(){
     puts(a);
 }

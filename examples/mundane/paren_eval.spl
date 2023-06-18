@@ -1,4 +1,4 @@
-extern "C" printf(*char, int);
+include "../../libs/libc/stdio.spl"
 func main(){
     let a: int = 4;
     let b: int = 4;

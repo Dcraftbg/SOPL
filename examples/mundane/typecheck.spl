@@ -1,4 +1,4 @@
-extern "C" puts(ptr : int);
+include "../../libs/libc/stdio.spl"
 const Hello = "Hello World\n";
 func main() {
     puts("Hello World!\n") // This should warn because nornal strings also push their length as the argument
