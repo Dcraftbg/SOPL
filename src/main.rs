@@ -538,12 +538,13 @@ impl Op {
             Op::BAND => "&",
         }
     }
-    fn get_priority(&self, _currentETree: &ExprTree) -> usize {
+    fn get_priority(&self, currentETree: &ExprTree) -> usize {
         match self {
             Self::NOT =>  0,
             Self::EQ   | Self::NEQ | Self::GT | Self::LT | Self::GTEQ | Self::LTEQ => 1,
             Self::PLUS | Self::MINUS                                               => 2,
-            Self::STAR | Self::BAND                                                => 3,
+            Self::STAR                                                             => {if currentETree.left.is_none() {0} else {3}},
+            Self::BAND                                                             => 0,
             Self::DIV | Self::REMAINDER                                            => 3,
             Self::NONE  => panic!("This should not occur"),
         }
@@ -589,14 +590,14 @@ impl Expression {
             _ => false
         }
     }
-    fn result_of(&self,program: &CmdProgram,build: &BuildProgram, local_vars: &Vec<Locals>) -> Option<VarType> {
+    fn result_of(&self,program: &CmdProgram,build: &BuildProgram, local_vars: &Vec<Locals>, loc: &ProgramLocation) -> Option<VarType> {
         match self {
             Self::val(v) => v.var_type_t(build, local_vars),
             Self::expr(s) => {
                 if let Some(v1) = &s.left {
-                    let res1 = v1.result_of(program, build, local_vars);
+                    let res1 = v1.result_of(program, build, local_vars,loc);
                     if let Some(v2) = &s.right {
-                        let res2 = v2.result_of(program, build, local_vars);
+                        let res2 = v2.result_of(program, build, local_vars,loc);
                         if res1.is_some() && res2.is_some() && res1.as_ref().unwrap().weak_eq(&res2.as_ref().unwrap()) {
                             res1
                         }
@@ -613,16 +614,15 @@ impl Expression {
                 }
                 else if let Some(v2) = &s.right {
                     if s.op == Op::STAR {
-                        let res = v2.result_of(program, build, local_vars);
+                        let res = v2.result_of(program, build, local_vars,loc);
                         let res = res.unwrap();
-                        assert!(res.is_some_ptr());
+                        typ_assert!(loc,res.is_some_ptr(),"Error: Cannot dereference void pointer!");
                         res.get_ptr_val()
                     }
                     else if s.op == Op::BAND {
-                        assert!(v2.is_ofp());
+                        typ_assert!(loc,v2.is_ofp(),"Cannot reference expression!");
                         let ofp = v2.unwrap_val();
                         match ofp {
-                            OfP::REGISTER(_) => todo!(),
                             OfP::LOCALVAR(v) => {
                                 let vp = get_local(local_vars, v).unwrap();
                                 match vp {
@@ -633,12 +633,13 @@ impl Expression {
                                 }
                                 
                             },
-                            OfP::CONST(_) => todo!(),
-                            OfP::RESULT(_, _) => todo!(),
+                            _ => {
+                                typ_error!(loc,"Error: Cannot reference anything other than localvariable!");
+                            }
                         }
                     }
                     else{
-                        v2.result_of(program, build, local_vars)
+                        v2.result_of(program, build, local_vars,loc)
                     }
                 }
                 else {
@@ -5129,26 +5130,26 @@ fn type_check_scope(build: &BuildProgram, program: &CmdProgram, scope: TCScopeTy
                 }
             },
             Instruction::ADDSET(o, e)           => {
-                let ot = o.result_of(program,build, &currentLocals);
-                let et = e.result_of(program, build, &currentLocals);
+                let ot = o.result_of(program,build, &currentLocals,loc);
+                let et = e.result_of(program, build, &currentLocals,loc);
                 typ_assert!(loc,ot.is_some() && et.is_some(), "Error: Expected result but found nothing!");
                 typ_assert!(loc,ot.as_ref().unwrap().weak_eq(&et.as_ref().unwrap()), "Error: Types did not match Expected: {} but found {}",ot.unwrap().to_string(false),et.unwrap().to_string(false));
             },
             Instruction::SUBSET(o, e)           => {
-                let ot = o.result_of(program,build, currentLocals);
-                let et = e.result_of(program, build, currentLocals);
+                let ot = o.result_of(program,build, currentLocals,loc);
+                let et = e.result_of(program, build, currentLocals,loc);
                 typ_assert!(loc,ot.is_some() && et.is_some(), "Error: Expected result but found nothing!");
                 typ_assert!(loc,ot.as_ref().unwrap().weak_eq(&et.as_ref().unwrap()), "Error: Types did not match Expected: {} but found {}",ot.unwrap().to_string(false),et.unwrap().to_string(false));
             },
             Instruction::MULSET(o, e)           => {
-                let ot = o.result_of(program,build, currentLocals);
-                let et = e.result_of(program, build, currentLocals);
+                let ot = o.result_of(program,build, currentLocals,loc);
+                let et = e.result_of(program, build, currentLocals,loc);
                 typ_assert!(loc,ot.is_some() && et.is_some(), "Error: Expected result but found nothing!");
                 typ_assert!(loc,ot.as_ref().unwrap().weak_eq(&et.as_ref().unwrap()), "Error: Types did not match Expected: {} but found {}",ot.unwrap().to_string(false),et.unwrap().to_string(false));
             },
             Instruction::DIVSET(o, e)           => {
-                let ot = o.result_of(program,build, currentLocals);
-                let et = e.result_of(program, build, currentLocals);
+                let ot = o.result_of(program,build, currentLocals,loc);
+                let et = e.result_of(program, build, currentLocals,loc);
                 typ_assert!(loc,ot.is_some() && et.is_some(), "Error: Expected result but found nothing!");
                 typ_assert!(loc,ot.as_ref().unwrap().weak_eq(&et.as_ref().unwrap()), "Error: Types did not match Expected: {} but found {}",ot.unwrap().to_string(false),et.unwrap().to_string(false));
             },
@@ -5183,13 +5184,13 @@ fn type_check_scope(build: &BuildProgram, program: &CmdProgram, scope: TCScopeTy
             Instruction::INTERRUPT(_)        => {},
             Instruction::EXPAND_SCOPE(s)       => if type_check_scope(build, program, TCScopeType::NORMAL(&s), currentLocals) { hasFoundRet = true},
             Instruction::EXPAND_IF_SCOPE(s)    => {
-                let res = s.typ.unwrap_expr().result_of(program, build, &currentLocals);
+                let res = s.typ.unwrap_expr().result_of(program, build, &currentLocals,loc);
                 typ_assert!(loc,res.is_some() && res.as_ref().unwrap().weak_eq(&VarType::BOOLEAN), "Error: Expected result of expression to be boolean but found: {}",if let Some(res) = res { res.to_string(false)} else { "None".to_owned()});
                 if type_check_scope(build, program, TCScopeType::NORMAL(&s), currentLocals) { hasFoundRet = true} //TODO: Typecheck condition
             }
             Instruction::EXPAND_ELSE_SCOPE(s)  => if type_check_scope(build, program, TCScopeType::NORMAL(&s), currentLocals) { hasFoundRet = true},
             Instruction::EXPAND_WHILE_SCOPE(s) => {
-                let res = s.typ.unwrap_expr().result_of(program, build, &currentLocals);
+                let res = s.typ.unwrap_expr().result_of(program, build, &currentLocals,loc);
                 typ_assert!(loc,res.is_some() && res.as_ref().unwrap().weak_eq(&VarType::BOOLEAN), "Error: Expected result of expression to be boolean but found: {}",if let Some(res) = res { res.to_string(false)} else { "None".to_owned()});
                 if type_check_scope(build, program, TCScopeType::NORMAL(&s), currentLocals) { hasFoundRet = true}
             }
