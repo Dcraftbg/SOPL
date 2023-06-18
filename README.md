@@ -7,7 +7,7 @@ With Rust like syntax with the same amount of low level programming as C
 
 > What is sopl?
 
-Sopl is a lightweight, easily extendable, programming language language.
+Sopl is a lightweight, easily extendable, programming language.
 It is currently in it's very early stages and is syntacically bound to change over time. I'll try to not change it semantically too much but be warned if you are using it to build projects yourself as things may break over versions.
 For more info on current versions checkout [version.md](version.md)
 
