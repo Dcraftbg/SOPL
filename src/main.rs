@@ -1485,7 +1485,7 @@ impl<'a> Lexer<'a> {
         if !c.is_alphabetic() && c != '_' {
             return None;
         }
-        while self.is_not_empty() && c.is_alphanumeric() || c=='_' || c=='-' {
+        while self.is_not_empty() && c.is_alphanumeric() || c=='_'{
             c = self.cchar_s()?;
             self.cursor += 1;
             o.push(c);
@@ -6087,6 +6087,10 @@ fn main() {
 - [x] TODO: Add more examples like OpenGL examples, native Windows examples with linking to kernel.dll etc.
 
 - [x] TODO: Implement while loops
+
+- [ ] TODO: Implement || and && boolean logic
+- [ ] TODO: Implement function overloading
+
 
 - [ ] TODO: Update all of readme and add more documentation
 - [ ] TODO: Add more useful examples

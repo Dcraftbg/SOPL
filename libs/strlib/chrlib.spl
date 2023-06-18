@@ -1,0 +1,34 @@
+// TODO: This is yet at parts theoretical since we don't have || nor && but they seem easy to implement in the future and with them the library should work entirely
+func is_alphabetic(c: char : bool) {
+    return (c>='a' && c <='z') || (c>='A' && c <='Z');
+}
+func is_numeric(c: char : bool) {
+    return c>='0' && c <= '9';
+}
+func is_alphanumeric(c: char : bool) {
+    return (c>='a' && c <='z') || (c>='A' && c <='Z') || (c>='0' && c <= '9');
+}
+func is_whitespace(c: char : bool) {
+    return c == ' ' || c == '\n' || c == '\t' || c == '\r';
+}
+func is_hexanumeric(c: char : bool) {
+    return (c>='0' && c <= '9') || (c>='A' && c<='F');
+}
+func is_lowercase(c: char : bool) {
+    return c>='a' && c <='z';
+}
+func is_uppercase(c: char : bool) {
+    return c>='A' && c <='Z';
+}
+func to_lowercase(c: char : bool) {
+    if is_uppercase(c) {
+        return c-'A'+'a';
+    }
+    return c;
+}
+func to_uppercase(c: char : bool) {
+    if is_lowercase(c) {
+        return c-'a'+'A';
+    }
+    return c;
+}
