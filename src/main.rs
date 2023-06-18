@@ -368,6 +368,19 @@ struct Ptr {
     typ: PtrTyp,
     inner_ref: usize,
 }
+impl Ptr {
+    fn deref(&self) -> VarType {
+        if self.inner_ref > 0 {
+            VarType::PTR(Ptr {typ: self.typ.clone(), inner_ref: self.inner_ref-1 })
+        }
+        else {
+            match &self.typ {
+                PtrTyp::VOID => panic!("Cannot deref void pointer"),
+                PtrTyp::TYP(t) => *(*t).clone(),
+            }
+        }
+    }
+}
 impl PtrTyp {
     fn to_string(&self) -> String {
         match self {
@@ -377,7 +390,7 @@ impl PtrTyp {
             Self::VOID => "void".to_owned()
         }
     }
-}
+}   
 
 impl IntrinsicType {
     fn to_string(&self,isplural: bool) -> String{
@@ -588,6 +601,64 @@ impl Expression {
         match self {
             Self::val(_) => true,
             _ => false
+        }
+    }
+    fn result_of_c(&self,program: &CmdProgram,build: &BuildProgram, local_vars: &HashMap<String,LocalVariable>, loc: &ProgramLocation) -> Option<VarType>  {
+        match self {
+            Self::val(v) => v.var_type(build, local_vars),
+            Self::expr(s) => {
+                if let Some(v1) = &s.left {
+                    let res1 = v1.result_of_c(program, build, local_vars,loc);
+                    if let Some(v2) = &s.right {
+                        let res2 = v2.result_of_c(program, build, local_vars,loc);
+                        if res1.is_some() && res2.is_some() && res1.as_ref().unwrap().weak_eq(&res2.as_ref().unwrap()) {
+                            res1
+                        }
+                        else if res1.is_none() {
+                            res2
+                        }
+                        else {
+                            panic!("Unreachable")
+                        }
+                    }
+                    else {
+                        res1
+                    }
+                }
+                else if let Some(v2) = &s.right {
+                    if s.op == Op::STAR {
+                        let res = v2.result_of_c(program, build, local_vars,loc);
+                        let res = res.unwrap();
+                        typ_assert!(loc,res.is_some_ptr(),"Error: Cannot dereference void pointer!");
+                        res.get_ptr_val()
+                    }
+                    else if s.op == Op::BAND {
+                        typ_assert!(loc,v2.is_ofp(),"Cannot reference expression!");
+                        let ofp = v2.unwrap_val();
+                        match ofp {
+                            OfP::LOCALVAR(v) => {
+                                let vp = &local_vars.get(v).unwrap().typ;
+                                match vp {
+                                    VarType::PTR(val) => {
+                                        Some(VarType::PTR(Ptr { typ: val.typ.clone(), inner_ref: val.inner_ref+1 }))
+                                    },
+                                    _ => Some(VarType::PTR(Ptr { typ: PtrTyp::TYP(Box::new(vp.clone())), inner_ref: 0 }))
+                                }
+                                
+                            },
+                            _ => {
+                                typ_error!(loc,"Error: Cannot reference anything other than localvariable!");
+                            }
+                        }
+                    }
+                    else{
+                        v2.result_of_c(program, build, local_vars,loc)
+                    }
+                }
+                else {
+                    panic!("Unreachable")
+                }
+            }
         }
     }
     fn result_of(&self,program: &CmdProgram,build: &BuildProgram, local_vars: &Vec<Locals>, loc: &ProgramLocation) -> Option<VarType> {
@@ -4036,7 +4107,30 @@ fn parse_token_to_build_inst(token: Token,lexer: &mut Lexer, program: &mut CmdPr
                 }
             }));
             let setop = par_expect!(lexer.currentLocation, setop, "Error: Expected op but found nothing!");
-            todo!("Finish this")
+            //tokens_to_expression(&body, build, program, &currentLocals);
+            let currentScope = getTopMut(scopeStack).unwrap();
+            let expr_body: Vec<Token> = lexer.map_while(|t| if t.typ != TokenType::IntrinsicType(IntrinsicType::DOTCOMA) {Some(t)} else { None }).collect();
+            let expr = tokens_to_expression(&expr_body, build, program, &currentLocals);
+            let sbody = currentScope.body_unwrap_mut().unwrap();
+            match &setop {
+                SetOp::SET      => {
+                    sbody.push((token.location.clone(),Instruction::MOV(tokens_to_expression(&body, build, program, &currentLocals), expr)))
+                },
+                SetOp::PLUSSET  => {
+                    sbody.push((token.location.clone(),Instruction::ADDSET(tokens_to_expression(&body, build, program, &currentLocals), expr)))
+                },
+                SetOp::MINUSSET => {
+                    sbody.push((token.location.clone(),Instruction::SUBSET(tokens_to_expression(&body, build, program, &currentLocals), expr)))
+                },
+                SetOp::MULSET   => {
+                    sbody.push((token.location.clone(),Instruction::MULSET(tokens_to_expression(&body, build, program, &currentLocals), expr)))
+                },
+                SetOp::DIVSET   => {
+                    sbody.push((token.location.clone(),Instruction::DIVSET(tokens_to_expression(&body, build, program, &currentLocals), expr)))
+                },
+            }
+            
+            
         },
         TokenType::SETOperation(_) => todo!(),
     }
@@ -4454,30 +4548,43 @@ fn nasm_x86_64_handle_scope(f: &mut File, build: &BuildProgram, program: &CmdPro
         //println!("Instruction at {}: {:?}",i,inst);
         match inst {
             Instruction::MOV(Op, Op2) => {
-                let Op = Op.unwrap_val();
-                match Op {
-                    OfP::REGISTER(Reg1) => {
-                        let oreg2 = Register::RBX.to_byte_size(Reg1.size());
-                        //TODO: This may break
-                        Op2.LEIRnasm(vec![*Reg1,oreg2], f, program, build,&local_vars, stack_size, loc)?;
-                    }
-                    OfP::LOCALVAR(varOrg) => {
-                        let var = com_expect!(loc,local_vars.get(varOrg),"Error: Unknown variable found during compilation {}",varOrg);
-                        let oreg  = Register::RAX.to_byte_size(var.typ.get_size(program));
-                        let oreg2 = Register::RBX.to_byte_size(var.typ.get_size(program));
-                        let oregs = Op2.LEIRnasm(vec![oreg,oreg2,Register::RCX.to_byte_size(var.typ.get_size(program))], f, program,build, &local_vars, stack_size, loc)?;
-                        if stack_size-var.operand == 0 {
-                            writeln!(f, "   mov {} [rsp], {}",size_to_nasm_type(var.typ.get_size(program)), oregs[0].to_byte_size(var.typ.get_size(program)).to_string())?;
+
+                if let Expression::val(Op) = Op {
+                    match Op {
+                        OfP::REGISTER(Reg1) => {
+                            let oreg2 = Register::RBX.to_byte_size(Reg1.size());
+                            //TODO: This may break
+                            Op2.LEIRnasm(vec![*Reg1,oreg2], f, program, build,&local_vars, stack_size, loc)?;
                         }
-                        else {
-                            writeln!(f, "   mov {} [rsp+{}], {}",size_to_nasm_type(var.typ.get_size(program)),stack_size-var.operand, oregs[0].to_byte_size(var.typ.get_size(program)).to_string())?;
+                        OfP::LOCALVAR(varOrg) => {
+                            let var = com_expect!(loc,local_vars.get(varOrg),"Error: Unknown variable found during compilation {}",varOrg);
+                            let oreg  = Register::RAX.to_byte_size(var.typ.get_size(program));
+                            let oreg2 = Register::RBX.to_byte_size(var.typ.get_size(program));
+                            let oregs = Op2.LEIRnasm(vec![oreg,oreg2,Register::RCX.to_byte_size(var.typ.get_size(program))], f, program,build, &local_vars, stack_size, loc)?;
+                            if stack_size-var.operand == 0 {
+                                writeln!(f, "   mov {} [rsp], {}",size_to_nasm_type(var.typ.get_size(program)), oregs[0].to_byte_size(var.typ.get_size(program)).to_string())?;
+                            }
+                            else {
+                                writeln!(f, "   mov {} [rsp+{}], {}",size_to_nasm_type(var.typ.get_size(program)),stack_size-var.operand, oregs[0].to_byte_size(var.typ.get_size(program)).to_string())?;
+                            }
                         }
-                    }
-                    _ => {
-                        todo!("Unsupported");
+                        _ => {
+                            todo!("Unsupported");
+                        }
                     }
                 }
-                
+                else {
+                    let expr = Op.unwrap_expr();
+                    com_assert!(loc, expr.op == Op::STAR, "Error: Expected op STAR but found {}",expr.op.to_string());
+                    let res_right = expr.right.as_ref().unwrap().result_of_c(program, build, &local_vars, loc).unwrap();
+                    //println!("res_right: {:#?}",res_right);
+                    com_assert!(loc, res_right.is_some_ptr(), "Error: Cannot dereference void pointer");
+                    let oregs = expr.right.as_ref().unwrap().LEIRnasm(vec![Register::RAX.to_byte_size(res_right.get_size(program)),Register::RBX.to_byte_size(res_right.get_size(program)),Register::RCX.to_byte_size(res_right.get_size(program))], f, program, build, &local_vars, stack_size, loc)?;
+                    let res_deref_val = res_right.get_ptr_val().unwrap();
+                    writeln!(f, "   mov rsi, {}",oregs[0].to_string())?;
+                    let oregs2 = Op2.LEIRnasm(vec![Register::RAX.to_byte_size(res_deref_val.get_size(program)),Register::RBX.to_byte_size(res_deref_val.get_size(program)),Register::RCX.to_byte_size(res_deref_val.get_size(program))], f, program, build, &local_vars, stack_size, loc)?;
+                    writeln!(f, "   mov {} [rsi], {}",size_to_nasm_type(res_deref_val.get_size(program)),oregs2[0].to_byte_size(res_deref_val.get_size(program)).to_string())?;
+                }
             }
             Instruction::CALLRAW(Word, contract) => {
                 nasm_x86_64_prep_args(program, build, f, build.get_contract_of_symbol(Word).expect("TODO: implement rawcall without contract").clone(), contract, &mut stack_size, loc.clone(), &local_vars)?;
