@@ -491,6 +491,7 @@ enum Op {
     MINUS,
     DIV,
     STAR,
+    BAND,
     REMAINDER,
     EQ,
     NEQ,
@@ -515,6 +516,7 @@ impl Op {
             "<" => Some(Op::LT),
             "<="=> Some(Op::LTEQ),
             "!" => Some(Op::NOT),
+            "&" => Some(Op::BAND),
             _ => None
         }
     }
@@ -533,15 +535,16 @@ impl Op {
             Op::LTEQ  => "<=",
             Op::NOT   => "!" ,
             Op::REMAINDER => "%",
+            Op::BAND => "&",
         }
     }
-    fn get_priority(&self, currentETree: &ExprTree) -> usize {
+    fn get_priority(&self, _currentETree: &ExprTree) -> usize {
         match self {
             Self::NOT =>  0,
             Self::EQ   | Self::NEQ | Self::GT | Self::LT | Self::GTEQ | Self::LTEQ => 1,
             Self::PLUS | Self::MINUS                                               => 2,
-            Self::STAR => {3}
-            Self::DIV | Self::REMAINDER                               => 3,
+            Self::STAR | Self::BAND                                                => 3,
+            Self::DIV | Self::REMAINDER                                            => 3,
             Self::NONE  => panic!("This should not occur"),
         }
     }
@@ -615,6 +618,25 @@ impl Expression {
                         assert!(res.is_some_ptr());
                         res.get_ptr_val()
                     }
+                    else if s.op == Op::BAND {
+                        assert!(v2.is_ofp());
+                        let ofp = v2.unwrap_val();
+                        match ofp {
+                            OfP::REGISTER(_) => todo!(),
+                            OfP::LOCALVAR(v) => {
+                                let vp = get_local(local_vars, v).unwrap();
+                                match vp {
+                                    VarType::PTR(val) => {
+                                        Some(VarType::PTR(Ptr { typ: val.typ.clone(), inner_ref: val.inner_ref+1 }))
+                                    },
+                                    _ => Some(VarType::PTR(Ptr { typ: PtrTyp::TYP(Box::new(vp.clone())), inner_ref: 0 }))
+                                }
+                                
+                            },
+                            OfP::CONST(_) => todo!(),
+                            OfP::RESULT(_, _) => todo!(),
+                        }
+                    }
                     else{
                         v2.result_of(program, build, local_vars)
                     }
@@ -674,10 +696,16 @@ impl ExprTree {
                     o = leftregs1;
                 }
                 else {
-                    let leftregs1 = left.LEIRnasm(regs.to_vec(), f, program, build, local_vars, stack_size, loc)?;
+                    let mut leftregs1 = left.LEIRnasm(regs.to_vec(), f, program, build, local_vars, stack_size, loc)?;
                     com_assert!(loc,regs.len() > 1, "TODO: Handle multi-parameter loading for expressions!");
                     let right       = com_expect!(loc,self.right.as_ref(),"Error: Cannot evaluate Op '{}' without left parameter",Op::PLUS.to_string());
-                    let rightregs1= right.LEIRnasm(regs[1..].to_vec(), f, program, build, local_vars, stack_size, loc)?;
+                    let mut rightregs1= right.LEIRnasm(regs[1..].to_vec(), f, program, build, local_vars, stack_size, loc)?;
+                    if leftregs1[0].size() > rightregs1[0].size() {
+                        rightregs1[0] = rightregs1[0].to_byte_size(leftregs1[0].size());
+                    }
+                    if leftregs1[0].size() < rightregs1[0].size() {
+                        leftregs1[0] = leftregs1[0].to_byte_size(leftregs1[0].size());
+                    }
                     com_assert!(loc,rightregs1.len() == 1, "TODO: Handle multi-parameter loading for expressions!");
                     writeln!(f, "   add {}, {}",leftregs1[0].to_string(),rightregs1[0].to_string())?;
                     o = leftregs1;
@@ -873,6 +901,20 @@ impl ExprTree {
                 // o = leftregs1;
 
             },
+            Op::BAND => {                
+                let right = com_expect!(loc,self.right.as_ref(),"Error: Cannot evaluate Op '{}' without left parameter",Op::LTEQ .to_string());
+                com_assert!(loc,right.is_ofp(), "Error: Expected right to be ofp but found something else!");
+                let rightofp = right.unwrap_val();
+                match rightofp {
+                    OfP::LOCALVAR(v) => {
+                        let v = local_vars.get(v).unwrap();
+                        writeln!(f, "   mov {}, rsp",regs[0].to_string())?;
+                        writeln!(f, "   add {}, {}",regs[0].to_string(),stack_size-v.operand)?;
+                        o = vec![regs[0].clone()]
+                    }
+                    _ => com_error!(loc, "Error: Cannot get location of ofp")
+                }
+            },
             
         }
         //println!("Output regs: {:?}",o);
@@ -969,11 +1011,12 @@ fn tokens_to_expression(body: &[Token],build: &mut BuildProgram, program: &CmdPr
             }
         }
         else if let TokenType::Operation(op) = &token.typ {
-            if *op == Op::NOT {
+            if *op == Op::NOT || *op == Op::BAND {
                 par_assert!(token, currentETree.left.is_none(), "Error: Cannot have NOT with a left side already defined!");
             }
             else if *op == Op::STAR {//this means its a deref
             }
+            
             else {
                 par_assert!(token, currentETree.left.is_some(), "Error: Cannot have an Operator different from NOT without a left side!");
             }
@@ -1018,10 +1061,9 @@ fn tokens_to_expression(body: &[Token],build: &mut BuildProgram, program: &CmdPr
                     par_assert!(exprTok, *t == IntrinsicType::OPENPAREN, "Unexpected intrinsic {}", t.to_string(false));
                     let org_count = bracketcount;
                     bracketcount += 1;
-                    let index_from = i2+1;
-                    let mut index = i2+1;
+                    i2 += 1;
                     while bracketcount > org_count {
-                        if let Some(tok) = body.get(index) {
+                        if let Some(tok) = body.get(i2) {
                             match tok.typ {
                                 TokenType::IntrinsicType(it) => {
                                     match it {
@@ -1036,7 +1078,7 @@ fn tokens_to_expression(body: &[Token],build: &mut BuildProgram, program: &CmdPr
                         else {
                             par_error!(exprTok, "Open paren opened here but never closed!");
                         }
-                        index += 1;
+                        i2 += 1;
                     }
                     //let expr = tokens_to_expression(&body[index_from..index-1], build, program, locals);
                     //if tmp_eTree.left.is_none() {
@@ -1045,7 +1087,8 @@ fn tokens_to_expression(body: &[Token],build: &mut BuildProgram, program: &CmdPr
                     //else if tmp_eTree.right.is_none() && tmp_eTree.op != Op::NONE {
                     //    tmp_eTree.right = Some(expr);
                     //}
-                    i2 = index-2;
+                    //i2 = index-2;
+                    i2 -= 2;
                 }
                 else {
                     par_error!(exprTok, "Error: unknown token type in expression: {}",token.typ.to_string(false))        
@@ -3886,7 +3929,7 @@ fn parse_token_to_build_inst(token: Token,lexer: &mut Lexer, program: &mut CmdPr
         TokenType::Number64(_) => {
             par_error!(lexer.currentLocation, "Error: Unexpected Token type Long!");
         }
-        TokenType::Definition(_) => todo!(),
+        TokenType::Definition(_) => todo!("{}",lexer.currentLocation.loc_display()),
         TokenType::CStringType(_) => todo!(),
         TokenType::Function(name) => {
             let args = parse_argument_contract(lexer, build, currentLocals);

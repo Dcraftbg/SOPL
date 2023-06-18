@@ -1,0 +1,14 @@
+extern "C" printf(*char, int);
+func addptr(a: *int, b: *int : int) {
+    let aval: int = *a;
+    let bval: int = *b;
+    return aval+bval;
+}
+func main(){
+    let a: int = 4;
+    let b: int = 5;
+    let aloc: *int = &a;
+    let bloc: *int = &b;
+    let result: int = addptr(aloc,bloc);
+    printf("result: %d",result);
+}
