@@ -140,7 +140,8 @@ macro_rules! com_assert {
         if !($condition) {
             let message = format!($($arg)*);
             eprintln!("(C) [ERROR] {}: {}", $location.loc_display(), message);
-            exit(1);
+            panic!("DEBUG: here");
+            //exit(1);
         }
     });
 }
@@ -551,7 +552,7 @@ impl Op {
         }
     }
 }
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 enum Expression {
     val(OfP),
     expr(Box<ExprTree>)
@@ -643,7 +644,7 @@ impl Expression {
         }
     }
 }
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 struct ExprTree {
     left:  Option<Expression>,
     right: Option<Expression>,
@@ -660,9 +661,15 @@ impl ExprTree {
                 if left.is_ofp() {
                     com_assert!(loc,regs.len() > 1, "TODO: Handle multi-parameter loading for expressions!");
                     let right       = com_expect!(loc,self.right.as_ref(),"Error: Cannot evaluate Op '{}' without left parameter",Op::PLUS .to_string());
-                    let rightregs1= right.LEIRnasm(regs.to_vec(), f, program, build, local_vars, stack_size, loc)?;
-                    let leftregs1 = left.LEIRnasm(regs[1..].to_vec(), f, program, build, local_vars, stack_size, loc)?;
+                    let mut rightregs1= right.LEIRnasm(regs.to_vec(), f, program, build, local_vars, stack_size, loc)?;
+                    let mut leftregs1 = left.LEIRnasm(regs[1..].to_vec(), f, program, build, local_vars, stack_size, loc)?;
                     com_assert!(loc,rightregs1.len() == 1, "TODO: Handle multi-parameter loading for expressions!");
+                    if leftregs1[0].size() > rightregs1[0].size() {
+                        rightregs1[0] = rightregs1[0].to_byte_size(leftregs1[0].size());
+                    }
+                    if leftregs1[0].size() < rightregs1[0].size() {
+                        leftregs1[0] = leftregs1[0].to_byte_size(leftregs1[0].size());
+                    }
                     writeln!(f, "   add {}, {}",leftregs1[0].to_string(),rightregs1[0].to_string())?;
                     o = leftregs1;
                 }
@@ -878,6 +885,7 @@ impl ExprTree {
 }
 fn tokens_to_expression(body: &[Token],build: &mut BuildProgram, program: &CmdProgram,locals: &Vec<Locals>) -> Expression {
     //println!("TOP: {:?}\nLen: {}",body,body.len());
+    let mut bracketcount = 0;
     if body.len() == 0 {
         panic!("Error: Cannot evaluate empty body");
     }
@@ -979,6 +987,7 @@ fn tokens_to_expression(body: &[Token],build: &mut BuildProgram, program: &CmdPr
             let mut tmp_eTree: ExprTree = ExprTree::new();
             for exprTok in &body[i..] {
                 //println!("exprTok: {:?} at {}",exprTok,i2);
+
                 if let Some(val) = OfP::from_token(exprTok, build, program, locals) {
                     //par_assert!(token,tmp_eTree.left.is_none() || (hasFoundOp && tmp_eTree.right.is_none()),"Error: Cannot have multiple Ofp values consecutively!");
                     if tmp_eTree.left.is_none() {
@@ -1005,8 +1014,41 @@ fn tokens_to_expression(body: &[Token],build: &mut BuildProgram, program: &CmdPr
                         tmp_eTree.op = op2.clone()
                     }
                 }
+                else if let TokenType::IntrinsicType(t) = &exprTok.typ {
+                    par_assert!(exprTok, *t == IntrinsicType::OPENPAREN, "Unexpected intrinsic {}", t.to_string(false));
+                    let org_count = bracketcount;
+                    bracketcount += 1;
+                    let index_from = i2+1;
+                    let mut index = i2+1;
+                    while bracketcount > org_count {
+                        if let Some(tok) = body.get(index) {
+                            match tok.typ {
+                                TokenType::IntrinsicType(it) => {
+                                    match it {
+                                        IntrinsicType::OPENPAREN => bracketcount += 1,
+                                        IntrinsicType::CLOSEPAREN => bracketcount -= 1,
+                                        _ =>{}
+                                    }
+                                }
+                                _ => {}
+                            }
+                        }
+                        else {
+                            par_error!(exprTok, "Open paren opened here but never closed!");
+                        }
+                        index += 1;
+                    }
+                    //let expr = tokens_to_expression(&body[index_from..index-1], build, program, locals);
+                    //if tmp_eTree.left.is_none() {
+                    //    tmp_eTree.left = Some(expr);
+                    //}
+                    //else if tmp_eTree.right.is_none() && tmp_eTree.op != Op::NONE {
+                    //    tmp_eTree.right = Some(expr);
+                    //}
+                    i2 = index-2;
+                }
                 else {
-                    par_error!(token, "Error: unknown token type in expression: {}",token.typ.to_string(false))        
+                    par_error!(exprTok, "Error: unknown token type in expression: {}",token.typ.to_string(false))        
                 }
                 i2 += 1;
             }
@@ -1039,6 +1081,49 @@ fn tokens_to_expression(body: &[Token],build: &mut BuildProgram, program: &CmdPr
                 if body.len() == i2+1 {
                     return Expression::val(OfP::RESULT(f.clone(), parse_argument_contract_from_body(cbody, build, locals, &body[0].location)));
                 }   
+            }
+        }
+        else if let TokenType::IntrinsicType(t) = &body[0].typ {
+            match t {
+                IntrinsicType::OPENPAREN => {
+                    let org_count = bracketcount;
+                    bracketcount += 1;
+                    let index_from = i;
+                    i += 1;
+                    while bracketcount > org_count {
+                        if let Some(tok) = body.get(i) {
+                            match tok.typ {
+                                TokenType::IntrinsicType(it) => {
+                                    match it {
+                                        IntrinsicType::OPENPAREN => bracketcount += 1,
+                                        IntrinsicType::CLOSEPAREN => bracketcount -= 1,
+                                        _ =>{}
+                                    }
+                                }
+                                _ => {}
+                            }
+                        }
+                        else {
+                            par_error!(token, "Open paren opened here but never closed!");
+                        }
+                        i += 1;
+                    }
+                    let expr = tokens_to_expression(&body[index_from..i-1], build, program, locals);
+                    if currentETree.left.is_none()  && currentETree.right.is_none() && currentETree.op == Op::NONE && expr.is_expr(){
+                        currentETree = *(*expr.unwrap_expr()).clone();
+                    }
+                    else if currentETree.left.is_none() {
+                        currentETree.left = Some(expr);
+                    }
+                    else if currentETree.right.is_none() && currentETree.op != Op::NONE {
+                        currentETree.right = Some(expr);
+                    }
+                    else {
+                        par_error!(token, "This should be unreachable!");
+                    }
+                }
+                _ => par_error!(token, "Error: Unexpected intrinsic type: {} in expression!",t.to_string(false))
+                
             }
         }
         else {
@@ -2112,7 +2197,7 @@ impl CallArg {
 }
 type CallArgs = Vec<CallArg>;
 // TODO: Introduce this for ADD, SUB, MUL, DIV
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 enum OfP {
     REGISTER (Register),
     //PARAM    (String),
@@ -4334,9 +4419,9 @@ fn nasm_x86_64_handle_scope(f: &mut File, build: &BuildProgram, program: &CmdPro
                     }
                     OfP::LOCALVAR(varOrg) => {
                         let var = com_expect!(loc,local_vars.get(varOrg),"Error: Unknown variable found during compilation {}",varOrg);
-                        let oreg = Register::RAX.to_byte_size(var.typ.get_size(program));
+                        let oreg  = Register::RAX.to_byte_size(var.typ.get_size(program));
                         let oreg2 = Register::RBX.to_byte_size(var.typ.get_size(program));
-                        let oregs = Op2.LEIRnasm(vec![oreg,oreg2], f, program,build, &local_vars, stack_size, loc)?;
+                        let oregs = Op2.LEIRnasm(vec![oreg,oreg2,Register::RCX.to_byte_size(var.typ.get_size(program))], f, program,build, &local_vars, stack_size, loc)?;
                         if stack_size-var.operand == 0 {
                             writeln!(f, "   mov {} [rsp], {}",size_to_nasm_type(var.typ.get_size(program)), oregs[0].to_byte_size(var.typ.get_size(program)).to_string())?;
                         }

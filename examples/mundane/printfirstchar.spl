@@ -3,8 +3,20 @@ func printfc(str: *char) {
     let c: char = *str;
     printf("%c",c);
 }
+func mputc(c: char) {
+    printf("%c",c);
+}
 func main(){
+    let c: char;
     let p: *char = "Hello";
-    printfc(p);
+    c = *p;
+    mputc(c);
+    c = *(p+1);
+    mputc(c);
+    c = *(p+2);
+    mputc(c);
+    c = *(p+3);
+    mputc(c);
+    
 
 }

@@ -1,0 +1,8 @@
+extern "C" printf(*char, int);
+func main(){
+    let a: int = 4;
+    let b: int = 4;
+    let c: int = 3;
+    let d: int = c*(a+b);
+    printf("d=%d",d);
+}
