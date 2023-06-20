@@ -183,6 +183,43 @@ macro_rules! typ_warn {
     });
 }
 
+macro_rules! lex_error {
+    ($token:expr, $($arg:tt)*) => ({
+        let message = format!($($arg)*);
+        eprintln!("(L) [ERROR] {}: {}", $token.loc_display(), message);
+        exit(1);
+    });
+}
+macro_rules! lex_assert {
+    ($token:expr, $condition:expr, $($arg:tt)*) => ({
+        if !$condition {
+            let message = format!($($arg)*);
+            eprintln!("(L) [ERROR] {}: {}", $token.loc_display(), message);
+            exit(1);
+        }
+    });
+}
+macro_rules! lex_expect {
+    ($location:expr, $expector:expr, $($arg:tt)*) => ({
+
+        let message = format!($($arg)*);
+        let message = format!("(L) [ERROR] {}: {}", $location.loc_display(), message);
+        $expector.expect(&message)
+    });
+}
+macro_rules! lex_info {
+    ($token:expr, $($arg:tt)*) => ({
+        let message = format!($($arg)*);
+        println!("(L) [INFO] {}: {}", $token.loc_display(), message);
+    });
+}
+macro_rules! lex_warn {
+    ($token:expr, $($arg:tt)*) => ({
+        let message = format!($($arg)*);
+        println!("(L) [WARN] {}: {}", $token.loc_display(), message);
+    });
+}
+
 fn is_symbolic(c: char) -> bool {
     c.is_alphabetic() || c.is_alphanumeric() || c == '_' || c=='-'
 }
@@ -341,6 +378,8 @@ enum IntrinsicType {
     // SUB,
     // MUL,
     // DIV,
+    GOTO,
+    MAKELABEL,
     RET,
     INCLUDE,
     IF,
@@ -474,6 +513,10 @@ impl IntrinsicType {
             IntrinsicType::THREEDOTS => {
                 if isplural {"Threedots".to_string()} else {"Threedots".to_string().to_string()}
             },
+            IntrinsicType::GOTO => {
+                if isplural {"Gotos".to_string()} else {"Goto".to_string().to_string()}
+            },
+            IntrinsicType::MAKELABEL => todo!(),
         }
     }
 }
@@ -616,7 +659,7 @@ impl Expression {
             _ => false
         }
     }
-    fn result_of_c(&self,program: &CmdProgram,build: &BuildProgram, local_vars: &HashMap<String,LocalVariable>, loc: &ProgramLocation) -> Option<VarType>  {
+    fn result_of_c(&self,program: &CmdProgram,build: &BuildProgram, local_vars: &Vec<HashMap<String,LocalVariable>>, loc: &ProgramLocation) -> Option<VarType>  {
         match self {
             Self::val(v) => v.var_type(build, local_vars),
             Self::expr(s) => {
@@ -653,7 +696,7 @@ impl Expression {
                         let ofp = v2.unwrap_val();
                         match ofp {
                             OfP::LOCALVAR(v) => {
-                                let vp = &local_vars.get(v).unwrap().typ;
+                                let vp = &get_local_build(local_vars, v).unwrap().typ;
                                 match vp {
                                     VarType::PTR(val) => {
                                         Some(VarType::PTR(Ptr { typ: val.typ.clone(), inner_ref: val.inner_ref+1 }))
@@ -755,7 +798,7 @@ impl Expression {
     }
 }
 impl Expression {
-    fn LEIRnasm(&self,regs: Vec<Register>,f: &mut File, program: &CmdProgram,build: &BuildProgram,local_vars: &HashMap<String, LocalVariable>,stack_size: usize,loc: &ProgramLocation) -> std::io::Result<Vec<Register>>{
+    fn LEIRnasm(&self,regs: Vec<Register>,f: &mut File, program: &CmdProgram,build: &BuildProgram,local_vars: &Vec<HashMap<String, LocalVariable>>,stack_size: usize,loc: &ProgramLocation) -> std::io::Result<Vec<Register>>{
         match self {
             Expression::val(v) => {
                v.LOIRGNasm(regs, f, program, build, local_vars, stack_size, loc)
@@ -774,7 +817,7 @@ struct ExprTree {
     op: Op
 }
 impl ExprTree {
-    fn eval_nasm(&self,regs: Vec<Register>,f: &mut File,program: &CmdProgram,build: &BuildProgram,local_vars: &HashMap<String, LocalVariable>,stack_size: usize,loc: &ProgramLocation) -> std::io::Result<Vec<Register>>{
+    fn eval_nasm(&self,regs: Vec<Register>,f: &mut File,program: &CmdProgram,build: &BuildProgram,local_vars: &Vec<HashMap<String, LocalVariable>>,stack_size: usize,loc: &ProgramLocation) -> std::io::Result<Vec<Register>>{
         #[allow(unused_assignments)]
         let mut o: Vec<Register> = Vec::new();
         match self.op {
@@ -1011,17 +1054,22 @@ impl ExprTree {
 
             },
             Op::BAND => {
-                let right = com_expect!(loc,self.right.as_ref(),"Error: Cannot evaluate Op '{}' without left parameter",Op::LTEQ .to_string());
-                com_assert!(loc,right.is_ofp(), "Error: Expected right to be ofp but found something else!");
-                let rightofp = right.unwrap_val();
-                match rightofp {
-                    OfP::LOCALVAR(v) => {
-                        let v = local_vars.get(v).unwrap();
-                        writeln!(f, "   mov {}, rsp",regs[0].to_string())?;
-                        writeln!(f, "   add {}, {}",regs[0].to_string(),stack_size-v.operand)?;
-                        o = vec![regs[0].clone()]
+                if let Some(_) = self.left.as_ref() {
+                    todo!()
+                }
+                else {
+                    let right = com_expect!(loc,self.right.as_ref(),"Error: Cannot evaluate Op '{}' without left parameter",Op::LTEQ .to_string());
+                    com_assert!(loc,right.is_ofp(), "Error: Expected right to be ofp but found something else!");
+                    let rightofp = right.unwrap_val();
+                    match rightofp {
+                        OfP::LOCALVAR(v) => {
+                            let v = get_local_build(local_vars, v).unwrap();
+                            writeln!(f, "   mov {}, rsp",regs[0].to_string())?;
+                            writeln!(f, "   add {}, {}",regs[0].to_string(),stack_size-v.operand)?;
+                            o = vec![regs[0].clone()]
+                        }
+                        _ => com_error!(loc, "Error: Cannot get location of ofp")
                     }
-                    _ => com_error!(loc, "Error: Cannot get location of ofp")
                 }
             },
 
@@ -1152,7 +1200,6 @@ fn tokens_to_expression(body: &[Token],build: &mut BuildProgram, program: &CmdPr
                     }
                 }
                 else if let TokenType::Operation(op2) = &exprTok.typ {
-                    
                     if op2.get_priority(&tmp_eTree) <= priority {
                         opo = op2;
                         break;
@@ -1194,7 +1241,7 @@ fn tokens_to_expression(body: &[Token],build: &mut BuildProgram, program: &CmdPr
                     //i2 += 1;
                 }
                 else {
-                    par_error!(exprTok, "Error: unknown token type in expression: {}",token.typ.to_string(false))
+                    par_error!(exprTok, "Error: unknown token type in expression: {}",exprTok.typ.to_string(false))
                 }
                 i2 += 1;
             }
@@ -1479,10 +1526,13 @@ impl<'a> Lexer<'a> {
         self.currentLocation.character = 0;
         self.currentLocation.linenumber += 1;
     }
+    fn loc_display(&self) -> String {
+        self.currentLocation.loc_display()
+    }
     fn pop_symbol(&mut self) -> Option<String> {
         let mut o = String::new();
         let mut c = self.cchar_s()?;
-        if !c.is_alphabetic() && c != '_' {
+        if !c.is_alphabetic() && c != '_'{
             return None;
         }
         while self.is_not_empty() && c.is_alphanumeric() || c=='_'{
@@ -1613,6 +1663,17 @@ impl Iterator for Lexer<'_> {
                         panic!("Error: Abruptly ran out of chars!");
                     }
 
+                }
+                '@' => {
+                    self.cursor += 1;
+                    self.currentLocation.character += 1;
+                    let outstr = "@".to_owned()+&self.pop_symbol()?;
+                    if let Some(Intr) = self.Intrinsics.get(&outstr) {
+                        return Some(Token { typ: TokenType::IntrinsicType(Intr.clone()), location: self.currentLocation.clone() })
+                    }
+                    else {
+                        lex_error!(self, "Error: Expected Intrinsic but found {}. Cannot have @ in variable names, function names etc.",outstr)
+                    }
                 }
                 _    => {
                     let _orgcursor = self.cursor;
@@ -2404,6 +2465,7 @@ enum OfP {
     // STR      (Uuid, ProgramStringType)
     // etc.
 }
+
 impl OfP {
     fn var_type_t(&self, build: &BuildProgram, local_vars: &Vec<Locals>) -> Option<VarType> {
         match self {
@@ -2413,15 +2475,15 @@ impl OfP {
             Self::RESULT(f, _) => build.functions.get(f).unwrap().contract.Outputs.get(0).cloned()
         }
     }
-    fn var_type(&self, build: &BuildProgram, local_vars: &HashMap<String, LocalVariable>) -> Option<VarType> {
+    fn var_type(&self, build: &BuildProgram, local_vars: &Vec<HashMap<String, LocalVariable>>) -> Option<VarType> {
         match self {
             Self::REGISTER(reg) => Some(reg.to_var_type()),
             Self::CONST(v) => Some(v.to_type(build)[0].clone()),
-            Self::LOCALVAR(v) => Some(local_vars.get(v).unwrap().typ.clone()),
+            Self::LOCALVAR(v) => Some(get_local_build(local_vars, v).unwrap().typ.clone()),
             Self::RESULT(f, _) => build.functions.get(f).unwrap().contract.Outputs.get(0).cloned()
         }
     }
-    fn LOIRGNasm(&self, regs: Vec<Register>, f: &mut File, program: &CmdProgram,build: &BuildProgram, local_vars: &HashMap<String, LocalVariable>, stack_size: usize, loc: &ProgramLocation) -> std::io::Result<Vec<Register>>{
+    fn LOIRGNasm(&self, regs: Vec<Register>, f: &mut File, program: &CmdProgram,build: &BuildProgram, local_vars: &Vec<HashMap<String, LocalVariable>>, stack_size: usize, loc: &ProgramLocation) -> std::io::Result<Vec<Register>>{
         let mut out: Vec<Register> = Vec::with_capacity(regs.len());
         match self {
             OfP::REGISTER(reg2) => {
@@ -2430,8 +2492,7 @@ impl OfP {
                 out.push(reg.clone());
             },
             OfP::LOCALVAR(val) => {
-                //println!("Got to here!");
-                let lvar = local_vars.get(val).unwrap();
+                let lvar = get_local_build(local_vars, val).unwrap();
                 let osize = lvar.typ.get_size(program);
                 let reg = &regs[0].to_byte_size(osize);
                 if stack_size-lvar.operand == 0 {
@@ -2550,6 +2611,8 @@ enum Instruction {
     MORETHANEQUALS  (Expression, Expression),
     LESSTHANEQUALS  (Expression, Expression),
     NOTEQUALS       (Expression, Expression),
+    GOTO(String, usize),
+    MAKELABEL(String)
 }
 
 #[derive(Debug,Clone,PartialEq)]
@@ -3577,22 +3640,23 @@ fn getTopMut(scopeStack: &mut ScopeStack) -> Option<&mut Scope> {
     scopeStack.get_mut(len-1)
 }
 fn get_local<'a>(currentLocals: &'a Vec<Locals>, name: &String) -> Option<&'a VarType> {
-    for e in currentLocals {
+    for e in currentLocals.iter().rev() {
         if let Some(v) = e.get(name) {
             return Some(v);
         }
     }
     None
 }
+
 fn contains_local<'a>(currentLocals: &'a Vec<Locals>, name: &String) -> bool {
-    for e in currentLocals {
+    for e in currentLocals.iter().rev() {
         if e.contains_key(name) {
             return true
         }
     }
     false
 }
-fn parse_token_to_build_inst(token: Token,lexer: &mut Lexer, program: &mut CmdProgram, build: &mut BuildProgram, scopeStack: &mut ScopeStack, currentLocals: &mut Vec<Locals>){
+fn parse_token_to_build_inst(token: Token,lexer: &mut Lexer, program: &mut CmdProgram, build: &mut BuildProgram, scopeStack: &mut ScopeStack, currentLocals: &mut Vec<Locals>, currentLabels: &mut HashSet<String>, expectedLabels: &mut HashMap<String, Vec<(ProgramLocation,*mut Instruction)>>){
     match token.typ {
         TokenType::WordType(ref word) => {
             par_assert!(token,scopeStack.len() > 0, "Undefined Word Call outside of entry point! '{}'",word);
@@ -3837,6 +3901,22 @@ fn parse_token_to_build_inst(token: Token,lexer: &mut Lexer, program: &mut CmdPr
                         match sc.typ {
                             ScopeType::FUNCTION(mut func, name) => {
                                 //println!("CurrentLocals function: {:#?}",currentLocals);
+                                for (label, locs) in expectedLabels.iter() {
+                                    for (_,goto) in locs.iter() {
+                                        let t = *goto;
+                                        //unsafe { println!("Instruction before: {:?}",*t); }
+                                        unsafe { *t = Instruction::GOTO(label.clone(), currentLocals.len()) };
+                                        //unsafe { println!("Instruction after: {:?}",*t); }
+                                    }
+                                    if currentLabels.contains(label) { continue;}
+                                    eprintln!("Error: Label to goto not defined! ({})",label);
+                                    for (loc, _) in locs {
+                                        eprintln!("{}: defined goto here",loc.loc_display());
+                                    }
+                                    exit(1);
+                                }
+                                expectedLabels.clear();
+                                currentLabels.clear();
                                 func.body.push((token.location.clone(),Instruction::SCOPEEND));
                                 func.locals = currentLocals.pop().unwrap();
                                 build.functions.insert(name, func);
@@ -4159,6 +4239,38 @@ fn parse_token_to_build_inst(token: Token,lexer: &mut Lexer, program: &mut CmdPr
                 },
                 IntrinsicType::THREEDOTS => todo!(),
 
+                IntrinsicType::GOTO => {
+                    let ntok = par_expect!(lexer.currentLocation, lexer.next(), "Error: Abruptly ran out of tokens for GOTO");
+                    par_assert!(ntok, ntok.typ == TokenType::IntrinsicType(IntrinsicType::OPENPAREN), "Error: Unexpected symbol {} in GOTO! Expected open paren followed by a string (name of the label) and then a closing paren",ntok.typ.to_string(false));
+                    let ntok = par_expect!(lexer.currentLocation, lexer.next(), "Error: Abruptly ran out of tokens for GOTO");
+                    let symbol_name = par_expect!(ntok,ntok.unwrap_string(), "Error: Expected token string but found {}",ntok.typ.to_string(false));
+                    let body = getTopMut(scopeStack).unwrap().body_unwrap_mut().unwrap();
+                    body.push((ntok.location.clone(), Instruction::GOTO(symbol_name.to_owned(), 0)));
+                    let len = body.len();
+                    if let Some(label) = expectedLabels.get_mut(symbol_name) {
+                        let (_,r) = &mut body[len-1];
+                        label.push((ntok.location.clone(),r))
+                    }
+                    else {
+                        let (_,r) = &mut body[len-1];
+                        expectedLabels.insert(symbol_name.clone(), vec![(ntok.location.clone(),r)]);
+                    }
+                    let ntok = par_expect!(lexer.currentLocation, lexer.next(), "Error: Abruptly ran out of tokens for GOTO");
+                    par_assert!(ntok, ntok.typ == TokenType::IntrinsicType(IntrinsicType::CLOSEPAREN), "Error: Unexpected symbol {} in GOTO! Expected open paren followed by a string (name of the label) and then a closing paren",ntok.typ.to_string(false));
+                    par_assert!(token, scopeStack.len() > 0 && getTopMut(scopeStack).unwrap().body_is_some(), "Error: Unexpected interrupt intrinsic outside of scope! Scopes of type {} do not support instructions!",getTopMut(scopeStack).unwrap().typ.to_string(false));
+                },
+                IntrinsicType::MAKELABEL => {
+                    let ntok = par_expect!(lexer.currentLocation, lexer.next(), "Error: Abruptly ran out of tokens for MAKELABEL");
+                    par_assert!(ntok, ntok.typ == TokenType::IntrinsicType(IntrinsicType::OPENPAREN), "Error: Unexpected symbol {} in MAKELABEL! Expected open paren followed by a string (name of the label) and then a closing paren",ntok.typ.to_string(false));
+                    let ntok = par_expect!(lexer.currentLocation, lexer.next(), "Error: Abruptly ran out of tokens for MAKELABEL");
+                    let symbol_name = par_expect!(ntok,ntok.unwrap_string(), "Error: Expected token string but found {}",ntok.typ.to_string(false));
+                    currentLabels.insert(symbol_name.to_owned());
+                    let ntok = par_expect!(lexer.currentLocation, lexer.next(), "Error: Abruptly ran out of tokens for MAKELABEL");
+                    par_assert!(ntok, ntok.typ == TokenType::IntrinsicType(IntrinsicType::CLOSEPAREN), "Error: Unexpected symbol {} in MAKELABEL! Expected open paren followed by a string (name of the label) and then a closing paren",ntok.typ.to_string(false));
+                    let body = getTopMut(scopeStack).unwrap().body_unwrap_mut().unwrap();
+                    body.push((ntok.location.clone(), Instruction::MAKELABEL(symbol_name.to_owned())))
+                },
+
             }
         }
         TokenType::StringType(_) => {
@@ -4317,9 +4429,20 @@ fn parse_tokens_to_build(lexer: &mut Lexer, program: &mut CmdProgram) -> BuildPr
     let mut build: BuildProgram = BuildProgram { externals: HashMap::new(), functions: HashMap::new(),stringdefs: HashMap::new(), constdefs: HashMap::new(), dll_imports: HashMap::new(), dll_exports: HashMap::new() };
     let mut scopeStack: ScopeStack = vec![];
     let mut currentLocals: Vec<Locals> = Vec::new();
+    let mut currentLabels: HashSet<String> = HashSet::new();
+    let mut expectedLabels: HashMap<String,Vec<(ProgramLocation,*mut Instruction)>> = HashMap::new();
     while let Some(token) = lexer.next() {
-        parse_token_to_build_inst(token, lexer, program, &mut build, &mut scopeStack, &mut currentLocals);
+        parse_token_to_build_inst(token, lexer, program, &mut build, &mut scopeStack, &mut currentLocals, &mut currentLabels, &mut expectedLabels);
     }
+    /*
+    for (label, locs) in expectedLabels {
+        if currentLabels.contains(&label) { continue;}
+        eprintln!("Error: Label to goto not defined! ({})",label);
+        for loc in locs {
+            eprintln!("{}: defined goto here",loc.loc_display());
+        }
+    }
+    */
     // for (fn_name, fn_fn)in build.functions.iter_mut() {
     //     if fn_name != "main" && fn_fn.location.file == lexer.currentLocation.file {
     //         fn_fn.body.push((fn_fn.location.clone(),Instruction::RET()))
@@ -4427,7 +4550,7 @@ fn optimization_ops(build: &mut BuildProgram, program: &CmdProgram) -> optim_ops
         OptimizationMode::DEBUG => optim_ops { usedStrings: HashMap::new(), usedExterns: HashSet::new(), usedFuncs: HashSet::new() },
     }
 }
-fn nasm_x86_64_prep_args(program: &CmdProgram, build: &BuildProgram, f: &mut File, contract: &Vec<OfP>, mut stack_size: usize, local_vars: &HashMap<String, LocalVariable>) -> io::Result<(usize,usize)> {
+fn nasm_x86_64_prep_args(program: &CmdProgram, build: &BuildProgram, f: &mut File, contract: &Vec<OfP>, mut stack_size: usize, local_vars: &Vec<HashMap<String, LocalVariable>>) -> io::Result<(usize,usize)> {
     //let mut shadow_space = 0;
     let org_stack_size = stack_size;
     
@@ -4436,7 +4559,7 @@ fn nasm_x86_64_prep_args(program: &CmdProgram, build: &BuildProgram, f: &mut Fil
         //println!("stack_size-org_stack_size before {:?} = {}",arg,stack_size-org_stack_size);
         match arg {
             OfP::LOCALVAR(v) => {
-                let var1 = local_vars.get(v).expect("Unknown local variable parameter");
+                let var1 = get_local_build(local_vars, v).expect("Unknown local variable parameter");
                 let oreg = Register::RAX.to_byte_size(var1.typ.get_size(program));
                 if stack_size-var1.operand == 0 {
                     writeln!(f, "   mov {}, {} [rsp]",oreg.to_string(),size_to_nasm_type(oreg.size()))?;
@@ -4862,7 +4985,16 @@ fn nasm_x86_64_load_args(f: &mut File, scope: &TCScopeType, build: &BuildProgram
     // }
     Ok(offset)
 }
-fn nasm_x86_64_handle_scope(f: &mut File, build: &BuildProgram, program: &CmdProgram, scope: TCScopeType, mut local_vars: HashMap<String, LocalVariable>, mut stack_size: usize, func_stack_begin: usize, inst_count: &mut usize) -> io::Result<()> {
+fn get_local_build<'a>(currentLocals: &'a Vec<HashMap<String, LocalVariable>>, name: &String) -> Option<&'a LocalVariable> {
+    for e in currentLocals {        
+        if let Some(v) = e.get(name) {
+            return Some(v);
+        }
+    }
+    None
+}
+
+fn nasm_x86_64_handle_scope(f: &mut File, build: &BuildProgram, program: &CmdProgram, scope: TCScopeType, local_vars: &mut Vec<HashMap<String, LocalVariable>>, mut stack_size: usize, func_stack_begin: usize, inst_count: &mut usize) -> io::Result<()> {
     *inst_count += 1;
     let expect_loc_t = LinkedHashMap::new();
     let contract_loc_t = FunctionContract { Inputs: LinkedHashMap::new(), Outputs: Vec::new()};
@@ -4876,8 +5008,8 @@ fn nasm_x86_64_handle_scope(f: &mut File, build: &BuildProgram, program: &CmdPro
     }
     for (name, val) in expect_locals.iter() {
         stack_size += val.get_size(program);
-
-        local_vars.insert(name.clone(), LocalVariable { typ: val.clone(), operand: stack_size });
+        let res = local_vars.len()-1;
+        local_vars[res].insert(name.clone(), LocalVariable { typ: val.clone(), operand: stack_size });
     }
     let dif = stack_size-stack_size_org;
     let additional = dif%8;
@@ -4900,7 +5032,7 @@ fn nasm_x86_64_handle_scope(f: &mut File, build: &BuildProgram, program: &CmdPro
                             Op2.LEIRnasm(vec![*Reg1,oreg2], f, program, build,&local_vars, stack_size, loc)?;
                         }
                         OfP::LOCALVAR(varOrg) => {
-                            let var = com_expect!(loc,local_vars.get(varOrg),"Error: Unknown variable found during compilation {}",varOrg);
+                            let var = com_expect!(loc,get_local_build(&local_vars,varOrg),"Error: Unknown variable found during compilation {}",varOrg);
                             let oreg  = Register::RAX.to_byte_size(var.typ.get_size(program));
                             let oreg2 = Register::RBX.to_byte_size(var.typ.get_size(program));
                             let oregs = Op2.LEIRnasm(vec![oreg,oreg2,Register::RCX.to_byte_size(var.typ.get_size(program))], f, program,build, &local_vars, stack_size, loc)?;
@@ -4957,7 +5089,7 @@ fn nasm_x86_64_handle_scope(f: &mut File, build: &BuildProgram, program: &CmdPro
                         writeln!(f, "   add {}, {}",reg1.to_string(), reg2.to_string())?;
                     }
                     OfP::LOCALVAR(var1) => {
-                        let var1 = com_expect!(loc,local_vars.get(var1),"Error: Unknown variable found during compilation {}",var1);
+                        let var1 = com_expect!(loc,get_local_build(&local_vars,var1),"Error: Unknown variable found during compilation {}",var1);
                         let reg1 = Register::RAX.to_byte_size(var1.typ.get_size(program));
                         let reg2 = Register::RBX.to_byte_size(reg1.size());
                         op2.LEIRnasm(vec![reg1,reg2], f, program,build, &local_vars, stack_size, loc)?;
@@ -4982,7 +5114,7 @@ fn nasm_x86_64_handle_scope(f: &mut File, build: &BuildProgram, program: &CmdPro
                         writeln!(f, "   sub {}, {}",reg1.to_string(), reg2.to_string())?;
                     }
                     OfP::LOCALVAR(var1) => {
-                        let var1 = com_expect!(loc,local_vars.get(var1),"Error: Unknown variable found during compilation {}",var1);
+                        let var1 = com_expect!(loc,get_local_build(&local_vars,var1),"Error: Unknown variable found during compilation {}",var1);
                         let reg1 = Register::RAX.to_byte_size(var1.typ.get_size(program));
                         let reg2 = Register::RBX.to_byte_size(reg1.size());
                         op2.LEIRnasm(vec![reg1,reg2], f, program,build, &local_vars, stack_size, loc)?;
@@ -5006,7 +5138,7 @@ fn nasm_x86_64_handle_scope(f: &mut File, build: &BuildProgram, program: &CmdPro
                         writeln!(f, "   imul {}, {}",reg1.to_string(), reg2.to_string())?;
                     }
                     OfP::LOCALVAR(var1) => {
-                        let var1 = com_expect!(loc,local_vars.get(var1),"Error: Unknown variable found during compilation {}",var1);
+                        let var1 = com_expect!(loc,get_local_build(&local_vars, var1),"Error: Unknown variable found during compilation {}",var1);
                         let reg1 = Register::RAX.to_byte_size(var1.typ.get_size(program));
                         op2.LEIRnasm(vec![reg1], f, program,build, &local_vars, stack_size, loc)?;
                         if stack_size-var1.operand == 0 {
@@ -5095,7 +5227,10 @@ fn nasm_x86_64_handle_scope(f: &mut File, build: &BuildProgram, program: &CmdPro
             Instruction::INTERRUPT(val) => {
                 writeln!(f, "   int 0x{:x}",val)?;
             },
-            Instruction::EXPAND_SCOPE(s) => nasm_x86_64_handle_scope(f, build, program, TCScopeType::NORMAL(&s),local_vars.clone(),stack_size,func_stack_begin,inst_count)?,
+            Instruction::EXPAND_SCOPE(s) => {
+                local_vars.push(HashMap::new());
+                nasm_x86_64_handle_scope(f, build, program, TCScopeType::NORMAL(&s),local_vars,stack_size,func_stack_begin,inst_count)?
+            }
             Instruction::EXPAND_IF_SCOPE(s)   => {
                 let binst = inst_count.clone();
                 let condition = match s.typ {
@@ -5110,7 +5245,7 @@ fn nasm_x86_64_handle_scope(f: &mut File, build: &BuildProgram, program: &CmdPro
                             writeln!(f, "   cmp {}, 0",reg.to_string())?;
                         },
                         OfP::LOCALVAR(v) => {
-                            let var = local_vars.get(v).unwrap();
+                            let var = get_local_build(&local_vars,v).unwrap();
                             com_assert!(loc,var.typ.weak_eq(&VarType::BOOLEAN),"Error: Expected boolean but found {}",var.typ.to_string(false));
                             if stack_size-var.operand == 0 {
                                 writeln!(f, "   cmp {} [rsp], 0",size_to_nasm_type(var.typ.get_size(program)),)?;
@@ -5195,7 +5330,8 @@ fn nasm_x86_64_handle_scope(f: &mut File, build: &BuildProgram, program: &CmdPro
                 if let Some((_,elses)) = scope.get_body(build).get(i+1) {
                     match elses {
                         Instruction::EXPAND_ELSE_SCOPE(elses) => {
-                            nasm_x86_64_handle_scope(f, build, program, TCScopeType::NORMAL(&elses), local_vars.clone(), stack_size,func_stack_begin,inst_count)?;
+                            local_vars.push(HashMap::new());
+                            nasm_x86_64_handle_scope(f, build, program, TCScopeType::NORMAL(&elses), local_vars, stack_size,func_stack_begin,inst_count)?;
                         }
                         _ => {}
                     }
@@ -5205,7 +5341,8 @@ fn nasm_x86_64_handle_scope(f: &mut File, build: &BuildProgram, program: &CmdPro
                 writeln!(f, "   jmp .IF_SCOPE_END_{}",binst)?;
                 writeln!(f, "   .IF_SCOPE_{}:",binst)?;
                 *inst_count += 1;
-                nasm_x86_64_handle_scope(f, build, program, TCScopeType::NORMAL(&s), local_vars.clone(), stack_size,func_stack_begin,inst_count)?;
+                local_vars.push(HashMap::new());
+                nasm_x86_64_handle_scope(f, build, program, TCScopeType::NORMAL(&s), local_vars, stack_size,func_stack_begin,inst_count)?;
                 *inst_count -= 1;
 
                 writeln!(f, "   .IF_SCOPE_END_{}:",binst)?;
@@ -5226,7 +5363,7 @@ fn nasm_x86_64_handle_scope(f: &mut File, build: &BuildProgram, program: &CmdPro
                             writeln!(f, "   cmp {}, 0",reg.to_string())?;
                         },
                         OfP::LOCALVAR(v) => {
-                            let var = local_vars.get(v).unwrap();
+                            let var = get_local_build(&local_vars, v).unwrap();
                             com_assert!(loc,var.typ.weak_eq(&VarType::BOOLEAN),"Error: Expected boolean but found {}",var.typ.to_string(false));
                             if stack_size-var.operand == 0 {
                                 writeln!(f, "   cmp {} [rsp], 0",size_to_nasm_type(var.typ.get_size(program)),)?;
@@ -5314,7 +5451,8 @@ fn nasm_x86_64_handle_scope(f: &mut File, build: &BuildProgram, program: &CmdPro
                 // writeln!(f, "   jmp .WHILE_SCOPE_END_{}",i)?;
                 // writeln!(f, "   .IF_SCOPE_{}:",i)?;
                 let binst = inst_count.clone();
-                nasm_x86_64_handle_scope(f, build, program, TCScopeType::NORMAL(&s), local_vars.clone(), stack_size,func_stack_begin,inst_count)?;
+                local_vars.push(HashMap::new());
+                nasm_x86_64_handle_scope(f, build, program, TCScopeType::NORMAL(&s), local_vars, stack_size,func_stack_begin,inst_count)?;
                 writeln!(f, "   jmp .WHILE_SCOPE_{}" ,binst)?;
                 writeln!(f, "   .WHILE_SCOPE_END_{}:",binst)?;
 
@@ -5324,6 +5462,30 @@ fn nasm_x86_64_handle_scope(f: &mut File, build: &BuildProgram, program: &CmdPro
             },
             Instruction::SYSCALL => {
                 writeln!(f, "   syscall")?;
+            }
+            Instruction::MAKELABEL(lname) => {
+                write!(f, "   .LABEL_")?;
+                for chr in lname.bytes() {
+                    write!(f, "{}",chr)?;
+                }
+                writeln!(f, ":\n")?;
+            }
+            Instruction::GOTO(lname, s) => {
+                let mut total_drop: usize = 0;
+                for vars in &local_vars[s.to_owned()..] {
+                    for v in vars.values() {
+                        total_drop += v.typ.get_size(program);
+                    }
+                }
+                if total_drop > 0 {
+                    writeln!(f, "   add rsp, {}",total_drop)?;
+                }
+                //todo!("Drop the variables until we hit s len {}",s);
+                write!(f, "   jmp .LABEL_")?;
+                for chr in lname.bytes() {
+                    write!(f, "{}",chr)?;
+                }
+                writeln!(f)?;
             }
             //TODO: Re-enble these
             _ => todo!("Re-enable these:")
@@ -5387,6 +5549,7 @@ fn nasm_x86_64_handle_scope(f: &mut File, build: &BuildProgram, program: &CmdPro
         }
         writeln!(f, "   ret")?;
     }
+    local_vars.pop();
     Ok(())
 }
 fn to_nasm_x86_64(build: &mut BuildProgram, program: &CmdProgram) -> io::Result<()>{
@@ -5481,7 +5644,7 @@ fn to_nasm_x86_64(build: &mut BuildProgram, program: &CmdProgram) -> io::Result<
             writeln!(&mut f, "{}{}:",program.architecture.func_prefix,function_name)?;
         }
         let mut inst_count = 0;
-        nasm_x86_64_handle_scope(&mut f, build, program, TCScopeType::FUNCTION(function_name.clone()),HashMap::new(),0,0,&mut inst_count)?;
+        nasm_x86_64_handle_scope(&mut f, build, program, TCScopeType::FUNCTION(function_name.clone()),&mut vec![HashMap::new()],0,0,&mut inst_count)?;
         if function_name == "main" {
             let mut argsize: usize = 0;
             for (_,local) in function.locals.iter() {
@@ -5712,6 +5875,8 @@ fn type_check_scope(build: &BuildProgram, program: &CmdProgram, scope: TCScopeTy
             Instruction::NOTEQUALS(_, _)      => {},
             Instruction::EQUALS(_, _)         => {},
             Instruction::SYSCALL              => {}
+            Instruction::MAKELABEL(_) => {},
+            Instruction::GOTO(_,_) => {},
             _ => todo!("Unreachable")
         }
     }
@@ -5983,7 +6148,9 @@ fn main() {
     Intrinsics.insert("cast".to_string(), IntrinsicType::CAST);
     Intrinsics.insert("syscall".to_string(), IntrinsicType::SYSCALL);
     Intrinsics.insert("...".to_string(), IntrinsicType::THREEDOTS);
-
+    Intrinsics.insert("@goto".to_string(), IntrinsicType::GOTO);
+    Intrinsics.insert("@makelabel".to_string(), IntrinsicType::MAKELABEL);
+    
 
     let mut Definitions: HashMap<String,VarType> = HashMap::new();
     Definitions.insert("int".to_string(), VarType::INT);
@@ -6098,6 +6265,13 @@ fn main() {
 - [x] TODO: Update README.md flags
 - [x] TODO: Push to master
 
+- [ ] TODO: Fix something like this (which currently compiles but nasm or any other assembler doesn't allow it since its invalid assembly):
+func a() {
+    @goto("b");
+}
+func b(){
+    @makelabel("b");
+}
 - [ ] TODO: Make it so that get_body returns None if scope has not been opened yet
 - [ ] TODO: Remove some dependencies like UUID since we don't exactly need it (also bench mark it to see the improvement in speed!)
 - [/] TODO: Make callraw use reference to UUID and name instead of raw when typechecking
