@@ -34,6 +34,7 @@ Made for easy navigation around the README.md
   - [Interrupts](#interrupts)
   - [Registers](#registers)
   - [Dlls](#dlls)
+- [Libraries](#libs)
 
 
 ## Quickstart
@@ -467,3 +468,35 @@ Or export to a dll:
 ```
 dll_export "mylib.dll" myfunc(...);
 ```
+
+## Libs
+
+Libaries are very important to any language and SOPL is no exception (Libs can be found in the libs folder). However SOPL, since it supports a wide range of platfroms, has its libraries divided into 3 Groups:
+- Platform specific libraries -> found in the folders following the platforms name: i.e. libs/Linux/, libs/Windows etc.
+- Target specific libraries -> An example of a target specific library can be anything from libc. They aren't platform specific however they DO NOT compile for platforms like fasm_x86_64-exe (Not **yet** implemented). 
+- Independent Libaries -> libraries that don't depend on anything but raw sopl. These can be found into their seperate folders inside the libs folder: libs/strlib, etc.
+
+You can always write your own libary but SOPL also comes with some built-in libraries to help you out on your journey 
+
+### Platform specific libs
+Currently supported platform specific libs:
+- Linux (Partially implemented but still doesn't have sysfuncs.spl finished yet)
+- Windows (Not implemented entirely but has been started)
+
+Platform specific libs can help you make fast programs that also use platform specific things (WinAPI on windows, Syscalls on Linux)
+
+### Target specific libs
+With the currently unfinished libs, its almost a necesity to use target specific libs. Its entirely possible to write whole programs without them, however this can prove to be challanging. I'm hopping that I will be able to fix this once I have stdsopl.spl going. 
+
+Currently supported target specific libs:
+- C:
+  - stdio.spl
+  - stdlib.spl
+
+## Independent libs
+
+Currently supported independent libs:
+- strlib:
+  [x] strlib.spl
+  [ ] chrlib.spl (Not done because we don't have boolean operations nor chars working yet)
+  [ ] strnum.spl
