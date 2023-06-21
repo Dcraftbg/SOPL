@@ -861,10 +861,10 @@ impl ExprTree {
                 }
             },
             Op::MINUS => {
-                let left = com_expect!(loc,self.left.as_ref(),"Error: Cannot evaluate Op '{}' without left parameter",Op::PLUS .to_string());
+                let left = com_expect!(loc,self.left.as_ref(),"Error: Cannot evaluate Op '{}' without left parameter",Op::MINUS.to_string());
                 if left.is_ofp() {
                     com_assert!(loc,regs.len() > 1, "TODO: Handle multi-parameter loading for expressions!");
-                    let right       = com_expect!(loc,self.right.as_ref(),"Error: Cannot evaluate Op '{}' without left parameter",Op::PLUS .to_string());
+                    let right       = com_expect!(loc,self.right.as_ref(),"Error: Cannot evaluate Op '{}' without left parameter",Op::MINUS.to_string());
                     let rightregs1= right.LEIRnasm(regs.to_vec(), f, program, build, local_vars, stack_size, loc)?;
                     let leftregs1 = left.LEIRnasm(regs[1..].to_vec(), f, program, build, local_vars, stack_size, loc)?;
                     com_assert!(loc,rightregs1.len() == 1, "TODO: Handle multi-parameter loading for expressions!");
@@ -874,7 +874,7 @@ impl ExprTree {
                 else {
                     let leftregs1 = left.LEIRnasm(regs.to_vec(), f, program, build, local_vars, stack_size, loc)?;
                     com_assert!(loc,regs.len() > 1, "TODO: Handle multi-parameter loading for expressions!");
-                    let right       = com_expect!(loc,self.right.as_ref(),"Error: Cannot evaluate Op '{}' without left parameter",Op::PLUS.to_string());
+                    let right       = com_expect!(loc,self.right.as_ref(),"Error: Cannot evaluate Op '{}' without left parameter",Op::MINUS.to_string());
                     let rightregs1= right.LEIRnasm(regs[1..].to_vec(), f, program, build, local_vars, stack_size, loc)?;
                     com_assert!(loc,rightregs1.len() == 1, "TODO: Handle multi-parameter loading for expressions!");
                     writeln!(f, "   sub {}, {}",leftregs1[0].to_string(),rightregs1[0].to_string())?;
@@ -884,11 +884,11 @@ impl ExprTree {
             },
             Op::DIV   => {
                 com_assert!(loc,regs[0].to_byte_size(8) == Register::RAX,"Error: Cannot do division with output register different from RAX");
-                let left = com_expect!(loc,self.left.as_ref(),"Error: Cannot evaluate Op '{}' without left parameter",Op::DIV  .to_string());
+                let left = com_expect!(loc,self.left.as_ref(),"Error: Cannot evaluate Op '{}' without left parameter",Op::DIV.to_string());
                 if left.is_ofp() {
                     let leftregs1 = left.LEIRnasm(regs.clone(), f, program, build, local_vars, stack_size, loc)?;
                     com_assert!(loc,leftregs1.len() == 1, "TODO: Handle multi-parameter loading for expressions!");
-                    let right = com_expect!(loc,self.right.as_ref(),"Error: Cannot evaluate Op '{}' without left parameter",Op::DIV  .to_string());
+                    let right = com_expect!(loc,self.right.as_ref(),"Error: Cannot evaluate Op '{}' without left parameter",Op::DIV.to_string());
                     let rightregs1 = right.LEIRnasm(regs[1..].to_vec(), f, program, build, local_vars, stack_size, loc)?;
                     com_assert!(loc,rightregs1.len() == 1, "TODO: Handle multi-parameter loading for expressions!");
                     //writeln!(f, "   xor rdx, rdx")?;
@@ -897,7 +897,7 @@ impl ExprTree {
                     o = leftregs1;
                 }
                 else {
-                    let right = com_expect!(loc,self.right.as_ref(),"Error: Cannot evaluate Op '{}' without left parameter",Op::DIV  .to_string());
+                    let right = com_expect!(loc,self.right.as_ref(),"Error: Cannot evaluate Op '{}' without left parameter",Op::DIV.to_string());
                     let rightregs1 = right.LEIRnasm(regs.to_vec(), f, program, build, local_vars, stack_size, loc)?;
                     let leftregs1 = left.LEIRnasm(regs[1..].to_vec(), f, program, build, local_vars, stack_size, loc)?;
                     com_assert!(loc,leftregs1.len() == 1, "TODO: Handle multi-parameter loading for expressions!");
@@ -910,11 +910,11 @@ impl ExprTree {
             },
             Op::REMAINDER => {
                 com_assert!(loc,regs[0].to_byte_size(8) == Register::RAX,"Error: Cannot do division with output register different from RAX");
-                let left = com_expect!(loc,self.left.as_ref(),"Error: Cannot evaluate Op '{}' without left parameter",Op::DIV.to_string());
+                let left = com_expect!(loc,self.left.as_ref(),"Error: Cannot evaluate Op '{}' without left parameter",Op::REMAINDER.to_string());
                 if left.is_ofp() {
                     let leftregs1 = left.LEIRnasm(regs.clone(), f, program, build, local_vars, stack_size, loc)?;
                     com_assert!(loc,leftregs1.len() == 1, "TODO: Handle multi-parameter loading for expressions!");
-                    let right = com_expect!(loc,self.right.as_ref(),"Error: Cannot evaluate Op '{}' without left parameter",Op::DIV.to_string());
+                    let right = com_expect!(loc,self.right.as_ref(),"Error: Cannot evaluate Op '{}' without left parameter",Op::REMAINDER.to_string());
                     let rightregs1 = right.LEIRnasm(regs[1..].to_vec(), f, program, build, local_vars, stack_size, loc)?;
                     com_assert!(loc,rightregs1.len() == 1, "TODO: Handle multi-parameter loading for expressions!");
                     writeln!(f, "   cqo")?;
@@ -922,7 +922,7 @@ impl ExprTree {
                     o = vec![Register::RDX.to_byte_size(rightregs1[0].size())]
                 }
                 else {
-                    let right = com_expect!(loc,self.right.as_ref(),"Error: Cannot evaluate Op '{}' without left parameter",Op::DIV.to_string());
+                    let right = com_expect!(loc,self.right.as_ref(),"Error: Cannot evaluate Op '{}' without left parameter",Op::REMAINDER.to_string());
                     let rightregs1 = right.LEIRnasm(regs.to_vec(), f, program, build, local_vars, stack_size, loc)?;
                     let leftregs1 = left.LEIRnasm(regs[1..].to_vec(), f, program, build, local_vars, stack_size, loc)?;
                     com_assert!(loc,leftregs1.len() == 1, "TODO: Handle multi-parameter loading for expressions!");
@@ -939,7 +939,7 @@ impl ExprTree {
                     if left.is_ofp() {
                         let leftregs1 = left.LEIRnasm(regs.clone(), f, program, build, local_vars, stack_size, loc)?;
                         com_assert!(loc,leftregs1.len() == 1, "TODO: Handle multi-parameter loading for expressions!");
-                        let right = com_expect!(loc,self.right.as_ref(),"Error: Cannot evaluate Op '{}' without left parameter",Op::DIV  .to_string());
+                        let right = com_expect!(loc,self.right.as_ref(),"Error: Cannot evaluate Op '{}' without left parameter",Op::STAR  .to_string());
                         let rightregs1 = right.LEIRnasm(regs[1..].to_vec(), f, program, build, local_vars, stack_size, loc)?;
                         com_assert!(loc,rightregs1.len() == 1, "TODO: Handle multi-parameter loading for expressions!");
                         //writeln!(f, "   xor rdx, rdx")?;
@@ -948,7 +948,7 @@ impl ExprTree {
                         o = leftregs1;
                     }
                     else {
-                        let right = com_expect!(loc,self.right.as_ref(),"Error: Cannot evaluate Op '{}' without left parameter",Op::DIV  .to_string());
+                        let right = com_expect!(loc,self.right.as_ref(),"Error: Cannot evaluate Op '{}' without left parameter",Op::STAR  .to_string());
                         let rightregs1 = right.LEIRnasm(regs.to_vec(), f, program, build, local_vars, stack_size, loc)?;
                         let leftregs1 = left.LEIRnasm(regs[1..].to_vec(), f, program, build, local_vars, stack_size, loc)?;
                         com_assert!(loc,leftregs1.len() == 1, "TODO: Handle multi-parameter loading for expressions!");
@@ -1058,7 +1058,7 @@ impl ExprTree {
                     todo!()
                 }
                 else {
-                    let right = com_expect!(loc,self.right.as_ref(),"Error: Cannot evaluate Op '{}' without left parameter",Op::LTEQ .to_string());
+                    let right = com_expect!(loc,self.right.as_ref(),"Error: Cannot evaluate Op '{}' without left parameter",Op::BAND.to_string());
                     com_assert!(loc,right.is_ofp(), "Error: Expected right to be ofp but found something else!");
                     let rightofp = right.unwrap_val();
                     match rightofp {
