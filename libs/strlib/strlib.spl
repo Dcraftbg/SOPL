@@ -93,29 +93,29 @@ func strfind(src: *char, size_src: size_t, srca: *char,size_srca: size_t : *char
 // }
 
 // Testing
-include "../libc/stdio.spl"
-func main(){
-   //let c: *char = "Hello";
-   // let clen: size_t = cstrlen(c);
-   // //printf("Got here!\n");
-   // let res: *char = strchr(c, 108, clen);
-   // printf("Res: %s\n",res);
-   let a: *char = "Hello World!";
+// include "../libc/stdio.spl"
+// func main(){
+//    //let c: *char = "Hello";
+//    // let clen: size_t = cstrlen(c);
+//    // //printf("Got here!\n");
+//    // let res: *char = strchr(c, 108, clen);
+//    // printf("Res: %s\n",res);
+//    let a: *char = "Hello World!";
    
-   let res: *char = strfind(a,12, "World",5);
-   if res == 0 {
-       printf("Error: Could not find World inside string!\n");
-   }
-   else {
-       let expr: size_t = res - a;
-       printf("Found it at: %lld\n",expr);
-   }
-   if striseq("Hello", 5, "Hello", 5) {
-       printf("YAY they are equal!\n");
-   }
-   else {
-       printf("Noo.... They are not equal!\n");
-   }
-}
+//    let res: *char = strfind(a,12, "World",5);
+//    if res == 0 {
+//        printf("Error: Could not find World inside string!\n");
+//    }
+//    else {
+//        let expr: size_t = res - a;
+//        printf("Found it at: %lld\n",expr);
+//    }
+//    if striseq("Hello", 5, "Hello", 5) {
+//        printf("YAY they are equal!\n");
+//    }
+//    else {
+//        printf("Noo.... They are not equal!\n");
+//    }
+// }
 //strfind("Hello",5,"World",5);
 //strfind("Hello"s,"World"s);

@@ -2,7 +2,7 @@
 
 Newest Version: [0.13A](#013a)
 # Manual:
-  - [0.13A] (#013a)
+  - [0.13A](#013a)
   - [0.12.5A](#0125a) 
     - [0.12.4A](#0124a) 
     - [0.12.3A](#0123a) 
@@ -42,6 +42,19 @@ Newest Version: [0.13A](#013a)
   - [0.2A](#02a)
   - [0.1A](#01a)
 # Change Log
+ ## 0.13.3A
+   - Added @goto and @makelabel
+   - Restructured internal local variable handling (now its not copying extensively the more scopes you have for compiling!)
+   - Fixed issue with makelabel and made it so there is an _ between each of the character numbers
+  
+ ## 0.13.2A 
+   - Minor changes
+   - Mostly contributed to writting sopl libs
+ ## 0.13.1A
+   - Added ability to have more than 4 or whatever amount of registers you specified for passing arguments
+   - Added a better system for passing arguments
+   - Moved libs to libs folder
+   - Started strlib.spl
  ## 0.13A
    - Added arbitrary memory access to be able to dereference and reference data
    - Added BAND operand to be able to get the memory location of a local variable
