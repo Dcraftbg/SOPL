@@ -37,7 +37,10 @@ func strchr(src: *char, c: char, size: size_t : *char) {
     }
     return src+found_index;
 }
-func striseq(src: *char, srca: *char, size: size_t : bool) {
+func striseq(src: *char, size: size_t, srca: *char, sizea: size_t : bool) {
+    if size != sizea {
+        return 1;
+    }
     let index: size_t = 0;
     while index < size {
         if *(src+index) != (*(srca+index)) {
@@ -107,12 +110,12 @@ func main(){
        let expr: size_t = res - a;
        printf("Found it at: %lld\n",expr);
    }
-   //if striseq("Hello", "Hello", 5) {
-   //    printf("YAY they are equal!\n");
-   //}
-   //else {
-   //    printf("Noo.... They are not equal!\n");
-   //}
+   if striseq("Hello", 5, "Hello", 5) {
+       printf("YAY they are equal!\n");
+   }
+   else {
+       printf("Noo.... They are not equal!\n");
+   }
 }
 //strfind("Hello",5,"World",5);
 //strfind("Hello"s,"World"s);

@@ -5466,7 +5466,7 @@ fn nasm_x86_64_handle_scope(f: &mut File, build: &BuildProgram, program: &CmdPro
             Instruction::MAKELABEL(lname) => {
                 write!(f, "   .LABEL_")?;
                 for chr in lname.bytes() {
-                    write!(f, "{}",chr)?;
+                    write!(f, "{}_",chr)?;
                 }
                 writeln!(f, ":\n")?;
             }
@@ -5483,7 +5483,7 @@ fn nasm_x86_64_handle_scope(f: &mut File, build: &BuildProgram, program: &CmdPro
                 //todo!("Drop the variables until we hit s len {}",s);
                 write!(f, "   jmp .LABEL_")?;
                 for chr in lname.bytes() {
-                    write!(f, "{}",chr)?;
+                    write!(f, "{}_",chr)?;
                 }
                 writeln!(f)?;
             }
