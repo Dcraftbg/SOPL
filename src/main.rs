@@ -2581,8 +2581,6 @@ enum Instruction {
     CALLRAW (String, CallArgs),
     FNBEGIN (),
     RET     (Expression),
-    SCOPEBEGIN,
-    SCOPEEND,
     SYSCALL,
 
     // CONDITIONAL_JUMP(usize),
@@ -2593,13 +2591,6 @@ enum Instruction {
     EXPAND_IF_SCOPE    (NormalScope),
     EXPAND_WHILE_SCOPE (NormalScope),
     EXPAND_ELSE_SCOPE  (NormalScope),
-
-    EQUALS          (Expression, Expression),
-    MORETHAN        (Expression, Expression),
-    LESSTHAN        (Expression, Expression),
-    MORETHANEQUALS  (Expression, Expression),
-    LESSTHANEQUALS  (Expression, Expression),
-    NOTEQUALS       (Expression, Expression),
     GOTO(String, usize),
     MAKELABEL(String)
 }
@@ -3838,7 +3829,6 @@ fn parse_token_to_build_inst(token: Token,lexer: &mut Lexer, program: &mut CmdPr
                                 }
                                 expectedLabels.clear();
                                 currentLabels.clear();
-                                func.body.push((token.location.clone(),Instruction::SCOPEEND));
                                 func.locals = currentLocals.pop().unwrap();
                                 build.functions.insert(name, func);
                             },
@@ -4785,8 +4775,6 @@ fn nasm_x86_64_handle_scope(f: &mut File, build: &BuildProgram, program: &CmdPro
                 
                 writeln!(f, "   ret")?;
             }
-            //TOOD: Potentially remove these
-            Instruction::SCOPEBEGIN | Instruction::SCOPEEND => {}
             Instruction::DEFVAR(_) => {},
             Instruction::INTERRUPT(val) => {
                 writeln!(f, "   int 0x{:x}",val)?;
@@ -5360,8 +5348,6 @@ fn type_check_scope(build: &BuildProgram, program: &CmdProgram, scope: TCScopeTy
             },
             Instruction::FNBEGIN()           => {},
             Instruction::RET(_) => {hasFoundRet=true}, // TODO: typecheck expression
-            Instruction::SCOPEBEGIN          => {},
-            Instruction::SCOPEEND            => {},
             Instruction::INTERRUPT(_)        => {},
             Instruction::EXPAND_SCOPE(s)       => if type_check_scope(build, program, TCScopeType::NORMAL(&s), currentLocals) { hasFoundRet = true},
             Instruction::EXPAND_IF_SCOPE(s)    => {
@@ -5375,13 +5361,7 @@ fn type_check_scope(build: &BuildProgram, program: &CmdProgram, scope: TCScopeTy
                 typ_assert!(loc,res.is_some() && res.as_ref().unwrap().weak_eq(&VarType::BOOLEAN), "Error: Expected result of expression to be boolean but found: {}",if let Some(res) = res { res.to_string(false)} else { "None".to_owned()});
                 if type_check_scope(build, program, TCScopeType::NORMAL(&s), currentLocals) { hasFoundRet = true}
             }
-            //TODO: add typechecking for this:
-            Instruction::MORETHAN(_, _)       => {},
-            Instruction::LESSTHAN(_, _)       => {},
-            Instruction::MORETHANEQUALS(_, _) => {},
-            Instruction::LESSTHANEQUALS(_, _) => {},
-            Instruction::NOTEQUALS(_, _)      => {},
-            Instruction::EQUALS(_, _)         => {},
+
             Instruction::SYSCALL              => {}
             Instruction::MAKELABEL(_) => {},
             Instruction::GOTO(_,_) => {},
