@@ -1,26 +1,26 @@
-extern "C" abort	
-extern "C" abs  	
-extern "C" atexit	
-extern "C" atof	
-extern "C" atoi	
-extern "C" atol	
-extern "C" bsearch	
-extern "C" calloc	
-extern "C" div	    
-extern "C" exit	
-extern "C" free	
-extern "C" getenv	
-extern "C" labs	
-extern "C" ldiv	
-extern "C" malloc	
-extern "C" qsort	
-extern "C" rand	
-extern "C" realloc	
-extern "C" srand	
-extern "C" strtod	
-extern "C" strtol	
-extern "C" strtoul	
-extern "C" system
+extern "C" abort	;
+extern "C" abs  	;
+extern "C" atexit	;
+extern "C" atof	;
+extern "C" atoi	;
+extern "C" atol	;
+extern "C" bsearch	;
+extern "C" calloc	;
+extern "C" div	    ;
+extern "C" exit	;
+extern "C" free	;
+extern "C" getenv	;
+extern "C" labs	;
+extern "C" ldiv	;
+extern "C" malloc	;
+extern "C" qsort	;
+extern "C" rand	;
+extern "C" realloc	;
+extern "C" srand	;
+extern "C" strtod	;
+extern "C" strtol	;
+extern "C" strtoul	;
+extern "C" system;
 const NULL = 0;
 const EXIT_SUCCESS = 0;
 const EXIT_FAILURE = 8;

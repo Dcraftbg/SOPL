@@ -429,6 +429,20 @@ impl Ptr {
             }
         }
     }
+    fn ref_to(typ: VarType) -> Self {
+        if typ.is_ptr() {
+            match typ.clone() {
+                VarType::PTR(mut p) => {
+                    p.inner_ref += 1;
+                    p
+                }
+                _ => panic!("Unreachable")
+            }
+        }
+        else {
+            Self{inner_ref: 0, typ: PtrTyp::TYP(Box::new(typ))}
+        }
+    }
 }
 impl PtrTyp {
     fn to_string(&self) -> String {
@@ -2510,6 +2524,7 @@ enum OfP {
     REGISTER (Register),
     //PARAM    (String),
     LOCALVAR (String),
+    GLOBALVAR(String),
     CONST    (RawConstValueType),
     RESULT   (String,CallArgs),
     BUFFER   (usize)
@@ -2528,7 +2543,8 @@ impl OfP {
             Self::RESULT(f, _) => {        
                 build.functions.get(f)?.contract.Outputs.get(0).cloned()
             }
-            Self::BUFFER(_) => todo!()
+            Self::BUFFER(_) => todo!(),
+            Self::GLOBALVAR(_) => todo!()
         }
     }
     fn var_type(&self, build: &BuildProgram, local_vars: &Vec<HashMap<String, LocalVariable>>) -> Option<VarType> {
@@ -2537,64 +2553,81 @@ impl OfP {
             Self::CONST(v) => Some(v.to_type(build)[0].clone()),
             Self::LOCALVAR(v) => Some(get_local_build(local_vars, v).unwrap().typ.clone()),
             Self::RESULT(f, _) => build.functions.get(f).unwrap().contract.Outputs.get(0).cloned(),
-            Self::BUFFER(_) => todo!()
+            Self::BUFFER(_) => todo!(),
+            Self::GLOBALVAR(_) => todo!(),
         }
     }
     fn LOIRGNasm(&self, regs: Vec<Register>, f: &mut File, program: &CmdProgram,build: &BuildProgram, local_vars: &Vec<HashMap<String, LocalVariable>>, buffers: &Vec<BuildBuf>, stack_size: usize, loc: &ProgramLocation) -> std::io::Result<Vec<Register>>{
         let mut out: Vec<Register> = Vec::with_capacity(regs.len());
         match self {
+            OfP::GLOBALVAR(v) => {
+                
+                let var= build.global_vars.get(v).unwrap();
+                match &var.typ {
+                    GlobalVarType::BUFFER(i) => {
+                        let reg = regs[0].to_byte_size(8);
+                        writeln!(f, "   mov {}, _GLOBL_{}",reg,i)?;
+                    }
+                    GlobalVarType::CONSTANT(_) => {
+                        todo!("I don't know how to handle this yet");
+                        //let osize = val.get_size(program);
+                        //let reg = regs[0].to_byte_size(8);                        
+                        //writeln!(f, "   mov {}, {} [_GLOBL_{}]",reg,size_to_nasm_type(osize),v)?;
+                    }
+                }
+            }
             OfP::REGISTER(reg2) => {
-                let reg = &regs[0].to_byte_size(reg2.size());
+                let reg = regs[0].to_byte_size(reg2.size());
                 writeln!(f, "   mov {}, {}",reg.to_string(),reg2.to_string())?;
-                out.push(reg.clone());
+                out.push(reg)
             },
             OfP::LOCALVAR(val) => {
                 let lvar = get_local_build(local_vars, val).unwrap();
                 let osize = lvar.typ.get_size(program);
-                let reg = &regs[0].to_byte_size(osize);
+                let reg = regs[0].to_byte_size(osize);
                 if stack_size-lvar.operand == 0 {
                     writeln!(f, "   mov {}, {} [rsp]",reg.to_string(),size_to_nasm_type(osize))?;
                 }
                 else {
                     writeln!(f, "   mov {}, {} [rsp+{}]",reg.to_string(),size_to_nasm_type(osize),stack_size-lvar.operand)?;
                 }
-                out.push(reg.clone());
+                out.push(reg);
             },
             OfP::CONST(val) => {
                 match val {
                     RawConstValueType::INT(val) => {
-                        let reg = &regs[0].to_byte_size(4);
+                        let reg = regs[0].to_byte_size(4);
                         writeln!(f, "   mov {}, {}",reg.to_string(),val)?;
-                        out.push(reg.clone());
+                        out.push(reg);
                     },
                     RawConstValueType::LONG(val) => {
-                        let reg = &regs[0].to_byte_size(8);
+                        let reg = regs[0].to_byte_size(8);
                         writeln!(f, "   mov {}, {}",reg.to_string(),val)?;
-                        out.push(reg.clone());
+                        out.push(reg);
                     },
                     RawConstValueType::STR(val) => {
                         let str = build.stringdefs.get(val).unwrap();
                         match str.Typ {
                             ProgramStringType::STR => {
                                 com_assert!(loc,regs.len() > 1, "Error: Cannot load Ofp into register!");
-                                let reg = &regs[0];
-                                let reg1 = &regs[1];
+                                let reg = regs[0];
+                                let reg1 = regs[1];
                                 writeln!(f, "   lea {}, [rel _STRING_{}_]",reg.to_string(),val.to_string().replace("-", ""))?;
                                 writeln!(f, "   mov {}, {}",reg1.to_string(),build.stringdefs.get(val).unwrap().Data.len())?;
-                                out.push(reg.clone());
-                                out.push(reg1.clone());
+                                out.push(reg);
+                                out.push(reg1);
                             },
                             ProgramStringType::CSTR => {
-                                let reg = &regs[0];
+                                let reg = regs[0];
                                 writeln!(f, "   lea {}, [rel _STRING_{}_]",reg.to_string(),val.to_string().replace("-", ""))?;
-                                out.push(reg.clone());
+                                out.push(reg);
                             },
                         }
                     },
                     RawConstValueType::PTR(_,val) => {
-                        let reg = &regs[0].to_byte_size(8);
+                        let reg = regs[0].to_byte_size(8);
                         writeln!(f, "    mov {}, {}",reg.to_string(),val)?;
-                        out.push(reg.clone());
+                        out.push(reg);
                     },
                 }
             },
@@ -2604,21 +2637,21 @@ impl OfP {
                 if sp_taken-stack_size+shadow_space > 0 {
                     writeln!(f, "   add rsp, {}",sp_taken-stack_size+shadow_space)?
                 }
-                let reg = &regs[0].to_byte_size(build.get_contract_of_symbol(func).unwrap().Outputs.get(0).unwrap_or(&VarType::LONG).get_size(program));
+                let reg = regs[0].to_byte_size(build.get_contract_of_symbol(func).unwrap().Outputs.get(0).unwrap_or(&VarType::LONG).get_size(program));
                 if reg.to_byte_size(8) != Register::RAX {
                     let oreg = Register::RAX.to_byte_size(reg.size());
                     writeln!(f, "   mov {}, {}",reg.to_string(),oreg.to_string())?;
                 }
-                out.push(reg.clone());
+                out.push(reg);
             },
             OfP::BUFFER(s) => {
                 let buf: &BuildBuf = &buffers[*s];
-                let reg = &regs[0].to_byte_size(8);
+                let reg = regs[0].to_byte_size(8);
                 writeln!(f, "   mov {}, rsp",reg)?;
                 if stack_size-buf.offset > 0 {
                     writeln!(f, "   add {}, {}",reg,stack_size-buf.offset)?;
                 }
-                out.push(reg.clone())
+                out.push(reg)
             },
         }
         Ok(out)
@@ -2628,6 +2661,9 @@ impl OfP {
             TokenType::WordType(data)  => {
                 if contains_local(locals, data){
                     return Some(Self::LOCALVAR(data.clone()))
+                }
+                else if build.global_vars.contains_key(data) {
+                    return Some(Self::GLOBALVAR(data.clone()))
                 }
                 else if build.constdefs.contains_key(data) {
                     return Some(Self::CONST(build.constdefs.get(data).unwrap().typ.clone()))
@@ -3088,6 +3124,16 @@ impl BuildBuf {
     }
 }
 #[derive(Debug)]
+enum GlobalVarType {
+    BUFFER(usize),
+    CONSTANT(RawConstValueType)
+}
+#[derive(Debug)]
+struct GlobalVar {
+    typ: GlobalVarType,
+    loc: ProgramLocation
+}
+#[derive(Debug)]
 struct BuildProgram {
     externals:    HashMap<String,External>,
     functions:    HashMap<String, Function>,
@@ -3095,7 +3141,8 @@ struct BuildProgram {
     constdefs:    HashMap<String, RawConstValue>,
     dll_imports:  HashMap<String, DLL_import>,
     dll_exports:  HashMap<String, DLL_export>,
-    //buffers:      HashMap<String, BuildBuf>
+    global_vars:  HashMap<String, GlobalVar>,
+    buffers:      Vec<BuildBuf>
 }
 impl BuildProgram {
     fn insert_unique_str(&mut self, str: ProgramString) -> Uuid {
@@ -3107,7 +3154,22 @@ impl BuildProgram {
         UUID
     }
     fn contains_symbol(&self, str: &String) -> bool {
-        self.constdefs.contains_key(str) || self.dll_imports.contains_key(str) || self.externals.contains_key(str) || self.functions.contains_key(str)
+        self.constdefs.contains_key(str) || self.dll_imports.contains_key(str) || self.externals.contains_key(str) || self.functions.contains_key(str) || self.global_vars.contains_key(str)
+    }
+    fn get_location_of_symbol(&self, str: &String) -> Option<ProgramLocation> {
+        if let Some(ext) = self.externals.get(str) {
+            return Some(ext.loc.clone())
+        }
+        else if let Some(func) = self.functions.get(str) {
+            return Some(func.location.clone())
+        }
+        else if let Some(var) = self.global_vars.get(str) {
+            return Some(var.loc.clone())
+        }
+        else if let Some(cons) = self.constdefs.get(str) {
+            return Some(cons.loc.clone())
+        }
+        None
     }
     fn get_contract_of_symbol(&self, str: &String) -> Option<AnyContract> {
         if let Some(ext) = self.externals.get(str) {
@@ -3122,8 +3184,9 @@ impl BuildProgram {
         None
     }
     fn new() -> Self {
-        Self { externals: HashMap::new(), functions: HashMap::new(),stringdefs: HashMap::new(), constdefs: HashMap::new(), dll_imports: HashMap::new(), dll_exports: HashMap::new(), 
-            //buffers: Vec::new()
+        Self { externals: HashMap::new(), functions: HashMap::new(),stringdefs: HashMap::new(), constdefs: HashMap::new(), dll_imports: HashMap::new(), dll_exports: HashMap::new(),
+            global_vars: HashMap::new(), 
+            buffers: Vec::new()
         }
     }
 }
@@ -3724,7 +3787,12 @@ fn getTop(scopeStack: &ScopeStack) -> Option<&Scope> {
 }
 fn getTopMut(scopeStack: &mut ScopeStack) -> Option<&mut Scope> {
     let len = scopeStack.len();
-    scopeStack.get_mut(len-1)
+    if len > 0 {
+        scopeStack.get_mut(len-1)
+    }
+    else{
+        None
+    }
 }
 fn get_local<'a>(currentLocals: &'a Vec<Locals>, name: &String) -> Option<&'a VarType> {
     for e in currentLocals.iter().rev() {
@@ -4143,51 +4211,133 @@ fn parse_token_to_build_inst(token: Token,lexer: &mut Lexer, program: &mut CmdPr
                 IntrinsicType::DOTCOMA => {},
 
                 IntrinsicType::Let => {
-
-                    let nametok = par_expect!(lexer.currentLocation, lexer.next(), "Error: abruptly ran out of tokens for Let");
-                    let loc = nametok.location.clone();
-                    match nametok.typ {
-                        TokenType::WordType(ref name) => {
-                            par_assert!(loc, !build.contains_symbol(&name), "Error: Redifinition of existing symbol {}",name);
-                            par_assert!(token, scopeStack.len() > 0 && getTopMut(scopeStack).unwrap().body_is_some(), "Error: Unexpected multiply intrinsic outside of scope! Scopes of type {} do not support instructions!",getTopMut(scopeStack).unwrap().typ.to_string(false));
-                            let currentScope = getTopMut(scopeStack).unwrap();
-                            let typ = par_expect!(lexer.currentLocation, lexer.next(), "Error: abruptly ran out of tokens for let type");
-                            par_assert!(typ,typ.typ==TokenType::IntrinsicType(IntrinsicType::DOUBLE_COLIN), "Error: You probably forgot to put a : after the name!");
-                            let typ = par_expect!(lexer.currentLocation, lexer.next(), "Error: abruptly ran out of tokens for let type");
-                            match typ.typ {
-                                TokenType::Definition(def) => {
-                                    currentLocals.last_mut().unwrap().insert(name.clone(), def);
-                                    currentScope.body_unwrap_mut().unwrap().push((lexer.currentLocation.clone(),Instruction::DEFVAR(name.clone())))
-                                }
-                                _ => {
-                                    par_error!(typ, "Error: unexpected token type in let definition. Expected VarType but found {}",typ.typ.to_string(false))
+                    if scopeStack.len() == 0 {
+                        let nametok = par_expect!(lexer.currentLocation, lexer.next(), "Error: abruptly ran out of tokens for Let");
+                        let name = par_expect!(lexer.currentLocation, nametok.unwrap_word(), "Error: Expected word after let but found {}",nametok.typ.to_string(false));
+                        par_assert!(nametok, !build.contains_symbol(name), "Error: Redefinition of symbol {} is not allowed! {}",name, {
+                            if let Some(loc) = build.get_location_of_symbol(name) {
+                                format!("Symbol already defined {} here",loc.loc_display())
+                            }
+                            else {
+                                "".to_owned()
+                            }
+                        });
+                        let typ = par_expect!(lexer.currentLocation, lexer.next(), "Error: abruptly ran out of tokens for let type");
+                        par_assert!(typ,typ.typ==TokenType::IntrinsicType(IntrinsicType::DOUBLE_COLIN), "Error: You probably forgot to put a : after the name ({})!",name);
+                        let typ = par_expect!(lexer.currentLocation, lexer.next(), "Error: abruptly ran out of tokens for let type");
+                        match &typ.typ {
+                            TokenType::IntrinsicType(t) => {
+                                match t {
+                                    IntrinsicType::OPENSQUARE => {
+                                        let ntok = par_expect!(lexer,lexer.next(),"Error: Ran out of tokens for global buffer initialization");
+                                        if let TokenType::Definition(buftyp) = &ntok.typ {
+                                            let ntok = par_expect!(lexer,lexer.next(),"Error: Ran out of tokens for global buffer initialization");
+                                            par_assert!(ntok, ntok.typ == TokenType::IntrinsicType(IntrinsicType::COMA), "Error: Expected coma after defintion in buffer!");    
+                                            let ntok = par_expect!(lexer,lexer.next(),"Error: Ran out of tokens for global buffer initialization");
+                                            let size = par_expect!(ntok, ntok.typ.unwrap_numeric(build), "Error: Expected numeric value after coma to indicate the size of the buffer but found {}",ntok.typ);
+                                            par_assert!(ntok, size > 0, "Error: Cannot have buffer of size lower than or equal to 0");
+                                            let res = build.buffers.len();
+                                            build.global_vars.insert(name.clone(), GlobalVar { typ: GlobalVarType::BUFFER(res), loc: typ.location });
+                                            build.buffers.push(BuildBuf::from_parse_buf(buftyp.to_owned(), size as usize));
+                                            let ntok = par_expect!(lexer,lexer.next(),"Error: Ran out of tokens for global buffer initialization");
+                                            par_assert!(ntok, ntok.typ == TokenType::IntrinsicType(IntrinsicType::CLOSESQUARE), "Error: Expected close square bracket but found {}",ntok.typ);
+                                        }
+                                        else {
+                                            par_error!(ntok, "Error: Expected VarType for buffer but found {}",ntok.typ);
+                                        }
+                                    }
+                                    _ => {
+                                        par_error!(typ, "Error: Unexpected intrinsic type: {}",t.to_string(false))
+                                    }
                                 }
                             }
-                        },
-                        _ => {
-                            par_error!(nametok, "Unexpected name type, Expected Word but found {}", nametok.typ.to_string(false))
+
+                            TokenType::Definition(_def) => {
+                                let ntok = par_expect!(lexer.currentLocation, lexer.next(), "Error: abruptly ran out of tokens for Let set instruction");
+                                if ntok.typ==TokenType::IntrinsicType(IntrinsicType::DOTCOMA) { todo!("Handle dotcoma for uninitialized globalvars")}
+                                par_assert!(ntok,ntok.typ==TokenType::SETOperation(SetOp::SET),"Error: Expected set or dotcoma but found something else!");
+                                let t = par_expect!(lexer,lexer.next(),"Error: Ran out of tokens for global initialization");
+                                todo!("Finish other global vars\nt: {:?}",t);
+                            }
+                            _ => {
+                                par_error!(typ, "Error: unexpected token type in let definition. Expected VarType but found {}",typ.typ.to_string(false))
+                            }
                         }
                     }
-                    if !lexer.is_newline() {
-                        let ntok = par_expect!(lexer.currentLocation, lexer.next(), "Error: abruptly ran out of tokens for Let set instruction");
-                        if ntok.typ==TokenType::IntrinsicType(IntrinsicType::DOTCOMA) { return }
-                        par_assert!(ntok,ntok.typ==TokenType::SETOperation(SetOp::SET),"Error: Expected set or dotcoma but found something else!");
-                        let body: Vec<Token> = lexer.map_while(|t| {
-                            if t.typ == TokenType::IntrinsicType(IntrinsicType::DOTCOMA) {
-                                None
+                    else {
+                        let nametok = par_expect!(lexer.currentLocation, lexer.next(), "Error: abruptly ran out of tokens for Let");
+                        let loc = nametok.location.clone();
+                        match nametok.typ {
+                            TokenType::WordType(ref name) => {
+                                par_assert!(loc, !build.contains_symbol(&name), "Error: Redifinition of existing symbol {}",name);
+                                par_assert!(loc, scopeStack.len() > 0, "Error: Cannot have variables outside of scopes");
+                                par_assert!(token,  getTopMut(scopeStack).unwrap().body_is_some(), "Error: Unexpected multiply intrinsic outside of scope! Scopes of type {} do not support instructions!",getTopMut(scopeStack).unwrap().typ.to_string(false));
+                                let currentScope = getTopMut(scopeStack).unwrap();
+                                let typ = par_expect!(lexer.currentLocation, lexer.next(), "Error: abruptly ran out of tokens for let type");
+                                par_assert!(typ,typ.typ==TokenType::IntrinsicType(IntrinsicType::DOUBLE_COLIN), "Error: You probably forgot to put a : after the name!");
+                                let typ = par_expect!(lexer.currentLocation, lexer.next(), "Error: abruptly ran out of tokens for let type");
+                                match typ.typ {
+                                    TokenType::Definition(def) => {
+                                        currentLocals.last_mut().unwrap().insert(name.clone(), def);
+                                        currentScope.body_unwrap_mut().unwrap().push((lexer.currentLocation.clone(),Instruction::DEFVAR(name.clone())))
+                                    }
+                                    TokenType::IntrinsicType(ref t) => {
+                                        match t {
+                                            IntrinsicType::OPENSQUARE => {
+                                                let ntok = par_expect!(lexer,lexer.next(),"Error: Ran out of tokens for global buffer initialization");
+                                                if let TokenType::Definition(buftyp) = &ntok.typ {
+                                                    let ntok = par_expect!(lexer,lexer.next(),"Error: Ran out of tokens for global buffer initialization");
+                                                    par_assert!(ntok, ntok.typ == TokenType::IntrinsicType(IntrinsicType::COMA), "Error: Expected coma after defintion in buffer!");    
+                                                    let ntok = par_expect!(lexer,lexer.next(),"Error: Ran out of tokens for global buffer initialization");
+                                                    let size = par_expect!(ntok, ntok.typ.unwrap_numeric(build), "Error: Expected numeric value after coma to indicate the size of the buffer but found {}",ntok.typ);
+                                                    par_assert!(ntok, size > 0, "Error: Cannot have buffer of size lower than or equal to 0");
+                                                    let res = build.buffers.len();
+                                                    //build.global_vars.insert(name.clone(), GlobalVar { typ: GlobalVarType::BUFFER(res), loc: typ.location });
+                                                    currentLocals.last_mut().unwrap().insert(name.clone(), VarType::PTR(Ptr::ref_to(buftyp.clone()))); // TODO: Implement VarType::BUFFER instead of all of this bullshit
+                                                    currentScope.body_unwrap_mut().unwrap().push((lexer.currentLocation.clone(),Instruction::MOV(Expression::val(OfP::LOCALVAR(name.clone())),Expression::val(OfP::BUFFER(res)))));
+                                                    currentScope.typ.buffers_unwrap_mut().unwrap().push(BuildBuf::from_parse_buf(buftyp.to_owned(), size as usize));
+                                                    //build.buffers.push(BuildBuf::from_parse_buf(buftyp.to_owned(), size as usize));
+                                                    let ntok = par_expect!(lexer,lexer.next(),"Error: Ran out of tokens for global buffer initialization");
+                                                    par_assert!(ntok, ntok.typ == TokenType::IntrinsicType(IntrinsicType::CLOSESQUARE), "Error: Expected close square bracket but found {}",ntok.typ);
+                                                }
+                                                else {
+                                                    par_error!(ntok, "Error: Expected VarType for buffer but found {}",ntok.typ);
+                                                }
+                                            }
+                                            _ => par_error!(typ, "Error: unexpected token type in let definition. Expected VarType but found {}",t.to_string(false))
+                                        }
+                                    }
+                                    _ => {
+                                        par_error!(typ, "Error: unexpected token type in let definition. Expected VarType but found {}",typ.typ.to_string(false))
+                                    }
+                                }
+                                
+                            },
+                            _ => {
+                                par_error!(nametok, "Unexpected name type, Expected Word but found {}", nametok.typ.to_string(false))
                             }
-                            else{
-                                Some(t)
-                            }
-                        }).collect();
-                        let currentScope = getTopMut(scopeStack).unwrap();
-                        let res = tokens_to_expression(&body, build, program, &currentLocals,par_expect!(lexer.currentLocation, currentScope.typ.buffers_unwrap_mut(), "Error: Expected to find buffers but found none"));
-                        currentScope.body_unwrap_mut().unwrap().push((lexer.currentLocation.clone(),Instruction::MOV(Expression::val(OfP::LOCALVAR(nametok.unwrap_word().unwrap().clone())),res)))
+                        }
+                        if !lexer.is_newline() {
+                            let ntok = par_expect!(lexer.currentLocation, lexer.next(), "Error: abruptly ran out of tokens for Let set instruction");
+                            if ntok.typ==TokenType::IntrinsicType(IntrinsicType::DOTCOMA) { return }
+                            par_assert!(ntok,ntok.typ==TokenType::SETOperation(SetOp::SET),"Error: Expected set or dotcoma but found something else!");
+                            let body: Vec<Token> = lexer.map_while(|t| {
+                                if t.typ == TokenType::IntrinsicType(IntrinsicType::DOTCOMA) {
+                                    None
+                                }
+                                else{
+                                    Some(t)
+                                }
+                            }).collect();
+                            let currentScope = getTopMut(scopeStack).unwrap();
+                            let res = tokens_to_expression(&body, build, program, &currentLocals,par_expect!(lexer.currentLocation, currentScope.typ.buffers_unwrap_mut(), "Error: Expected to find buffers but found none"));
+                            currentScope.body_unwrap_mut().unwrap().push((lexer.currentLocation.clone(),Instruction::MOV(Expression::val(OfP::LOCALVAR(nametok.unwrap_word().unwrap().clone())),res)))
+                        }
                     }
                 },
                 IntrinsicType::INTERRUPT => {
-
-                    par_assert!(token, scopeStack.len() > 0 && getTopMut(scopeStack).unwrap().body_is_some(), "Error: Unexpected interrupt intrinsic outside of scope! Scopes of type {} do not support instructions!",getTopMut(scopeStack).unwrap().typ.to_string(false));
+                    par_assert!(token, scopeStack.len() > 0, "Error: Unexpected interrupt intrinsic outside of scope!");
+                    par_assert!(token, getTopMut(scopeStack).unwrap().body_is_some(), "Error: Scopes of type {} do not support instructions!",getTopMut(scopeStack).unwrap().typ.to_string(false));
                     let body = getTopMut(scopeStack).unwrap().body_unwrap_mut().unwrap();
                     let lexerNext = par_expect!(lexer.currentLocation,lexer.next(),"Stream of tokens ended abruptly at INTERRUPT call");
                     match lexerNext.typ {
@@ -4265,6 +4415,8 @@ fn parse_token_to_build_inst(token: Token,lexer: &mut Lexer, program: &mut CmdPr
                 IntrinsicType::THREEDOTS => todo!(),
 
                 IntrinsicType::GOTO => {
+                    par_assert!(token, scopeStack.len() > 0, "Unexpected goto intrinsic outside of scope!");
+                    par_assert!(token, getTopMut(scopeStack).unwrap().body_is_some(), "Error: Scopes of type {} do not support instructions!",getTopMut(scopeStack).unwrap().typ.to_string(false));
                     let ntok = par_expect!(lexer.currentLocation, lexer.next(), "Error: Abruptly ran out of tokens for GOTO");
                     par_assert!(ntok, ntok.typ == TokenType::IntrinsicType(IntrinsicType::OPENPAREN), "Error: Unexpected symbol {} in GOTO! Expected open paren followed by a string (name of the label) and then a closing paren",ntok.typ.to_string(false));
                     let ntok = par_expect!(lexer.currentLocation, lexer.next(), "Error: Abruptly ran out of tokens for GOTO");
@@ -4282,9 +4434,11 @@ fn parse_token_to_build_inst(token: Token,lexer: &mut Lexer, program: &mut CmdPr
                     }
                     let ntok = par_expect!(lexer.currentLocation, lexer.next(), "Error: Abruptly ran out of tokens for GOTO");
                     par_assert!(ntok, ntok.typ == TokenType::IntrinsicType(IntrinsicType::CLOSEPAREN), "Error: Unexpected symbol {} in GOTO! Expected open paren followed by a string (name of the label) and then a closing paren",ntok.typ.to_string(false));
-                    par_assert!(token, scopeStack.len() > 0 && getTopMut(scopeStack).unwrap().body_is_some(), "Error: Unexpected interrupt intrinsic outside of scope! Scopes of type {} do not support instructions!",getTopMut(scopeStack).unwrap().typ.to_string(false));
+                    
                 },
                 IntrinsicType::MAKELABEL => {
+                    par_assert!(token, scopeStack.len() > 0, "Unexpected makelabel intrinsic outside of scope!");
+                    par_assert!(token, getTopMut(scopeStack).unwrap().body_is_some(), "Error: Scopes of type {} do not support instructions!",getTopMut(scopeStack).unwrap().typ.to_string(false));
                     let ntok = par_expect!(lexer.currentLocation, lexer.next(), "Error: Abruptly ran out of tokens for MAKELABEL");
                     par_assert!(ntok, ntok.typ == TokenType::IntrinsicType(IntrinsicType::OPENPAREN), "Error: Unexpected symbol {} in MAKELABEL! Expected open paren followed by a string (name of the label) and then a closing paren",ntok.typ.to_string(false));
                     let ntok = par_expect!(lexer.currentLocation, lexer.next(), "Error: Abruptly ran out of tokens for MAKELABEL");
@@ -4570,6 +4724,43 @@ fn nasm_x86_64_prep_args(program: &CmdProgram, build: &BuildProgram, f: &mut Fil
     for arg in contract {
     
         match arg {
+            OfP::GLOBALVAR(v) => {
+                let var1 = build.global_vars.get(v).expect("Unknown local variable parameter");
+                let oreg = match &var1.typ {
+                    GlobalVarType::BUFFER(i) => {
+                        let oreg = Register::RAX.to_byte_size((program.architecture.bits/8) as usize);
+                        writeln!(f, "   mov {}, _GLOBL_{}",oreg,i)?;
+                        oreg
+                    }
+                    GlobalVarType::CONSTANT(val) => {
+                        let oreg = Register::RAX.to_byte_size(val.to_type(build)[0].get_size(program));
+                        writeln!(f,"   mov {}, {} [_GLOBL_{}]",oreg,size_to_nasm_type(oreg.size()),v)?;
+                        oreg
+                    },
+                };
+                
+                if program.architecture.options.argumentPassing == ArcPassType::PUSHALL{
+                    stack_size += oreg.size();
+                    writeln!(f, "   mov {} [rsp-{}], {}",size_to_nasm_type(oreg.size()), stack_size-org_stack_size, oreg.to_string())?
+                }
+                else {
+                    let custompassing = program.architecture.options.argumentPassing.custom_unwrap();
+                    if let Some(nptrs) = custompassing.nums_ptrs.as_ref() {
+                        if let Some(oreg2) = nptrs.get(int_passed_count) {
+                            writeln!(f, "   mov {}, {}",oreg2.to_byte_size(oreg.size()).to_string(), oreg.to_string())?;
+                        }
+                        else {
+                            stack_size += oreg.size();
+                            writeln!(f, "   mov {} [rsp-{}], {}",size_to_nasm_type(oreg.size()), stack_size-org_stack_size, oreg.to_string())?
+                        }
+                        int_passed_count+=1;
+                    }
+                    else {
+                        stack_size += oreg.size();
+                        writeln!(f, "   mov {} [rsp-{}], {}",size_to_nasm_type(oreg.size()), stack_size-org_stack_size, oreg.to_string())?
+                    }
+                }
+            }
             OfP::LOCALVAR(v) => {
                 let var1 = get_local_build(local_vars, v).expect("Unknown local variable parameter");
                 let oreg = Register::RAX.to_byte_size(var1.typ.get_size(program));
@@ -5190,6 +5381,11 @@ fn to_nasm_x86_64(build: &mut BuildProgram, program: &CmdProgram) -> io::Result<
     let mut f = File::create(&program.opath).expect(&format!("Error: could not open output file {}",program.opath.as_str()));
     writeln!(&mut f,"BITS 64")?;
     writeln!(&mut f,"default rel")?;
+    writeln!(&mut f, "section .bss")?;
+    for (i,buf) in build.buffers.iter().enumerate() {
+        writeln!(&mut f, "   _GLOBL_{}: resb {}",i,buf.size*buf.typ.get_size(program))?;
+    }
+    
     writeln!(&mut f, "section .data")?;
 
 
@@ -5222,6 +5418,31 @@ fn to_nasm_x86_64(build: &mut BuildProgram, program: &CmdProgram) -> io::Result<
                     _ => {}
                 }
             }
+        }
+    }
+    for (name,var) in build.global_vars.iter() {
+        write!(&mut f, "   _GLOBL_{}: ",name)?;
+        match &var.typ {
+            //GlobalVarType::BUFFER(i) => writeln!(&mut f, "_GLOBLBUF_{}",i)?,
+            GlobalVarType::CONSTANT(val) => {
+                match val {
+                    RawConstValueType::INT(v) => writeln!(&mut f, "dd {}",v)?,
+                    RawConstValueType::LONG(v) => writeln!(&mut f, "dq {}",v)?,
+                    RawConstValueType::STR(UUID) => writeln!(&mut f, "_STRING_{}",UUID.to_string().replace("-", ""))?,
+                    RawConstValueType::PTR(_, t) => {
+                        if program.architecture.bits == 32 {
+                            writeln!(&mut f, "dd {}",t)?;
+                        }
+                        else if program.architecture.bits == 64 {
+                            writeln!(&mut f, "dq {}",t)?;
+                        }
+                        else {
+                            panic!("Unreachable")
+                        }
+                    },
+                }
+            },
+            _ => {}
         }
     }
     for (dll_import_name,_) in build.dll_imports.iter() {
@@ -5402,7 +5623,6 @@ fn type_check_scope(build: &BuildProgram, program: &CmdProgram, scope: TCScopeTy
                 for arg in contract {
                     match arg {
                         OfP::LOCALVAR(name) => {
-                            
                             let etyp = if externContract.InputPool.len() > 0 {
                                 Some(typ_expect!(loc, externContract.InputPool.pop(), "Error: Additional arguments provided for external that doesn't take in any more arguments!"))
                             } else if externContract.InputPool.is_dynamic {
@@ -5416,6 +5636,25 @@ fn type_check_scope(build: &BuildProgram, program: &CmdProgram, scope: TCScopeTy
                                 typ_assert!(loc,etyp.weak_eq(&local),"Error: Incompatible types for contract\nExpected: {}\nFound: ({}) {}",etyp.to_string(false),name,local.to_string(false));
                             }
                         },
+                        OfP::GLOBALVAR(name) => {
+                            let etyp = if externContract.InputPool.len() > 0 {
+                                Some(typ_expect!(loc, externContract.InputPool.pop(), "Error: Additional arguments provided for external that doesn't take in any more arguments!"))
+                            } else if externContract.InputPool.is_dynamic {
+                                externContract.InputPool.dynamic_type.clone()
+                            }
+                            else {
+                                typ_error!(loc, "Error: Unreachable");
+                            };
+                            let var = match &build.global_vars.get(name).unwrap().typ {
+                                GlobalVarType::BUFFER(b) => {
+                                    VarType::PTR(Ptr::ref_to(build.buffers[*b].typ.clone()))
+                                }
+                                _ => todo!()
+                            };
+                            if let Some(etyp) = etyp {
+                                typ_assert!(loc,etyp.weak_eq(&var),"Error: Incompatible types for contract\nExpected: {}\nFound: ({}) {}",etyp.to_string(false),name,var.to_string(false));
+                            }
+                        }
                         OfP::REGISTER(_) => todo!("Registers are still yet unhandled!"),
                         OfP::CONST(Const) => {
                             let typs = Const.to_type(build);
@@ -5466,15 +5705,25 @@ fn type_check_scope(build: &BuildProgram, program: &CmdProgram, scope: TCScopeTy
             Instruction::CALL(funcn, args)             => {
                 let function = typ_expect!(loc, build.functions.get(funcn), "Error: unknown function call to {}, Function may not exist!",funcn);
                 let mut functionIP = function.contract.Inputs.clone();
-                println!("functionIP: {:?}\nargs: {:?}",functionIP,args);
+                //println!("functionIP: {:?}\nargs: {:?}",functionIP,args);
                 for arg in args.iter().rev() {
                     match arg {
                         OfP::LOCALVAR(name) => {
                             let (_,etyp) = typ_expect!(loc, functionIP.pop_back(), "Error: Additional arguments provided for external that doesn't take in any more arguments!");
                             let local = get_local(currentLocals, &name).unwrap();
-                            println!("arg: {:?}\netyp: {:?}",local,etyp);
+                            //println!("arg: {:?}\netyp: {:?}",local,etyp);
                             typ_assert!(loc,etyp.weak_eq(&local),"Error: Incompatible types for contract\nExpected: {}\nFound: ({}) {}",etyp.to_string(false),name,local.to_string(false));
                         },
+                        OfP::GLOBALVAR(name) => {
+                            let (_,etyp) = typ_expect!(loc, functionIP.pop_back(), "Error: Additional arguments provided for external that doesn't take in any more arguments!");
+                            let var = match &build.global_vars.get(name).unwrap().typ {
+                                GlobalVarType::BUFFER(b) => {
+                                    VarType::PTR(Ptr::ref_to(build.buffers[*b].typ.clone()))
+                                }
+                                _ => todo!()
+                            };
+                            typ_assert!(loc,etyp.weak_eq(&var),"Error: Incompatible types for contract\nExpected: {}\nFound: ({}) {}",etyp.to_string(false),name,var.to_string(false));
+                        }
                         OfP::REGISTER(_) => todo!("Registers are still yet unhandled!"),
                         OfP::CONST(Const) => {
                             let typs = Const.to_type(build);
