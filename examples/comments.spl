@@ -1,4 +1,4 @@
-include "../src/C/stdio.spl"
+include "../libs/libc/stdio.spl"
 func main() {
     // Prints hello world :D
     puts("Hello World!\n")// Prints hello world :D

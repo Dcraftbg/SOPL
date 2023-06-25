@@ -4002,7 +4002,7 @@ fn parse_token_to_build_inst(token: Token,lexer: &mut Lexer, program: &mut CmdPr
                             let p = PathBuf::from(&program.path);
                             let p = p.parent().unwrap();
                             let include_p  = PathBuf::from(path);
-                            let info = fs::read_to_string(String::from(p.join(&include_p).to_str().unwrap().replace("\\", "/"))).expect(&format!("Error: could not open file: {}",String::from(p.join(&include_p).to_str().unwrap()).replace("\\", "/")));
+                            let info = par_expect!(token,fs::read_to_string(String::from(p.join(&include_p).to_str().unwrap().replace("\\", "/"))),"Error: could not open file: {}",String::from(p.join(&include_p).to_str().unwrap()).replace("\\", "/"));
                             let mut lf = Lexer::new(&info,lexer.Intrinsics,lexer.Definitions,HashSet::new());
                             lf.currentLocation.file = Rc::new(String::from(p.join(&include_p).to_str().unwrap().replace("\\", "/")));
                             let mut nprogram = program.clone();
