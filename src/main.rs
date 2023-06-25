@@ -6,7 +6,7 @@
 #![allow(unreachable_patterns)]
 
 use core::{num, panic};
-use std::{env, process::{exit, Command, Stdio}, path::{Path, PathBuf}, ffi::OsStr, str::{FromStr, Chars}, collections::{HashMap, HashSet}, hash::Hash, fs::{File, self}, io::{Read, Write, self}, fmt::format, borrow::{BorrowMut, Borrow}, clone, time::{SystemTime, Instant}, rc::Rc, iter::Peekable, cell::{RefCell, Ref, RefMut}, ops::{Deref, DerefMut}, vec, sync::Arc, os, f32::consts::E, any::Any};
+use std::{env, process::{exit, Command, Stdio}, path::{Path, PathBuf}, ffi::OsStr, str::{FromStr, Chars}, collections::{HashMap, HashSet}, hash::Hash, fs::{File, self}, io::{Read, Write, self}, fmt::{format, Display}, borrow::{BorrowMut, Borrow}, clone, time::{SystemTime, Instant}, rc::Rc, iter::Peekable, cell::{RefCell, Ref, RefMut}, ops::{Deref, DerefMut}, vec, sync::Arc, os, f32::consts::E, any::Any};
 use linked_hash_map::LinkedHashMap;
 use serde_json::Value;
 use uuid::Uuid;
@@ -370,6 +370,8 @@ enum IntrinsicType {
     DOTCOMA,
     OPENCURLY,
     CLOSECURLY,
+    OPENSQUARE,
+    CLOSESQUARE,
     INTERRUPT,
     SYSCALL,
 
@@ -516,7 +518,15 @@ impl IntrinsicType {
             IntrinsicType::GOTO => {
                 if isplural {"Gotos".to_string()} else {"Goto".to_string().to_string()}
             },
-            IntrinsicType::MAKELABEL => todo!(),
+            IntrinsicType::MAKELABEL   => {
+                if isplural {"Make labels".to_string()} else {"Make label".to_string()}
+            },
+            IntrinsicType::OPENSQUARE  => {
+                if isplural {"Open square".to_string()} else {"Open square".to_string()}
+            },
+            IntrinsicType::CLOSESQUARE => {
+                if isplural {"Close square".to_string()} else {"Close square".to_string()}
+            }
         }
     }
 }
@@ -794,14 +804,14 @@ impl Expression {
     }
 }
 impl Expression {
-    fn LEIRnasm(&self,regs: Vec<Register>,f: &mut File, program: &CmdProgram,build: &BuildProgram,local_vars: &Vec<HashMap<String, LocalVariable>>,stack_size: usize,loc: &ProgramLocation) -> std::io::Result<Vec<Register>>{
+    fn LEIRnasm(&self,regs: Vec<Register>,f: &mut File, program: &CmdProgram,build: &BuildProgram,local_vars: &Vec<HashMap<String, LocalVariable>>, buffers: &Vec<BuildBuf>,stack_size: usize,loc: &ProgramLocation) -> std::io::Result<Vec<Register>>{
         match self {
             Expression::val(v) => {
-               v.LOIRGNasm(regs, f, program, build, local_vars, stack_size, loc)
+               v.LOIRGNasm(regs, f, program, build, local_vars,buffers, stack_size, loc)
             },
             Expression::expr(e) => {
                 
-                e.eval_nasm(regs,f,program,build,local_vars,stack_size,loc)
+                e.eval_nasm(regs,f,program,build,local_vars,buffers,stack_size,loc)
             },
         }
     }
@@ -832,7 +842,7 @@ impl ExprTree {
         }
 
     }
-    fn eval_nasm(&self,regs: Vec<Register>,f: &mut File,program: &CmdProgram,build: &BuildProgram,local_vars: &Vec<HashMap<String, LocalVariable>>,stack_size: usize,loc: &ProgramLocation) -> std::io::Result<Vec<Register>>{
+    fn eval_nasm(&self,regs: Vec<Register>,f: &mut File,program: &CmdProgram,build: &BuildProgram,local_vars: &Vec<HashMap<String, LocalVariable>>, buffers: &Vec<BuildBuf>,stack_size: usize,loc: &ProgramLocation) -> std::io::Result<Vec<Register>>{
         #[allow(unused_assignments)]
         let mut o: Vec<Register> = Vec::new();
         match self.op {
@@ -843,9 +853,9 @@ impl ExprTree {
                     com_assert!(loc,regs.len() > 1, "TODO: Handle multi-parameter loading for expressions!");
                     let right       = com_expect!(loc,self.right.as_ref(),"Error: Cannot evaluate Op '{}' without left parameter",Op::PLUS .to_string());
                     
-                    let mut rightregs1= right.LEIRnasm(regs.to_vec(), f, program, build, local_vars, stack_size, loc)?;
+                    let mut rightregs1= right.LEIRnasm(regs.to_vec(), f, program, build, local_vars, buffers, stack_size, loc)?;
                     
-                    let mut leftregs1 = left.LEIRnasm(regs[1..].to_vec(), f, program, build, local_vars, stack_size, loc)?;
+                    let mut leftregs1 = left.LEIRnasm(regs[1..].to_vec(), f, program, build, local_vars, buffers, stack_size, loc)?;
                     com_assert!(loc,rightregs1.len() == 1, "TODO: Handle multi-parameter loading for expressions!");
                     if leftregs1[0].size() > rightregs1[0].size() {
                         rightregs1[0] = rightregs1[0].to_byte_size(leftregs1[0].size());
@@ -859,11 +869,11 @@ impl ExprTree {
                 else {
                     
                     
-                    let mut leftregs1 = left.LEIRnasm(regs.to_vec(), f, program, build, local_vars, stack_size, loc)?;
+                    let mut leftregs1 = left.LEIRnasm(regs.to_vec(), f, program, build, local_vars, buffers, stack_size, loc)?;
                     com_assert!(loc,regs.len() > 1, "TODO: Handle multi-parameter loading for expressions!");
                     
                     let right       = com_expect!(loc,self.right.as_ref(),"Error: Cannot evaluate Op '{}' without left parameter",Op::PLUS.to_string());
-                    let mut rightregs1= right.LEIRnasm(regs[1..].to_vec(), f, program, build, local_vars, stack_size, loc)?;
+                    let mut rightregs1= right.LEIRnasm(regs[1..].to_vec(), f, program, build, local_vars, buffers, stack_size, loc)?;
                     if leftregs1[0].size() > rightregs1[0].size() {
                         rightregs1[0] = rightregs1[0].to_byte_size(leftregs1[0].size());
                     }
@@ -880,17 +890,17 @@ impl ExprTree {
                 if left.is_ofp() {
                     com_assert!(loc,regs.len() > 1, "TODO: Handle multi-parameter loading for expressions!");
                     let right       = com_expect!(loc,self.right.as_ref(),"Error: Cannot evaluate Op '{}' without left parameter",Op::MINUS.to_string());
-                    let rightregs1= right.LEIRnasm(regs.to_vec(), f, program, build, local_vars, stack_size, loc)?;
-                    let leftregs1 = left.LEIRnasm(regs[1..].to_vec(), f, program, build, local_vars, stack_size, loc)?;
+                    let rightregs1= right.LEIRnasm(regs.to_vec(), f, program, build, local_vars, buffers, stack_size, loc)?;
+                    let leftregs1 = left.LEIRnasm(regs[1..].to_vec(), f, program, build, local_vars, buffers, stack_size, loc)?;
                     com_assert!(loc,rightregs1.len() == 1, "TODO: Handle multi-parameter loading for expressions!");
                     writeln!(f, "   sub {}, {}",leftregs1[0].to_string(),rightregs1[0].to_string())?;
                     o = leftregs1;
                 }
                 else {
-                    let leftregs1 = left.LEIRnasm(regs.to_vec(), f, program, build, local_vars, stack_size, loc)?;
+                    let leftregs1 = left.LEIRnasm(regs.to_vec(), f, program, build, local_vars, buffers, stack_size, loc)?;
                     com_assert!(loc,regs.len() > 1, "TODO: Handle multi-parameter loading for expressions!");
                     let right       = com_expect!(loc,self.right.as_ref(),"Error: Cannot evaluate Op '{}' without left parameter",Op::MINUS.to_string());
-                    let rightregs1= right.LEIRnasm(regs[1..].to_vec(), f, program, build, local_vars, stack_size, loc)?;
+                    let rightregs1= right.LEIRnasm(regs[1..].to_vec(), f, program, build, local_vars, buffers, stack_size, loc)?;
                     com_assert!(loc,rightregs1.len() == 1, "TODO: Handle multi-parameter loading for expressions!");
                     writeln!(f, "   sub {}, {}",leftregs1[0].to_string(),rightregs1[0].to_string())?;
                     o = leftregs1;
@@ -901,10 +911,10 @@ impl ExprTree {
                 com_assert!(loc,regs[0].to_byte_size(8) == Register::RAX,"Error: Cannot do division with output register different from RAX");
                 let left = com_expect!(loc,self.left.as_ref(),"Error: Cannot evaluate Op '{}' without left parameter",Op::DIV.to_string());
                 if left.is_ofp() {
-                    let leftregs1 = left.LEIRnasm(regs.clone(), f, program, build, local_vars, stack_size, loc)?;
+                    let leftregs1 = left.LEIRnasm(regs.clone(), f, program, build, local_vars, buffers, stack_size, loc)?;
                     com_assert!(loc,leftregs1.len() == 1, "TODO: Handle multi-parameter loading for expressions!");
                     let right = com_expect!(loc,self.right.as_ref(),"Error: Cannot evaluate Op '{}' without left parameter",Op::DIV.to_string());
-                    let rightregs1 = right.LEIRnasm(regs[1..].to_vec(), f, program, build, local_vars, stack_size, loc)?;
+                    let rightregs1 = right.LEIRnasm(regs[1..].to_vec(), f, program, build, local_vars, buffers, stack_size, loc)?;
                     com_assert!(loc,rightregs1.len() == 1, "TODO: Handle multi-parameter loading for expressions!");
                     
                     writeln!(f, "   cqo")?;
@@ -913,8 +923,8 @@ impl ExprTree {
                 }
                 else {
                     let right = com_expect!(loc,self.right.as_ref(),"Error: Cannot evaluate Op '{}' without left parameter",Op::DIV.to_string());
-                    let rightregs1 = right.LEIRnasm(regs.to_vec(), f, program, build, local_vars, stack_size, loc)?;
-                    let leftregs1 = left.LEIRnasm(regs[1..].to_vec(), f, program, build, local_vars, stack_size, loc)?;
+                    let rightregs1 = right.LEIRnasm(regs.to_vec(), f, program, build, local_vars, buffers, stack_size, loc)?;
+                    let leftregs1 = left.LEIRnasm(regs[1..].to_vec(), f, program, build, local_vars, buffers, stack_size, loc)?;
                     com_assert!(loc,leftregs1.len() == 1, "TODO: Handle multi-parameter loading for expressions!");
                     com_assert!(loc,rightregs1.len() == 1, "TODO: Handle multi-parameter loading for expressions!");
                     
@@ -927,10 +937,10 @@ impl ExprTree {
                 com_assert!(loc,regs[0].to_byte_size(8) == Register::RAX,"Error: Cannot do division with output register different from RAX");
                 let left = com_expect!(loc,self.left.as_ref(),"Error: Cannot evaluate Op '{}' without left parameter",Op::REMAINDER.to_string());
                 if left.is_ofp() {
-                    let leftregs1 = left.LEIRnasm(regs.clone(), f, program, build, local_vars, stack_size, loc)?;
+                    let leftregs1 = left.LEIRnasm(regs.clone(), f, program, build, local_vars, buffers, stack_size, loc)?;
                     com_assert!(loc,leftregs1.len() == 1, "TODO: Handle multi-parameter loading for expressions!");
                     let right = com_expect!(loc,self.right.as_ref(),"Error: Cannot evaluate Op '{}' without left parameter",Op::REMAINDER.to_string());
-                    let rightregs1 = right.LEIRnasm(regs[1..].to_vec(), f, program, build, local_vars, stack_size, loc)?;
+                    let rightregs1 = right.LEIRnasm(regs[1..].to_vec(), f, program, build, local_vars, buffers, stack_size, loc)?;
                     com_assert!(loc,rightregs1.len() == 1, "TODO: Handle multi-parameter loading for expressions!");
                     writeln!(f, "   cqo")?;
                     writeln!(f, "   idiv {}",rightregs1[0].to_string())?;
@@ -938,8 +948,8 @@ impl ExprTree {
                 }
                 else {
                     let right = com_expect!(loc,self.right.as_ref(),"Error: Cannot evaluate Op '{}' without left parameter",Op::REMAINDER.to_string());
-                    let rightregs1 = right.LEIRnasm(regs.to_vec(), f, program, build, local_vars, stack_size, loc)?;
-                    let leftregs1 = left.LEIRnasm(regs[1..].to_vec(), f, program, build, local_vars, stack_size, loc)?;
+                    let rightregs1 = right.LEIRnasm(regs.to_vec(), f, program, build, local_vars, buffers, stack_size, loc)?;
+                    let leftregs1 = left.LEIRnasm(regs[1..].to_vec(), f, program, build, local_vars, buffers, stack_size, loc)?;
                     com_assert!(loc,leftregs1.len() == 1, "TODO: Handle multi-parameter loading for expressions!");
                     com_assert!(loc,rightregs1.len() == 1, "TODO: Handle multi-parameter loading for expressions!");
                     writeln!(f, "   cqo")?;
@@ -952,10 +962,10 @@ impl ExprTree {
                 if let Some(left) = self.left.as_ref() {
                     com_assert!(loc,regs[0].to_byte_size(8) == Register::RAX,"Error: Cannot do division with output register different from RAX");
                     if left.is_ofp() {
-                        let leftregs1 = left.LEIRnasm(regs.clone(), f, program, build, local_vars, stack_size, loc)?;
+                        let leftregs1 = left.LEIRnasm(regs.clone(), f, program, build, local_vars, buffers, stack_size, loc)?;
                         com_assert!(loc,leftregs1.len() == 1, "TODO: Handle multi-parameter loading for expressions!");
                         let right = com_expect!(loc,self.right.as_ref(),"Error: Cannot evaluate Op '{}' without left parameter",Op::STAR  .to_string());
-                        let rightregs1 = right.LEIRnasm(regs[1..].to_vec(), f, program, build, local_vars, stack_size, loc)?;
+                        let rightregs1 = right.LEIRnasm(regs[1..].to_vec(), f, program, build, local_vars, buffers, stack_size, loc)?;
                         com_assert!(loc,rightregs1.len() == 1, "TODO: Handle multi-parameter loading for expressions!");
                         
                         writeln!(f, "   cqo")?;
@@ -964,8 +974,8 @@ impl ExprTree {
                     }
                     else {
                         let right = com_expect!(loc,self.right.as_ref(),"Error: Cannot evaluate Op '{}' without left parameter",Op::STAR  .to_string());
-                        let rightregs1 = right.LEIRnasm(regs.to_vec(), f, program, build, local_vars, stack_size, loc)?;
-                        let leftregs1 = left.LEIRnasm(regs[1..].to_vec(), f, program, build, local_vars, stack_size, loc)?;
+                        let rightregs1 = right.LEIRnasm(regs.to_vec(), f, program, build, local_vars, buffers, stack_size, loc)?;
+                        let leftregs1 = left.LEIRnasm(regs[1..].to_vec(), f, program, build, local_vars, buffers, stack_size, loc)?;
                         com_assert!(loc,leftregs1.len() == 1, "TODO: Handle multi-parameter loading for expressions!");
                         com_assert!(loc,rightregs1.len() == 1, "TODO: Handle multi-parameter loading for expressions!");
                         
@@ -976,10 +986,10 @@ impl ExprTree {
                 }
                 else {
                     let right = com_expect!(loc,self.right.as_ref(),"Error: Cannot evaluate Op '{}' without right parameter",Op::STAR.to_string());
-                    let rightregs1 = right.LEIRnasm(regs.to_vec(), f, program, build, local_vars, stack_size, loc)?;
+                    let rightregs1 = right.LEIRnasm(regs.to_vec(), f, program, build, local_vars, buffers, stack_size, loc)?;
                     com_assert!(loc,rightregs1.len() == 1, "TODO: Handle multi-parameter loading for expressions!");
                     let rego = &rightregs1[0];
-                    let resof = right.result_of_c(program, build, local_vars, loc).unwrap();
+                    let resof = right.result_of_c(program, build, local_vars,loc).unwrap();
                     com_assert!(loc, resof.is_some_ptr(), "Error: Cannot dereference void pointer!");
                     let resof = resof.get_ptr_val().unwrap();
                     writeln!(f, "   mov {}, {} [{}]",rego.to_byte_size(resof.get_size(program)).to_string(),size_to_nasm_type(resof.get_size(program)),rego.to_string())?;
@@ -988,10 +998,10 @@ impl ExprTree {
             },
             Op::EQ    => {
                 let left = com_expect!(loc,self.left.as_ref(),"Error: Cannot evaluate Op '{}' without left parameter",Op::EQ   .to_string());
-                let leftregs1 = left.LEIRnasm(regs.clone(), f, program, build, local_vars, stack_size, loc)?;
+                let leftregs1 = left.LEIRnasm(regs.clone(), f, program, build, local_vars, buffers, stack_size, loc)?;
                 com_assert!(loc,leftregs1.len() == 1, "TODO: Handle multi-parameter loading for expressions!");
                 let right = com_expect!(loc,self.right.as_ref(),"Error: Cannot evaluate Op '{}' without left parameter",Op::EQ   .to_string());
-                let rightregs1 = right.LEIRnasm(regs[1..].to_vec(), f, program, build, local_vars, stack_size, loc)?;
+                let rightregs1 = right.LEIRnasm(regs[1..].to_vec(), f, program, build, local_vars, buffers, stack_size, loc)?;
                 com_assert!(loc,rightregs1.len() == 1, "TODO: Handle multi-parameter loading for expressions!");
                 writeln!(f, "   cmp {}, {}",leftregs1[0].to_string(),rightregs1[0].to_string())?;
                 writeln!(f, "   sete {}",leftregs1[0].to_byte_size(1).to_string())?;
@@ -999,10 +1009,10 @@ impl ExprTree {
             },
             Op::NEQ   => {
                 let left = com_expect!(loc,self.left.as_ref(),"Error: Cannot evaluate Op '{}' without left parameter",Op::NEQ  .to_string());
-                let leftregs1 = left.LEIRnasm(regs.clone(), f, program, build, local_vars, stack_size, loc)?;
+                let leftregs1 = left.LEIRnasm(regs.clone(), f, program, build, local_vars, buffers, stack_size, loc)?;
                 com_assert!(loc,leftregs1.len() == 1, "TODO: Handle multi-parameter loading for expressions!");
                 let right = com_expect!(loc,self.right.as_ref(),"Error: Cannot evaluate Op '{}' without left parameter",Op::NEQ  .to_string());
-                let rightregs1 = right.LEIRnasm(regs[1..].to_vec(), f, program, build, local_vars, stack_size, loc)?;
+                let rightregs1 = right.LEIRnasm(regs[1..].to_vec(), f, program, build, local_vars, buffers, stack_size, loc)?;
                 com_assert!(loc,rightregs1.len() == 1, "TODO: Handle multi-parameter loading for expressions!");
                 writeln!(f, "   cmp {}, {}",leftregs1[0].to_string(),rightregs1[0].to_string())?;
                 writeln!(f, "   setne {}",leftregs1[0].to_byte_size(1).to_string())?;
@@ -1010,10 +1020,10 @@ impl ExprTree {
             },
             Op::GT    => {
                 let left = com_expect!(loc,self.left.as_ref(),"Error: Cannot evaluate Op '{}' without left parameter",Op::GT   .to_string());
-                let leftregs1 = left.LEIRnasm(regs.clone(), f, program, build, local_vars, stack_size, loc)?;
+                let leftregs1 = left.LEIRnasm(regs.clone(), f, program, build, local_vars, buffers, stack_size, loc)?;
                 com_assert!(loc,leftregs1.len() == 1, "TODO: Handle multi-parameter loading for expressions!");
                 let right = com_expect!(loc,self.right.as_ref(),"Error: Cannot evaluate Op '{}' without left parameter",Op::GT   .to_string());
-                let rightregs1 = right.LEIRnasm(regs[1..].to_vec(), f, program, build, local_vars, stack_size, loc)?;
+                let rightregs1 = right.LEIRnasm(regs[1..].to_vec(), f, program, build, local_vars, buffers, stack_size, loc)?;
                 com_assert!(loc,rightregs1.len() == 1, "TODO: Handle multi-parameter loading for expressions!");
                 writeln!(f, "   cmp {}, {}",leftregs1[0].to_string(),rightregs1[0].to_string())?;
                 writeln!(f, "   setg {}",leftregs1[0].to_byte_size(1).to_string())?;
@@ -1022,10 +1032,10 @@ impl ExprTree {
             },
             Op::GTEQ  => {
                 let left = com_expect!(loc,self.left.as_ref(),"Error: Cannot evaluate Op '{}' without left parameter",Op::GTEQ .to_string());
-                let leftregs1 = left.LEIRnasm(regs.clone(), f, program, build, local_vars, stack_size, loc)?;
+                let leftregs1 = left.LEIRnasm(regs.clone(), f, program, build, local_vars, buffers, stack_size, loc)?;
                 com_assert!(loc,leftregs1.len() == 1, "TODO: Handle multi-parameter loading for expressions!");
                 let right = com_expect!(loc,self.right.as_ref(),"Error: Cannot evaluate Op '{}' without left parameter",Op::GTEQ .to_string());
-                let rightregs1 = right.LEIRnasm(regs[1..].to_vec(), f, program, build, local_vars, stack_size, loc)?;
+                let rightregs1 = right.LEIRnasm(regs[1..].to_vec(), f, program, build, local_vars, buffers, stack_size, loc)?;
                 com_assert!(loc,rightregs1.len() == 1, "TODO: Handle multi-parameter loading for expressions!");
                 writeln!(f, "   cmp {}, {}",leftregs1[0].to_string(),rightregs1[0].to_string())?;
                 writeln!(f, "   setge {}",leftregs1[0].to_byte_size(1).to_string())?;
@@ -1034,10 +1044,10 @@ impl ExprTree {
             },
             Op::LT    => {
                 let left = com_expect!(loc,self.left.as_ref(),"Error: Cannot evaluate Op '{}' without left parameter",Op::LT   .to_string());
-                let leftregs1 = left.LEIRnasm(regs.clone(), f, program, build, local_vars, stack_size, loc)?;
+                let leftregs1 = left.LEIRnasm(regs.clone(), f, program, build, local_vars, buffers, stack_size, loc)?;
                 com_assert!(loc,leftregs1.len() == 1, "TODO: Handle multi-parameter loading for expressions!");
                 let right = com_expect!(loc,self.right.as_ref(),"Error: Cannot evaluate Op '{}' without left parameter",Op::LT   .to_string());
-                let rightregs1 = right.LEIRnasm(regs[1..].to_vec(), f, program, build, local_vars, stack_size, loc)?;
+                let rightregs1 = right.LEIRnasm(regs[1..].to_vec(), f, program, build, local_vars, buffers, stack_size, loc)?;
                 com_assert!(loc,rightregs1.len() == 1, "TODO: Handle multi-parameter loading for expressions!");
                 writeln!(f, "   cmp {}, {}",leftregs1[0].to_string(),rightregs1[0].to_string())?;
                 writeln!(f, "   setl {}",leftregs1[0].to_byte_size(1).to_string())?;
@@ -1046,10 +1056,10 @@ impl ExprTree {
             },
             Op::LTEQ  => {
                 let left = com_expect!(loc,self.left.as_ref(),"Error: Cannot evaluate Op '{}' without left parameter",Op::LTEQ .to_string());
-                let leftregs1 = left.LEIRnasm(regs.clone(), f, program, build, local_vars, stack_size, loc)?;
+                let leftregs1 = left.LEIRnasm(regs.clone(), f, program, build, local_vars, buffers, stack_size, loc)?;
                 com_assert!(loc,leftregs1.len() == 1, "TODO: Handle multi-parameter loading for expressions!");
                 let right = com_expect!(loc,self.right.as_ref(),"Error: Cannot evaluate Op '{}' without left parameter",Op::LTEQ .to_string());
-                let rightregs1 = right.LEIRnasm(regs[1..].to_vec(), f, program, build, local_vars, stack_size, loc)?;
+                let rightregs1 = right.LEIRnasm(regs[1..].to_vec(), f, program, build, local_vars, buffers, stack_size, loc)?;
                 com_assert!(loc,rightregs1.len() == 1, "TODO: Handle multi-parameter loading for expressions!");
                 writeln!(f, "   cmp {}, {}",leftregs1[0].to_string(),rightregs1[0].to_string())?;
                 writeln!(f, "   setle {}",leftregs1[0].to_byte_size(1).to_string())?;
@@ -1090,7 +1100,7 @@ impl ExprTree {
         Self { left: None, right: None, op: Op::NONE }
     }
 }
-fn tokens_to_expression(body: &[Token],build: &mut BuildProgram, program: &CmdProgram,locals: &Vec<Locals>) -> Expression {
+fn tokens_to_expression(body: &[Token],build: &mut BuildProgram, program: &CmdProgram,locals: &Vec<Locals>, buffers: &mut Vec<BuildBuf>) -> Expression {
     
     let mut bracketcount = 0;
     if body.len() == 0 {
@@ -1127,7 +1137,37 @@ fn tokens_to_expression(body: &[Token],build: &mut BuildProgram, program: &CmdPr
             }
         }
     }
-    
+    if let TokenType::IntrinsicType(i) = &body[0].typ {
+        let mut i2 = 0;
+        if *i == IntrinsicType::OPENSQUARE {
+            {
+                while i2 < body.len() && body[i2].typ != TokenType::IntrinsicType(IntrinsicType::CLOSESQUARE){
+                    i2+=1
+                }
+                let res = &body[1..i2];
+                res
+            };
+            if body.len() == i2+1 {
+                let ntok = &body[1];
+                if let TokenType::Definition(buftyp) = &ntok.typ {
+                    let ntok = &body[2];
+                    par_assert!(ntok, ntok.typ == TokenType::IntrinsicType(IntrinsicType::COMA), "Error: Expected coma after defintion in buffer!");    
+                    let ntok = &body[3];
+                    let size = par_expect!(ntok, ntok.typ.unwrap_numeric(build), "Error: Expected numeric value after coma to indicate the size of the buffer but found {}",ntok.typ);
+                    par_assert!(ntok, size > 0, "Error: Cannot have buffer of size lower than or equal to 0");
+                    let res = buffers.len();
+                    buffers.push(BuildBuf::from_parse_buf(buftyp.clone(),size as usize));
+                    return Expression::val(OfP::BUFFER(res));
+                }
+                else {
+                    par_error!(ntok, "Error: Expected VarType for buffer but found {}",ntok.typ);
+                }
+                
+                //return Expression::val(OfP::BUFFER(()))
+            }
+        };  
+
+    }
     let mut currentETree: ExprTree = ExprTree::new();
     let mut i: usize = 0;
 
@@ -1240,7 +1280,7 @@ fn tokens_to_expression(body: &[Token],build: &mut BuildProgram, program: &CmdPr
                 }
                 i2 += 1;
             }
-            currentETree.right = Some(tokens_to_expression(&body[i..i2],build,program,locals));
+            currentETree.right = Some(tokens_to_expression(&body[i..i2],build,program,locals,buffers));
             if i2 == body.len() {}
             else {
                 let buf = Expression::expr(Box::new(currentETree));
@@ -1303,7 +1343,7 @@ fn tokens_to_expression(body: &[Token],build: &mut BuildProgram, program: &CmdPr
                         }
                         i += 1;
                     }
-                    let expr = tokens_to_expression(&body[index_from..i-1], build, program, locals);
+                    let expr = tokens_to_expression(&body[index_from..i-1], build, program, locals,buffers);
                     if currentETree.left.is_none()  && currentETree.right.is_none() && currentETree.op == Op::NONE && expr.is_expr(){
                         currentETree = *(*expr.unwrap_expr()).clone();
                     }
@@ -1343,8 +1383,28 @@ enum TokenType {
     Operation     (Op),
     SETOperation  (SetOp)
 }
+impl Display for TokenType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.to_string(false))
+    }
+}
 
 impl TokenType {
+    fn unwrap_numeric(&self, build: &BuildProgram) -> Option<i64> {
+        match self {
+            TokenType::Number32(data) => Some(data.clone() as i64),
+            TokenType::Number64(data) => Some(data.clone() as i64),
+            TokenType::WordType(data) => {
+                let t = build.constdefs.get(data)?;
+                match &t.typ {
+                    RawConstValueType::INT(data)=> Some(data.clone() as i64),
+                    &RawConstValueType::LONG(data)    => Some(data.clone() as i64),
+                    _ => None
+                }
+            }
+            _ => None
+        }
+    }
     fn unwrap_setop(&self) -> &SetOp {
         match self {
             Self::SETOperation(op) => op,
@@ -1990,6 +2050,11 @@ enum Register {
     XMM7,
 
 }
+impl Display for Register {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.to_string())
+    }
+}
 impl Register {
     fn to_string(&self) -> String {
         match self {
@@ -2446,7 +2511,8 @@ enum OfP {
     //PARAM    (String),
     LOCALVAR (String),
     CONST    (RawConstValueType),
-    RESULT   (String,CallArgs)
+    RESULT   (String,CallArgs),
+    BUFFER   (usize)
     // RAW      (i64),
     // STR      (Uuid, ProgramStringType)
     // etc.
@@ -2462,6 +2528,7 @@ impl OfP {
             Self::RESULT(f, _) => {        
                 build.functions.get(f)?.contract.Outputs.get(0).cloned()
             }
+            Self::BUFFER(_) => todo!()
         }
     }
     fn var_type(&self, build: &BuildProgram, local_vars: &Vec<HashMap<String, LocalVariable>>) -> Option<VarType> {
@@ -2469,10 +2536,11 @@ impl OfP {
             Self::REGISTER(reg) => Some(reg.to_var_type()),
             Self::CONST(v) => Some(v.to_type(build)[0].clone()),
             Self::LOCALVAR(v) => Some(get_local_build(local_vars, v).unwrap().typ.clone()),
-            Self::RESULT(f, _) => build.functions.get(f).unwrap().contract.Outputs.get(0).cloned()
+            Self::RESULT(f, _) => build.functions.get(f).unwrap().contract.Outputs.get(0).cloned(),
+            Self::BUFFER(_) => todo!()
         }
     }
-    fn LOIRGNasm(&self, regs: Vec<Register>, f: &mut File, program: &CmdProgram,build: &BuildProgram, local_vars: &Vec<HashMap<String, LocalVariable>>, stack_size: usize, loc: &ProgramLocation) -> std::io::Result<Vec<Register>>{
+    fn LOIRGNasm(&self, regs: Vec<Register>, f: &mut File, program: &CmdProgram,build: &BuildProgram, local_vars: &Vec<HashMap<String, LocalVariable>>, buffers: &Vec<BuildBuf>, stack_size: usize, loc: &ProgramLocation) -> std::io::Result<Vec<Register>>{
         let mut out: Vec<Register> = Vec::with_capacity(regs.len());
         match self {
             OfP::REGISTER(reg2) => {
@@ -2542,6 +2610,15 @@ impl OfP {
                     writeln!(f, "   mov {}, {}",reg.to_string(),oreg.to_string())?;
                 }
                 out.push(reg.clone());
+            },
+            OfP::BUFFER(s) => {
+                let buf: &BuildBuf = &buffers[*s];
+                let reg = &regs[0].to_byte_size(8);
+                writeln!(f, "   mov {}, rsp",reg)?;
+                if stack_size-buf.offset > 0 {
+                    writeln!(f, "   add {}, {}",reg,stack_size-buf.offset)?;
+                }
+                out.push(reg.clone())
             },
         }
         Ok(out)
@@ -2625,6 +2702,7 @@ struct Function {
     locals: Locals,
     location: ProgramLocation,
     body: Vec<(ProgramLocation,Instruction)>,
+    buffers: Vec<BuildBuf>,
 }
 
 
@@ -2995,6 +3073,20 @@ struct DLL_import {
 struct DLL_export {
     contract: AnyContract
 }
+#[derive(Debug, Clone)]
+struct BuildBuf {
+    typ: VarType,
+    size: usize,
+    offset: usize,
+}
+impl BuildBuf {
+    fn from_typ(typ: VarType) -> Self {
+        Self { typ, size: 0, offset: 0 }
+    }
+    fn from_parse_buf(typ: VarType, size: usize) -> Self {
+        Self { typ, size, offset: 0 }
+    }
+}
 #[derive(Debug)]
 struct BuildProgram {
     externals:    HashMap<String,External>,
@@ -3002,7 +3094,8 @@ struct BuildProgram {
     stringdefs:   HashMap<Uuid,ProgramString>,
     constdefs:    HashMap<String, RawConstValue>,
     dll_imports:  HashMap<String, DLL_import>,
-    dll_exports:  HashMap<String, DLL_export>
+    dll_exports:  HashMap<String, DLL_export>,
+    //buffers:      HashMap<String, BuildBuf>
 }
 impl BuildProgram {
     fn insert_unique_str(&mut self, str: ProgramString) -> Uuid {
@@ -3027,6 +3120,11 @@ impl BuildProgram {
             return Some(func.contract.to_any_contract())
         }
         None
+    }
+    fn new() -> Self {
+        Self { externals: HashMap::new(), functions: HashMap::new(),stringdefs: HashMap::new(), constdefs: HashMap::new(), dll_imports: HashMap::new(), dll_exports: HashMap::new(), 
+            //buffers: Vec::new()
+        }
     }
 }
 
@@ -3223,6 +3321,7 @@ impl NormalScopeType {
 struct NormalScope {
     typ: NormalScopeType,
     body: ScopeBody,
+    buffers: Vec<BuildBuf>,
     locals: Locals
 }
 
@@ -3289,6 +3388,16 @@ impl ScopeType {
             },
             Self::NORMAL(_) => {
                 None
+            },
+        }
+    }
+    fn buffers_unwrap_mut(&mut self) -> Option<&mut Vec<BuildBuf>> {
+        match self {
+            Self::FUNCTION(func,_) => {
+                Some(&mut func.buffers)
+            },
+            Self::NORMAL(s) => {
+                Some(&mut s.buffers)
             },
         }
     }
@@ -3656,7 +3765,7 @@ fn parse_token_to_build_inst(token: Token,lexer: &mut Lexer, program: &mut CmdPr
             
             if let TokenType::SETOperation(op) = Op.typ {
                 let expr_body: Vec<Token> = lexer.map_while(|t| if t.typ != TokenType::IntrinsicType(IntrinsicType::DOTCOMA) {Some(t)} else { None }).collect();
-                let expr = tokens_to_expression(&expr_body, build, program, &currentLocals);
+                let expr = tokens_to_expression(&expr_body, build, program, &currentLocals,par_expect!(lexer.currentLocation, currentScope.typ.buffers_unwrap_mut(), "Error: Expected to find buffers but found none"));
                 let body = currentScope.body_unwrap_mut().unwrap();
                 match &op {
                     SetOp::SET      => {
@@ -3714,8 +3823,10 @@ fn parse_token_to_build_inst(token: Token,lexer: &mut Lexer, program: &mut CmdPr
                                             if let Some(tok) = lexer.peekable().peek() {
                                                 if tok.typ == TokenType::IntrinsicType(IntrinsicType::OPENPAREN) {
                                                     contract = Some(parse_any_contract(lexer));
-                                                    let ntc = par_expect!(lexer.currentLocation,lexer.next(),"Error: stream of tokens abruptly ended in extern definition");
-                                                    par_assert!(ntc, ntc.typ==TokenType::IntrinsicType(IntrinsicType::DOTCOMA),"Error: Expected dotcoma at the end of extern definition! But found {}",ntc.typ.to_string(false));
+                                                    if !lexer.is_newline() {
+                                                        let ntc = par_expect!(lexer.currentLocation,lexer.next(),"Error: stream of tokens abruptly ended in extern definition");
+                                                        par_assert!(ntc, ntc.typ==TokenType::IntrinsicType(IntrinsicType::DOTCOMA),"Error: Expected dotcoma at the end of extern definition! But found {}",ntc.typ.to_string(false));
+                                                    }
                                                 }
                                                 else {
                                                     par_assert!(tok, tok.typ==TokenType::IntrinsicType(IntrinsicType::DOTCOMA),"Error: Expected dotcoma at the end of extern definition!");
@@ -3757,7 +3868,7 @@ fn parse_token_to_build_inst(token: Token,lexer: &mut Lexer, program: &mut CmdPr
                             for (inn,inp) in contract.Inputs.iter() {
                                 locals.insert(inn.clone(), inp.clone());
                             }
-                            scopeStack.push(Scope { typ: ScopeType::FUNCTION(Function { contract, body:  vec![(token.location.clone(),Instruction::FNBEGIN())], location: token.location.clone(), locals: Locals::new() }, Word), hasBeenOpened: false });
+                            scopeStack.push(Scope { typ: ScopeType::FUNCTION(Function { contract, body:  vec![(token.location.clone(),Instruction::FNBEGIN())], location: token.location.clone(), locals: Locals::new(), buffers: Vec::new() }, Word), hasBeenOpened: false });
                             currentLocals.push(locals);
                             build.functions.reserve(1);
                         }
@@ -3775,7 +3886,7 @@ fn parse_token_to_build_inst(token: Token,lexer: &mut Lexer, program: &mut CmdPr
                         let s = scopeStack.last_mut().unwrap();
                         if s.hasBeenOpened {
                             currentLocals.push(Locals::new());
-                            scopeStack.push(Scope { typ: ScopeType::NORMAL(NormalScope { typ: NormalScopeType::EMPTY, body: vec![], locals: Locals::new()}), hasBeenOpened: true });
+                            scopeStack.push(Scope { typ: ScopeType::NORMAL(NormalScope { typ: NormalScopeType::EMPTY, body: vec![], locals: Locals::new(), buffers: Vec::new() }), hasBeenOpened: true });
                             return;
                         }
                         par_assert!(token,!s.hasBeenOpened, "Scope already opened! {:?}",scopeStack);
@@ -3804,7 +3915,7 @@ fn parse_token_to_build_inst(token: Token,lexer: &mut Lexer, program: &mut CmdPr
                     }
                     else {
 
-                        scopeStack.push(Scope { typ: ScopeType::NORMAL(NormalScope { typ: NormalScopeType::EMPTY, body: vec![], locals: Locals::new()}), hasBeenOpened: true});
+                        scopeStack.push(Scope { typ: ScopeType::NORMAL(NormalScope { typ: NormalScopeType::EMPTY, body: vec![], locals: Locals::new(), buffers: Vec::new()}), hasBeenOpened: true});
                     }
                 }
                 IntrinsicType::CLOSECURLY => {
@@ -3868,7 +3979,6 @@ fn parse_token_to_build_inst(token: Token,lexer: &mut Lexer, program: &mut CmdPr
                 }
                 IntrinsicType::RET => {
                     par_assert!(token, scopeStack.len()> 0 && getTopMut(scopeStack).unwrap().body_is_some(), "Error: Unexpected return intrinsic outside of scope! Scopes of type {} do not support instructions!",getTopMut(scopeStack).unwrap().typ.to_string(false));
-                    let body = getTopMut(scopeStack).unwrap().body_unwrap_mut().unwrap();
                     let result_body: Vec<Token> = lexer.map_while(|t| {
                         if t.typ != TokenType::IntrinsicType(IntrinsicType::DOTCOMA) {
                             Some(t)
@@ -3877,7 +3987,8 @@ fn parse_token_to_build_inst(token: Token,lexer: &mut Lexer, program: &mut CmdPr
                             None
                         }
                     }).collect();
-                    body.push((token.location.clone(),Instruction::RET(tokens_to_expression(&result_body, build, program, &currentLocals))));
+                    let res = tokens_to_expression(&result_body, build, program, &currentLocals,par_expect!(lexer.currentLocation, getTopMut(scopeStack).unwrap().typ.buffers_unwrap_mut(), "Error: Expected to find buffers but found none"));
+                    getTopMut(scopeStack).unwrap().body_unwrap_mut().unwrap().push((token.location.clone(),Instruction::RET(res)));
                 },
                 IntrinsicType::SYSCALL => {
                     par_assert!(token, scopeStack.len()> 0 && getTopMut(scopeStack).unwrap().body_is_some(), "Error: Unexpected return intrinsic outside of scope! Scopes of type {} do not support instructions!",getTopMut(scopeStack).unwrap().typ.to_string(false));
@@ -4070,7 +4181,8 @@ fn parse_token_to_build_inst(token: Token,lexer: &mut Lexer, program: &mut CmdPr
                             }
                         }).collect();
                         let currentScope = getTopMut(scopeStack).unwrap();
-                        currentScope.body_unwrap_mut().unwrap().push((lexer.currentLocation.clone(),Instruction::MOV(Expression::val(OfP::LOCALVAR(nametok.unwrap_word().unwrap().clone())),tokens_to_expression(&body, build, program, &currentLocals))))
+                        let res = tokens_to_expression(&body, build, program, &currentLocals,par_expect!(lexer.currentLocation, currentScope.typ.buffers_unwrap_mut(), "Error: Expected to find buffers but found none"));
+                        currentScope.body_unwrap_mut().unwrap().push((lexer.currentLocation.clone(),Instruction::MOV(Expression::val(OfP::LOCALVAR(nametok.unwrap_word().unwrap().clone())),res)))
                     }
                 },
                 IntrinsicType::INTERRUPT => {
@@ -4129,7 +4241,8 @@ fn parse_token_to_build_inst(token: Token,lexer: &mut Lexer, program: &mut CmdPr
                             Some(t)
                         }
                     }).collect();
-                    scopeStack.push(Scope { typ: ScopeType::NORMAL(NormalScope { typ: NormalScopeType::WHILE(tokens_to_expression(&condition, build, program, &currentLocals)), body: vec![], locals: Locals::new()}), hasBeenOpened: true});
+                    let condi = tokens_to_expression(&condition, build, program, &currentLocals, par_expect!(lexer.currentLocation, getTopMut(scopeStack).unwrap().typ.buffers_unwrap_mut(), "Error: Expected to find buffers but found none"));
+                    scopeStack.push(Scope { typ: ScopeType::NORMAL(NormalScope { typ: NormalScopeType::WHILE(condi), body: vec![], locals: Locals::new(), buffers: Vec::new()}), hasBeenOpened: true});
                     currentLocals.push(Locals::new());
                 },
                 IntrinsicType::IF => {
@@ -4141,12 +4254,13 @@ fn parse_token_to_build_inst(token: Token,lexer: &mut Lexer, program: &mut CmdPr
                             Some(t)
                         }
                     }).collect();
-                    scopeStack.push(Scope { typ: ScopeType::NORMAL(NormalScope { typ: NormalScopeType::IF(tokens_to_expression(&condition, build, program, &currentLocals)), body: vec![], locals: Locals::new()}), hasBeenOpened: true});
+                    let condi = tokens_to_expression(&condition, build, program, &currentLocals, par_expect!(lexer.currentLocation, getTopMut(scopeStack).unwrap().typ.buffers_unwrap_mut(), "Error: Expected to find buffers but found none"));
+                    scopeStack.push(Scope { typ: ScopeType::NORMAL(NormalScope { typ: NormalScopeType::IF(condi), body: vec![], locals: Locals::new(), buffers: Vec::new()}), hasBeenOpened: true});
                     currentLocals.push(Locals::new());
 
                 },
                 IntrinsicType::ELSE => {
-                    scopeStack.push(Scope { typ: ScopeType::NORMAL(NormalScope { typ: NormalScopeType::ELSE, body: vec![], locals: Locals::new()}), hasBeenOpened: false })
+                    scopeStack.push(Scope { typ: ScopeType::NORMAL(NormalScope { typ: NormalScopeType::ELSE, body: vec![], locals: Locals::new(), buffers: Vec::new() }), hasBeenOpened: false})
                 },
                 IntrinsicType::THREEDOTS => todo!(),
 
@@ -4181,6 +4295,8 @@ fn parse_token_to_build_inst(token: Token,lexer: &mut Lexer, program: &mut CmdPr
                     let body = getTopMut(scopeStack).unwrap().body_unwrap_mut().unwrap();
                     body.push((ntok.location.clone(), Instruction::MAKELABEL(symbol_name.to_owned())))
                 },
+                IntrinsicType::OPENSQUARE => todo!(),
+                IntrinsicType::CLOSESQUARE => todo!(),
 
             }
         }
@@ -4307,23 +4423,24 @@ fn parse_token_to_build_inst(token: Token,lexer: &mut Lexer, program: &mut CmdPr
             
             let currentScope = getTopMut(scopeStack).unwrap();
             let expr_body: Vec<Token> = lexer.map_while(|t| if t.typ != TokenType::IntrinsicType(IntrinsicType::DOTCOMA) {Some(t)} else { None }).collect();
-            let expr = tokens_to_expression(&expr_body, build, program, &currentLocals);
-            let sbody = currentScope.body_unwrap_mut().unwrap();
+            let expr = tokens_to_expression(&expr_body, build, program, &currentLocals, par_expect!(lexer.currentLocation, currentScope.typ.buffers_unwrap_mut(), "Error: Expected to find buffers but found none"));
+            let expr_2 = tokens_to_expression(&body, build, program, &currentLocals,par_expect!(lexer.currentLocation, currentScope.typ.buffers_unwrap_mut(), "Error: Expected to find buffers but found none"));
             match &setop {
+                
                 SetOp::SET      => {
-                    sbody.push((token.location.clone(),Instruction::MOV(tokens_to_expression(&body, build, program, &currentLocals), expr)))
+                    currentScope.body_unwrap_mut().unwrap().push((token.location.clone(),Instruction::MOV(expr_2,expr)))
                 },
                 SetOp::PLUSSET  => {
-                    sbody.push((token.location.clone(),Instruction::ADDSET(tokens_to_expression(&body, build, program, &currentLocals), expr)))
+                    currentScope.body_unwrap_mut().unwrap().push((token.location.clone(),Instruction::ADDSET(expr_2, expr)))
                 },
                 SetOp::MINUSSET => {
-                    sbody.push((token.location.clone(),Instruction::SUBSET(tokens_to_expression(&body, build, program, &currentLocals), expr)))
+                    currentScope.body_unwrap_mut().unwrap().push((token.location.clone(),Instruction::SUBSET(expr_2, expr)))
                 },
                 SetOp::MULSET   => {
-                    sbody.push((token.location.clone(),Instruction::MULSET(tokens_to_expression(&body, build, program, &currentLocals), expr)))
+                    currentScope.body_unwrap_mut().unwrap().push((token.location.clone(),Instruction::MULSET(expr_2, expr)))
                 },
                 SetOp::DIVSET   => {
-                    sbody.push((token.location.clone(),Instruction::DIVSET(tokens_to_expression(&body, build, program, &currentLocals), expr)))
+                    currentScope.body_unwrap_mut().unwrap().push((token.location.clone(),Instruction::DIVSET(expr_2, expr)))
                 },
             }
 
@@ -4334,7 +4451,7 @@ fn parse_token_to_build_inst(token: Token,lexer: &mut Lexer, program: &mut CmdPr
 
 }
 fn parse_tokens_to_build(lexer: &mut Lexer, program: &mut CmdProgram) -> BuildProgram {
-    let mut build: BuildProgram = BuildProgram { externals: HashMap::new(), functions: HashMap::new(),stringdefs: HashMap::new(), constdefs: HashMap::new(), dll_imports: HashMap::new(), dll_exports: HashMap::new() };
+    let mut build: BuildProgram = BuildProgram::new();
     let mut scopeStack: ScopeStack = vec![];
     let mut currentLocals: Vec<Locals> = Vec::new();
     let mut currentLabels: HashSet<String> = HashSet::new();
@@ -4608,6 +4725,13 @@ fn nasm_x86_64_handle_scope(f: &mut File, build: &BuildProgram, program: &CmdPro
         let res = local_vars.len()-1;
         local_vars[res].insert(name.clone(), LocalVariable { typ: val.clone(), operand: stack_size });
     }
+    
+    let mut bufs = scope.get_buffers(build).clone();
+    for buf in bufs.iter_mut() {
+        stack_size += buf.size*buf.typ.get_size(program);
+        buf.offset = stack_size;
+    }
+    
     let dif = stack_size-stack_size_org;
     let additional = dif%8;
     let dif = dif + additional;
@@ -4624,13 +4748,13 @@ fn nasm_x86_64_handle_scope(f: &mut File, build: &BuildProgram, program: &CmdPro
                         OfP::REGISTER(Reg1) => {
                             let oreg2 = Register::RBX.to_byte_size(Reg1.size());
                             //TODO: This may break
-                            Op2.LEIRnasm(vec![*Reg1,oreg2], f, program, build,&local_vars, stack_size, loc)?;
+                            Op2.LEIRnasm(vec![*Reg1,oreg2], f, program, build,&local_vars, &bufs,stack_size, loc)?;
                         }
                         OfP::LOCALVAR(varOrg) => {
                             let var = com_expect!(loc,get_local_build(&local_vars,varOrg),"Error: Unknown variable found during compilation {}",varOrg);
                             let oreg  = Register::RAX.to_byte_size(var.typ.get_size(program));
                             let oreg2 = Register::RBX.to_byte_size(var.typ.get_size(program));
-                            let oregs = Op2.LEIRnasm(vec![oreg,oreg2,Register::RCX.to_byte_size(var.typ.get_size(program))], f, program,build, &local_vars, stack_size, loc)?;
+                            let oregs = Op2.LEIRnasm(vec![oreg,oreg2,Register::RCX.to_byte_size(var.typ.get_size(program))], f, program,build, &local_vars, &bufs,stack_size, loc)?;
                             if stack_size-var.operand == 0 {
                                 writeln!(f, "   mov {} [rsp], {}",size_to_nasm_type(var.typ.get_size(program)), oregs[0].to_byte_size(var.typ.get_size(program)).to_string())?;
                             }
@@ -4649,10 +4773,10 @@ fn nasm_x86_64_handle_scope(f: &mut File, build: &BuildProgram, program: &CmdPro
                     let res_right = expr.right.as_ref().unwrap().result_of_c(program, build, &local_vars, loc).unwrap();
                     
                     com_assert!(loc, res_right.is_some_ptr(), "Error: Cannot dereference void pointer");
-                    let oregs = expr.right.as_ref().unwrap().LEIRnasm(vec![Register::RAX.to_byte_size(res_right.get_size(program)),Register::RBX.to_byte_size(res_right.get_size(program)),Register::RCX.to_byte_size(res_right.get_size(program))], f, program, build, &local_vars, stack_size, loc)?;
+                    let oregs = expr.right.as_ref().unwrap().LEIRnasm(vec![Register::RAX.to_byte_size(res_right.get_size(program)),Register::RBX.to_byte_size(res_right.get_size(program)),Register::RCX.to_byte_size(res_right.get_size(program))], f, program, build, &local_vars, &bufs,stack_size, loc)?;
                     let res_deref_val = res_right.get_ptr_val().unwrap();
                     writeln!(f, "   mov rsi, {}",oregs[0].to_string())?;
-                    let oregs2 = Op2.LEIRnasm(vec![Register::RAX.to_byte_size(res_deref_val.get_size(program)),Register::RBX.to_byte_size(res_deref_val.get_size(program)),Register::RCX.to_byte_size(res_deref_val.get_size(program))], f, program, build, &local_vars, stack_size, loc)?;
+                    let oregs2 = Op2.LEIRnasm(vec![Register::RAX.to_byte_size(res_deref_val.get_size(program)),Register::RBX.to_byte_size(res_deref_val.get_size(program)),Register::RCX.to_byte_size(res_deref_val.get_size(program))], f, program, build, &local_vars, &bufs,stack_size, loc)?;
                     writeln!(f, "   mov {} [rsi], {}",size_to_nasm_type(res_deref_val.get_size(program)),oregs2[0].to_byte_size(res_deref_val.get_size(program)).to_string())?;
                 }
             }
@@ -4675,14 +4799,14 @@ fn nasm_x86_64_handle_scope(f: &mut File, build: &BuildProgram, program: &CmdPro
                     OfP::REGISTER(reg1) => {
                         let reg2 = Register::RAX.to_byte_size(reg1.size());
                         let reg3 = Register::RBX.to_byte_size(reg1.size());
-                        op2.LEIRnasm(vec![reg2,reg3], f, program,build, &local_vars, stack_size, loc)?;
+                        op2.LEIRnasm(vec![reg2,reg3], f, program,build, &local_vars, &bufs,stack_size, loc)?;
                         writeln!(f, "   add {}, {}",reg1.to_string(), reg2.to_string())?;
                     }
                     OfP::LOCALVAR(var1) => {
                         let var1 = com_expect!(loc,get_local_build(&local_vars,var1),"Error: Unknown variable found during compilation {}",var1);
                         let reg1 = Register::RAX.to_byte_size(var1.typ.get_size(program));
                         let reg2 = Register::RBX.to_byte_size(reg1.size());
-                        op2.LEIRnasm(vec![reg1,reg2], f, program,build, &local_vars, stack_size, loc)?;
+                        op2.LEIRnasm(vec![reg1,reg2], f, program,build, &local_vars, &bufs,stack_size, loc)?;
                         if stack_size-var1.operand == 0 {
                             writeln!(f, "   add {} [rsp], {}",size_to_nasm_type(var1.typ.get_size(program)),reg1.to_string())?;
                         }
@@ -4692,6 +4816,7 @@ fn nasm_x86_64_handle_scope(f: &mut File, build: &BuildProgram, program: &CmdPro
                     },
                     OfP::CONST(_) => todo!(),
                     OfP::RESULT(_, _) => todo!(),
+                    _ => todo!()
                 }
             }
             Instruction::SUBSET(op1, op2) => {
@@ -4700,14 +4825,14 @@ fn nasm_x86_64_handle_scope(f: &mut File, build: &BuildProgram, program: &CmdPro
                     OfP::REGISTER(reg1) => {
                         let reg2 = Register::RAX.to_byte_size(reg1.size());
                         let reg3 = Register::RBX.to_byte_size(reg1.size());
-                        op2.LEIRnasm(vec![reg2,reg3], f, program,build, &local_vars, stack_size, loc)?;
+                        op2.LEIRnasm(vec![reg2,reg3], f, program,build, &local_vars, &bufs,stack_size, loc)?;
                         writeln!(f, "   sub {}, {}",reg1.to_string(), reg2.to_string())?;
                     }
                     OfP::LOCALVAR(var1) => {
                         let var1 = com_expect!(loc,get_local_build(&local_vars,var1),"Error: Unknown variable found during compilation {}",var1);
                         let reg1 = Register::RAX.to_byte_size(var1.typ.get_size(program));
                         let reg2 = Register::RBX.to_byte_size(reg1.size());
-                        op2.LEIRnasm(vec![reg1,reg2], f, program,build, &local_vars, stack_size, loc)?;
+                        op2.LEIRnasm(vec![reg1,reg2], f, program,build, &local_vars, &bufs,stack_size, loc)?;
                         if stack_size-var1.operand == 0 {
                             writeln!(f, "   sub {} [rsp], {}",size_to_nasm_type(var1.typ.get_size(program)),reg1.to_string())?;
                         }
@@ -4717,6 +4842,7 @@ fn nasm_x86_64_handle_scope(f: &mut File, build: &BuildProgram, program: &CmdPro
                     },
                     OfP::CONST(_) => todo!(),
                     OfP::RESULT(_, _) => todo!(),
+                    _ => todo!()
                 }
             }
             Instruction::MULSET(op1, op2) => {
@@ -4724,13 +4850,13 @@ fn nasm_x86_64_handle_scope(f: &mut File, build: &BuildProgram, program: &CmdPro
                 match op1 {
                     OfP::REGISTER(reg1) => {
                         let reg2 = Register::RAX.to_byte_size(reg1.size());
-                        op2.LEIRnasm(vec![reg2], f, program,build, &local_vars, stack_size, loc)?;
+                        op2.LEIRnasm(vec![reg2], f, program,build, &local_vars, &bufs,stack_size, loc)?;
                         writeln!(f, "   imul {}, {}",reg1.to_string(), reg2.to_string())?;
                     }
                     OfP::LOCALVAR(var1) => {
                         let var1 = com_expect!(loc,get_local_build(&local_vars, var1),"Error: Unknown variable found during compilation {}",var1);
                         let reg1 = Register::RAX.to_byte_size(var1.typ.get_size(program));
-                        op2.LEIRnasm(vec![reg1], f, program,build, &local_vars, stack_size, loc)?;
+                        op2.LEIRnasm(vec![reg1], f, program,build, &local_vars, &bufs,stack_size, loc)?;
                         if stack_size-var1.operand == 0 {
                             writeln!(f, "   imul {} [rsp], {}",size_to_nasm_type(var1.typ.get_size(program)),reg1.to_string())?;
                         }
@@ -4764,7 +4890,7 @@ fn nasm_x86_64_handle_scope(f: &mut File, build: &BuildProgram, program: &CmdPro
             }
             Instruction::RET(expr) => {
                 let dif = if scope.is_normal() {stack_size-func_stack_begin} else {stack_size-stack_size_org};
-                let _regs = expr.LEIRnasm(vec![Register::RAX,Register::RBX,Register::RCX], f, program, build, &local_vars, stack_size, loc)?;
+                let _regs = expr.LEIRnasm(vec![Register::RAX,Register::RBX,Register::RCX], f, program, build, &local_vars, &bufs,stack_size, loc)?;
                 let oreg = Register::RAX.to_byte_size(_regs[0].size());
                 if _regs[0] != oreg {
                     writeln!(f, "   mov {}, {}",oreg.to_string(),_regs[0].to_string())?;
@@ -4818,6 +4944,7 @@ fn nasm_x86_64_handle_scope(f: &mut File, build: &BuildProgram, program: &CmdPro
                             }
                             writeln!(f, "   cmp {}, 0",Register::RAX.to_string())?;
                         },
+                        _ => todo!()
                     }
                     writeln!(f, "   jnz .IF_SCOPE_{}",binst)?;
                 }
@@ -4826,51 +4953,51 @@ fn nasm_x86_64_handle_scope(f: &mut File, build: &BuildProgram, program: &CmdPro
                     com_assert!(loc,val.op.is_boolean(),"Error: Condition MUST be of type boolean but encountered op {}",val.op.to_string());
                     match val.op {
                         Op::EQ   => {
-                            let oreg1 = val.left.as_ref().unwrap().LEIRnasm(vec![Register::RAX, Register::RBX, Register::RCX], f, program, build, &local_vars, stack_size, loc)?;
+                            let oreg1 = val.left.as_ref().unwrap().LEIRnasm(vec![Register::RAX, Register::RBX, Register::RCX], f, program, build, &local_vars, &bufs, stack_size, loc)?;
                             let tmp = Register::RSI.to_byte_size(oreg1[0].size());
                             writeln!(f, "   mov {}, {}",tmp.to_string(),oreg1[0].to_string())?;
-                            let oreg2 = val.right.as_ref().unwrap().LEIRnasm(vec![Register::RAX, Register::RBX, Register::RCX], f, program, build, &local_vars, stack_size, loc)?;
+                            let oreg2 = val.right.as_ref().unwrap().LEIRnasm(vec![Register::RAX, Register::RBX, Register::RCX], f, program, build, &local_vars, &bufs, stack_size, loc)?;
 
                             writeln!(f, "   cmp {}, {}",tmp.to_string(),oreg2[0].to_byte_size(tmp.size()).to_string())?;
                             writeln!(f, "   jz .IF_SCOPE_{}",binst)?;
                         },
                         Op::NEQ  => {
-                            let oreg1 = val.left.as_ref().unwrap().LEIRnasm(vec![Register::RAX, Register::RBX, Register::RCX], f, program, build, &local_vars, stack_size, loc)?;
+                            let oreg1 = val.left.as_ref().unwrap().LEIRnasm(vec![Register::RAX, Register::RBX, Register::RCX], f, program, build, &local_vars, &bufs, stack_size, loc)?;
                             let tmp = Register::RSI.to_byte_size(oreg1[0].size());
                             writeln!(f, "   mov {}, {}",tmp.to_string(),oreg1[0].to_string())?;
-                            let oreg2 = val.right.as_ref().unwrap().LEIRnasm(vec![Register::RAX, Register::RBX, Register::RCX], f, program, build, &local_vars, stack_size, loc)?;
+                            let oreg2 = val.right.as_ref().unwrap().LEIRnasm(vec![Register::RAX, Register::RBX, Register::RCX], f, program, build, &local_vars, &bufs, stack_size, loc)?;
                             writeln!(f, "   cmp {}, {}",tmp.to_string(),oreg2[0].to_byte_size(tmp.size()).to_string())?;
                             writeln!(f, "   jnz .IF_SCOPE_{}",binst)?;
                         },
                         Op::GT   => {
-                            let oreg1 = val.left.as_ref().unwrap().LEIRnasm(vec![Register::RAX, Register::RBX, Register::RCX], f, program, build, &local_vars, stack_size, loc)?;
+                            let oreg1 = val.left.as_ref().unwrap().LEIRnasm(vec![Register::RAX, Register::RBX, Register::RCX], f, program, build, &local_vars, &bufs, stack_size, loc)?;
                             let tmp = Register::RSI.to_byte_size(oreg1[0].size());
                             writeln!(f, "   mov {}, {}",tmp.to_string(),oreg1[0].to_string())?;
-                            let oreg2 = val.right.as_ref().unwrap().LEIRnasm(vec![Register::RAX, Register::RBX, Register::RCX], f, program, build, &local_vars, stack_size, loc)?;
+                            let oreg2 = val.right.as_ref().unwrap().LEIRnasm(vec![Register::RAX, Register::RBX, Register::RCX], f, program, build, &local_vars, &bufs, stack_size, loc)?;
                             writeln!(f, "   cmp {}, {}",tmp.to_string(),oreg2[0].to_byte_size(tmp.size()).to_string())?;
                             writeln!(f, "   jg .IF_SCOPE_{}",binst)?;
                         },
                         Op::GTEQ => {
-                            let oreg1 = val.left.as_ref().unwrap().LEIRnasm(vec![Register::RAX, Register::RBX, Register::RCX], f, program, build, &local_vars, stack_size, loc)?;
+                            let oreg1 = val.left.as_ref().unwrap().LEIRnasm(vec![Register::RAX, Register::RBX, Register::RCX], f, program, build, &local_vars, &bufs, stack_size, loc)?;
                             let tmp = Register::RSI.to_byte_size(oreg1[0].size());
                             writeln!(f, "   mov {}, {}",tmp.to_string(),oreg1[0].to_string())?;
-                            let oreg2 = val.right.as_ref().unwrap().LEIRnasm(vec![Register::RAX, Register::RBX, Register::RCX], f, program, build, &local_vars, stack_size, loc)?;
+                            let oreg2 = val.right.as_ref().unwrap().LEIRnasm(vec![Register::RAX, Register::RBX, Register::RCX], f, program, build, &local_vars, &bufs, stack_size, loc)?;
                             writeln!(f, "   cmp {}, {}",tmp.to_string(),oreg2[0].to_byte_size(tmp.size()).to_string())?;
                             writeln!(f, "   jge .IF_SCOPE_{}",binst)?;
                         },
                         Op::LT   => {
-                            let oreg1 = val.left.as_ref().unwrap().LEIRnasm(vec![Register::RAX, Register::RBX, Register::RCX], f, program, build, &local_vars, stack_size, loc)?;
+                            let oreg1 = val.left.as_ref().unwrap().LEIRnasm(vec![Register::RAX, Register::RBX, Register::RCX], f, program, build, &local_vars, &bufs, stack_size, loc)?;
                             let tmp = Register::RSI.to_byte_size(oreg1[0].size());
                             writeln!(f, "   mov {}, {}",tmp.to_string(),oreg1[0].to_string())?;
-                            let oreg2 = val.right.as_ref().unwrap().LEIRnasm(vec![Register::RAX, Register::RBX, Register::RCX], f, program, build, &local_vars, stack_size, loc)?;
+                            let oreg2 = val.right.as_ref().unwrap().LEIRnasm(vec![Register::RAX, Register::RBX, Register::RCX], f, program, build, &local_vars, &bufs, stack_size, loc)?;
                             writeln!(f, "   cmp {}, {}",tmp.to_string(),oreg2[0].to_byte_size(tmp.size()).to_string())?;
                             writeln!(f, "   jl .IF_SCOPE_{}",binst)?;
                         },
                         Op::LTEQ => {
-                            let oreg1 = val.left.as_ref().unwrap().LEIRnasm(vec![Register::RAX, Register::RBX, Register::RCX], f, program, build, &local_vars, stack_size, loc)?;
+                            let oreg1 = val.left.as_ref().unwrap().LEIRnasm(vec![Register::RAX, Register::RBX, Register::RCX], f, program, build, &local_vars, &bufs, stack_size, loc)?;
                             let tmp = Register::RSI.to_byte_size(oreg1[0].size());
                             writeln!(f, "   mov {}, {}",tmp.to_string(),oreg1[0].to_string())?;
-                            let oreg2 = val.right.as_ref().unwrap().LEIRnasm(vec![Register::RAX, Register::RBX, Register::RCX], f, program, build, &local_vars, stack_size, loc)?;
+                            let oreg2 = val.right.as_ref().unwrap().LEIRnasm(vec![Register::RAX, Register::RBX, Register::RCX], f, program, build, &local_vars, &bufs, stack_size, loc)?;
                             writeln!(f, "   cmp {}, {}",tmp.to_string(),oreg2[0].to_byte_size(tmp.size()).to_string())?;
                             writeln!(f, "   jle .IF_SCOPE_{}",binst)?;
                         },
@@ -4935,6 +5062,7 @@ fn nasm_x86_64_handle_scope(f: &mut File, build: &BuildProgram, program: &CmdPro
                             }
                             writeln!(f, "   cmp {}, 0",Register::RAX.to_string())?;
                         },
+                        _ => todo!()
                     }
                     writeln!(f, "   jz .WHILE_SCOPE_END_{}",inst_count)?;
                 }
@@ -4943,52 +5071,52 @@ fn nasm_x86_64_handle_scope(f: &mut File, build: &BuildProgram, program: &CmdPro
                     com_assert!(loc,val.op.is_boolean(),"Error: Condition MUST be of type boolean but encountered op {}",val.op.to_string());
                     match val.op {
                         Op::EQ   => {
-                            let oreg1 = val.left.as_ref().unwrap().LEIRnasm(vec![Register::RAX, Register::RBX, Register::RCX], f, program, build, &local_vars, stack_size, loc)?;
+                            let oreg1 = val.left.as_ref().unwrap().LEIRnasm(vec![Register::RAX, Register::RBX, Register::RCX], f, program, build, &local_vars, &bufs, stack_size, loc)?;
                             let tmp = Register::RSI.to_byte_size(oreg1[0].size());
                             writeln!(f, "   mov {}, {}",tmp.to_string(),oreg1[0].to_string())?;
-                            let oreg2 = val.right.as_ref().unwrap().LEIRnasm(vec![Register::RAX, Register::RBX, Register::RCX], f, program, build, &local_vars, stack_size, loc)?;
+                            let oreg2 = val.right.as_ref().unwrap().LEIRnasm(vec![Register::RAX, Register::RBX, Register::RCX], f, program, build, &local_vars, &bufs, stack_size, loc)?;
                             writeln!(f, "   cmp {}, {}",tmp.to_string(),oreg2[0].to_byte_size(tmp.size()).to_string())?;
                             writeln!(f, "   jnz .WHILE_SCOPE_END_{}",inst_count)?;
                         },
                         Op::NEQ  => {
-                            let oreg1 = val.left.as_ref().unwrap().LEIRnasm(vec![Register::RAX, Register::RBX, Register::RCX], f, program, build, &local_vars, stack_size, loc)?;
+                            let oreg1 = val.left.as_ref().unwrap().LEIRnasm(vec![Register::RAX, Register::RBX, Register::RCX], f, program, build, &local_vars, &bufs, stack_size, loc)?;
                             let tmp = Register::RSI.to_byte_size(oreg1[0].size());
                             
                             writeln!(f, "   mov {}, {}",tmp.to_string(),oreg1[0].to_string())?;
 
-                            let oreg2 = val.right.as_ref().unwrap().LEIRnasm(vec![Register::RAX, Register::RBX, Register::RCX], f, program, build, &local_vars, stack_size, loc)?;
+                            let oreg2 = val.right.as_ref().unwrap().LEIRnasm(vec![Register::RAX, Register::RBX, Register::RCX], f, program, build, &local_vars, &bufs, stack_size, loc)?;
                             writeln!(f, "   cmp {}, {}",tmp.to_string(),oreg2[0].to_byte_size(tmp.size()).to_string())?;
                             writeln!(f, "   jz .WHILE_SCOPE_END_{}",inst_count)?;
                         },
                         Op::GT   => {
-                            let oreg1 = val.left.as_ref().unwrap().LEIRnasm(vec![Register::RAX, Register::RBX, Register::RCX], f, program, build, &local_vars, stack_size, loc)?;
+                            let oreg1 = val.left.as_ref().unwrap().LEIRnasm(vec![Register::RAX, Register::RBX, Register::RCX], f, program, build, &local_vars, &bufs, stack_size, loc)?;
                             let tmp = Register::RSI.to_byte_size(oreg1[0].size());
                             writeln!(f, "   mov {}, {}",tmp.to_string(),oreg1[0].to_string())?;
-                            let oreg2 = val.right.as_ref().unwrap().LEIRnasm(vec![Register::RAX, Register::RBX, Register::RCX], f, program, build, &local_vars, stack_size, loc)?;
+                            let oreg2 = val.right.as_ref().unwrap().LEIRnasm(vec![Register::RAX, Register::RBX, Register::RCX], f, program, build, &local_vars, &bufs, stack_size, loc)?;
                             writeln!(f, "   cmp {}, {}",tmp.to_string(),oreg2[0].to_byte_size(tmp.size()).to_string())?;
                             writeln!(f, "   jle .WHILE_SCOPE_END_{}",inst_count)?;
                         },
                         Op::GTEQ => {
-                            let oreg1 = val.left.as_ref().unwrap().LEIRnasm(vec![Register::RAX, Register::RBX, Register::RCX], f, program, build, &local_vars, stack_size, loc)?;
+                            let oreg1 = val.left.as_ref().unwrap().LEIRnasm(vec![Register::RAX, Register::RBX, Register::RCX], f, program, build, &local_vars, &bufs, stack_size, loc)?;
                             let tmp = Register::RSI.to_byte_size(oreg1[0].size());
                             writeln!(f, "   mov {}, {}",tmp.to_string(),oreg1[0].to_string())?;
-                            let oreg2 = val.right.as_ref().unwrap().LEIRnasm(vec![Register::RAX, Register::RBX, Register::RCX], f, program, build, &local_vars, stack_size, loc)?;
+                            let oreg2 = val.right.as_ref().unwrap().LEIRnasm(vec![Register::RAX, Register::RBX, Register::RCX], f, program, build, &local_vars, &bufs, stack_size, loc)?;
                             writeln!(f, "   cmp {}, {}",tmp.to_string(),oreg2[0].to_byte_size(tmp.size()).to_string())?;
                             writeln!(f, "   jl .WHILE_SCOPE_END_{}",inst_count)?;
                         },
                         Op::LT   => {
-                            let oreg1 = val.left.as_ref().unwrap().LEIRnasm(vec![Register::RAX, Register::RBX, Register::RCX], f, program, build, &local_vars, stack_size, loc)?;
+                            let oreg1 = val.left.as_ref().unwrap().LEIRnasm(vec![Register::RAX, Register::RBX, Register::RCX], f, program, build, &local_vars, &bufs, stack_size, loc)?;
                             let tmp = Register::RSI.to_byte_size(oreg1[0].size());
                             writeln!(f, "   mov {}, {}",tmp.to_string(),oreg1[0].to_string())?;
-                            let oreg2 = val.right.as_ref().unwrap().LEIRnasm(vec![Register::RAX, Register::RBX, Register::RCX], f, program, build, &local_vars, stack_size, loc)?;
+                            let oreg2 = val.right.as_ref().unwrap().LEIRnasm(vec![Register::RAX, Register::RBX, Register::RCX], f, program, build, &local_vars, &bufs, stack_size, loc)?;
                             writeln!(f, "   cmp {}, {}",tmp.to_string(),oreg2[0].to_byte_size(tmp.size()).to_string())?;
                             writeln!(f, "   jge .WHILE_SCOPE_END_{}",inst_count)?;
                         },
                         Op::LTEQ => {
-                            let oreg1 = val.left.as_ref().unwrap().LEIRnasm(vec![Register::RAX, Register::RBX, Register::RCX], f, program, build, &local_vars, stack_size, loc)?;
+                            let oreg1 = val.left.as_ref().unwrap().LEIRnasm(vec![Register::RAX, Register::RBX, Register::RCX], f, program, build, &local_vars, &bufs, stack_size, loc)?;
                             let tmp = Register::RSI.to_byte_size(oreg1[0].size());
                             writeln!(f, "   mov {}, {}",tmp.to_string(),oreg1[0].to_string())?;
-                            let oreg2 = val.right.as_ref().unwrap().LEIRnasm(vec![Register::RAX, Register::RBX, Register::RCX], f, program, build, &local_vars, stack_size, loc)?;
+                            let oreg2 = val.right.as_ref().unwrap().LEIRnasm(vec![Register::RAX, Register::RBX, Register::RCX], f, program, build, &local_vars, &bufs, stack_size, loc)?;
                             writeln!(f, "   cmp {}, {}",tmp.to_string(),oreg2[0].to_byte_size(tmp.size()).to_string())?;
                             writeln!(f, "   jg .WHILE_SCOPE_END_{}",inst_count)?;
                         },
@@ -5150,6 +5278,9 @@ fn to_nasm_x86_64(build: &mut BuildProgram, program: &CmdProgram) -> io::Result<
             for (_,local) in function.locals.iter() {
                 argsize += local.get_size(program);
             }
+            for buf in function.buffers.iter() {
+                argsize += buf.size*buf.typ.get_size(program);
+            }
             argsize += argsize%8;
             writeln!(&mut f, "   add rsp, {}",argsize)?;
             writeln!(&mut f, "   xor rax,rax")?;
@@ -5244,6 +5375,12 @@ impl TCScopeType<'_> {
             }
         }
     }
+    fn get_buffers<'a>(&'a self, build: &'a BuildProgram) -> &Vec<BuildBuf> {
+        match self {
+            TCScopeType::FUNCTION(name) => &build.functions.get(name).unwrap().buffers,
+            TCScopeType::NORMAL(s) => &s.buffers,
+        }
+    }
 }
 fn type_check_scope(build: &BuildProgram, program: &CmdProgram, scope: TCScopeType, currentLocals: &mut Vec<Locals>) -> bool {
     if let Some(locals) = scope.get_locals(build) {
@@ -5258,11 +5395,14 @@ fn type_check_scope(build: &BuildProgram, program: &CmdProgram, scope: TCScopeTy
             Instruction::MOV(_, _)           => {},
             Instruction::CALLRAW(name,contract)        => {
                 let mut externContract = build.get_contract_of_symbol(name).unwrap_or(AnyContract { InputPool: ContractInputPool::new(), Outputs: vec![] }).clone();//build.externals.get(name).unwrap().contract.as_ref().unwrap_or(&AnyContract { InputPool: vec![], Outputs: vec![] }).clone();
+                
+
                 externContract.InputPool.reverse();
                 typ_assert!(loc, externContract.InputPool.len() == contract.len() || externContract.InputPool.is_dynamic, "Error: Expected: {} amount of arguments but found {}",externContract.InputPool.len(), contract.len());
                 for arg in contract {
                     match arg {
                         OfP::LOCALVAR(name) => {
+                            
                             let etyp = if externContract.InputPool.len() > 0 {
                                 Some(typ_expect!(loc, externContract.InputPool.pop(), "Error: Additional arguments provided for external that doesn't take in any more arguments!"))
                             } else if externContract.InputPool.is_dynamic {
@@ -5294,6 +5434,7 @@ fn type_check_scope(build: &BuildProgram, program: &CmdProgram, scope: TCScopeTy
                             }
                         },
                         OfP::RESULT(_, _) => todo!(),
+                        _ => todo!()
                     }
                 }
             },
@@ -5325,13 +5466,13 @@ fn type_check_scope(build: &BuildProgram, program: &CmdProgram, scope: TCScopeTy
             Instruction::CALL(funcn, args)             => {
                 let function = typ_expect!(loc, build.functions.get(funcn), "Error: unknown function call to {}, Function may not exist!",funcn);
                 let mut functionIP = function.contract.Inputs.clone();
-
-                for arg in args {
+                println!("functionIP: {:?}\nargs: {:?}",functionIP,args);
+                for arg in args.iter().rev() {
                     match arg {
                         OfP::LOCALVAR(name) => {
                             let (_,etyp) = typ_expect!(loc, functionIP.pop_back(), "Error: Additional arguments provided for external that doesn't take in any more arguments!");
-
-                            let local =get_local(currentLocals, &name).unwrap();
+                            let local = get_local(currentLocals, &name).unwrap();
+                            println!("arg: {:?}\netyp: {:?}",local,etyp);
                             typ_assert!(loc,etyp.weak_eq(&local),"Error: Incompatible types for contract\nExpected: {}\nFound: ({}) {}",etyp.to_string(false),name,local.to_string(false));
                         },
                         OfP::REGISTER(_) => todo!("Registers are still yet unhandled!"),
@@ -5610,6 +5751,8 @@ fn main() {
     Intrinsics.insert(")".to_string(),IntrinsicType::CLOSEPAREN);
     Intrinsics.insert("{".to_string(),IntrinsicType::OPENCURLY);
     Intrinsics.insert("}".to_string(),IntrinsicType::CLOSECURLY);
+    Intrinsics.insert("[".to_string(),IntrinsicType::OPENSQUARE);
+    Intrinsics.insert("]".to_string(),IntrinsicType::CLOSESQUARE);
     Intrinsics.insert(":".to_string(),IntrinsicType::DOUBLE_COLIN);
     Intrinsics.insert(",".to_string(),IntrinsicType::COMA);
     Intrinsics.insert(";".to_string(),IntrinsicType::DOTCOMA);

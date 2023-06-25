@@ -13,7 +13,7 @@ func strcpy(dst: *char, src: *char, size: size_t) {
         i += 1;
     }
 }
-func strset(dst: *char, val: char, size: size_t) {
+func strset(dst: *char,  size: size_t, val: char) {
     let i: size_t = 0;
     while i < size {
         *(dst+i) = val;

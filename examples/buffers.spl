@@ -1,0 +1,8 @@
+include "../libs/strlib/strlib.spl"
+include "../libs/libc/stdio.spl"
+func main(){
+    let name: *char = [char, 500];
+    strset(name, 500, 0);
+    scanf("%s",name);
+    printf("Hello: %s\n",name);
+}
