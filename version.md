@@ -1,8 +1,13 @@
 **(Latest patch versions in github history and at the top of Change Log)**
 
-Newest Version: [0.13A](#013a)
+Newest Version: [0.15A](#015a)
 # Manual:
-  - [0.13A](#013a)
+  - [0.15A](#015a)
+  - [0.14A](#014a)
+  - [0.13.3A](#0133a)
+    - [0.13.2A](#0132a)
+    - [0.13.1A](#0131a)
+    - [0.13A](#013a)
   - [0.12.5A](#0125a) 
     - [0.12.4A](#0124a) 
     - [0.12.3A](#0123a) 
@@ -42,6 +47,12 @@ Newest Version: [0.13A](#013a)
   - [0.2A](#02a)
   - [0.1A](#01a)
 # Change Log
+ ## 0.15A
+   - Added mathlib.spl
+   - Changed expressions
+   - Fixed bugs to do with expressions
+ ## 0.14A
+   - Added local buffers
  ## 0.13.3A
    - Added @goto and @makelabel
    - Restructured internal local variable handling (now its not copying extensively the more scopes you have for compiling!)
