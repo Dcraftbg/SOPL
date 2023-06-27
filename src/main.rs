@@ -1227,54 +1227,105 @@ impl ExprTree {
                 
             },
             Op::REMAINDER => {
-                com_assert!(loc,regs[0].to_byte_size(8) == Register::RAX,"Error: Cannot do division with output register different from RAX");
-                let left = com_expect!(loc,self.left.as_ref(),"Error: Cannot evaluate Op '{}' without left parameter",Op::REMAINDER.to_string());
-                if left.is_ofp() {
-                    let leftregs1 = left.LEIRnasm(regs.clone(), f, program, build, local_vars, buffers, stack_size, loc)?;
-                    com_assert!(loc,leftregs1.len() == 1, "TODO: Handle multi-parameter loading for expressions!");
-                    let right = com_expect!(loc,self.right.as_ref(),"Error: Cannot evaluate Op '{}' without left parameter",Op::REMAINDER.to_string());
-                    let rightregs1 = right.LEIRnasm(regs[1..].to_vec(), f, program, build, local_vars, buffers, stack_size, loc)?;
-                    com_assert!(loc,rightregs1.len() == 1, "TODO: Handle multi-parameter loading for expressions!");
-                    writeln!(f, "   cqo")?;
-                    writeln!(f, "   idiv {}",rightregs1[0].to_string())?;
-                    o = vec![Register::RDX.to_byte_size(rightregs1[0].size())]
-                }
-                else {
-                    let right = com_expect!(loc,self.right.as_ref(),"Error: Cannot evaluate Op '{}' without left parameter",Op::REMAINDER.to_string());
-                    let rightregs1 = right.LEIRnasm(regs.to_vec(), f, program, build, local_vars, buffers, stack_size, loc)?;
-                    let leftregs1 = left.LEIRnasm(regs[1..].to_vec(), f, program, build, local_vars, buffers, stack_size, loc)?;
-                    com_assert!(loc,leftregs1.len() == 1, "TODO: Handle multi-parameter loading for expressions!");
-                    com_assert!(loc,rightregs1.len() == 1, "TODO: Handle multi-parameter loading for expressions!");
-                    writeln!(f, "   cqo")?;
-                    writeln!(f, "   idiv {}",rightregs1[0].to_string())?;
-                    o = vec![Register::RDX.to_byte_size(rightregs1[0].size())]
+                //TODO: Re-implement this
+                //com_assert!(loc,regs[0].to_byte_size(8) == Register::RDX,"Error: Cannot do division with output register different from RAX");
+                let left = com_expect!(loc,self.left.as_ref(),"Error: Cannot evaluate Op '{}' without left parameter",Op::DIV.to_string());
+                let right = com_expect!(loc,self.right.as_ref(),"Error: Cannot evaluate Op '{}' without left parameter",Op::DIV.to_string());
+                //if left.is_ofp() 
+                match right {
+                    Expression::expr(right_expr) => {
+                        let leftregs1 = left.LEIRnasm(regs.clone(), f, program, build, local_vars, buffers, stack_size, loc)?;
+                        com_assert!(loc,leftregs1.len() == 1, "TODO: Handle multi-parameter loading for expressions!");
+                        let rightregs1 = right_expr.eval_nasm(regs[1..].to_vec(), f, program, build, local_vars, buffers, stack_size, loc)?;
+                        com_assert!(loc,rightregs1.len() == 1, "TODO: Handle multi-parameter loading for expressions!");
+                        if leftregs1[0].to_byte_size(8) != Register::RDX {
+                            writeln!(f, "   mov {}, {}",Register::RDX.to_byte_size(leftregs1[0].size()),leftregs1[0])?;
+                        }
+                        writeln!(f,"   cqo")?;
+                        writeln!(f, "   idiv {}",rightregs1[0])?;
+                        o = vec![Register::RDX.to_byte_size(leftregs1[0].size())];
+                    }
+                    Expression::val(right_val) => {
+                        let left_oregs = left.LEIRnasm(regs.clone(), f, program, build, local_vars, buffers, stack_size, loc)?;
+                        com_assert!(loc,left_oregs.len() == 1, "TODO: Handle multi-parameter loading for expressions!");
+                        if left_oregs[0].to_byte_size(8) != Register::RDX {
+                            writeln!(f, "   mov {}, {}",Register::RDX.to_byte_size(left_oregs[0].size()),left_oregs[0])?;
+                        }
+                        match right_val {
+                            OfP::GLOBALVAR(v) => {
+                                writeln!(f,"   cqo")?;
+                                writeln!(f,"   idiv {} [_GLOBL_{}]",size_to_nasm_type(left_oregs[0].size()),v)?;
+                            }
+                            OfP::LOCALVAR(v) => {
+                                let ov = get_local_build(local_vars,v).unwrap();
+                                writeln!(f,"   cqo")?;
+                                if stack_size-ov.operand > 0 {
+                                    writeln!(f,"   idiv {} [rsp+{}]",size_to_nasm_type(ov.typ.get_size(program)),stack_size-ov.operand)?;
+                                }
+                                else {
+                                    writeln!(f,"   idiv {} [rsp]",size_to_nasm_type(ov.typ.get_size(program)))?;
+                                }
+                                
+                            }
+                            _ => {
+                                let right = right_val.LOIRGNasm(vec![regs[1].clone()], f, program, build, local_vars, buffers, stack_size, loc)?;
+                                writeln!(f,"   cqo")?;
+                                writeln!(f,"   idiv {}",right[0])?;
+                            }
+                        }
+                        o = vec![Register::RDX.to_byte_size(left_oregs[0].size())];
+                    }
                 }
 
             },
             Op::STAR   => {
                 if let Some(left) = self.left.as_ref() {
-                    com_assert!(loc,regs[0].to_byte_size(8) == Register::RAX,"Error: Cannot do division with output register different from RAX");
-                    if left.is_ofp() {
-                        let leftregs1 = left.LEIRnasm(regs.clone(), f, program, build, local_vars, buffers, stack_size, loc)?;
-                        com_assert!(loc,leftregs1.len() == 1, "TODO: Handle multi-parameter loading for expressions!");
-                        let right = com_expect!(loc,self.right.as_ref(),"Error: Cannot evaluate Op '{}' without left parameter",Op::STAR  .to_string());
-                        let rightregs1 = right.LEIRnasm(regs[1..].to_vec(), f, program, build, local_vars, buffers, stack_size, loc)?;
-                        com_assert!(loc,rightregs1.len() == 1, "TODO: Handle multi-parameter loading for expressions!");
-                        
-                        writeln!(f, "   cqo")?;
-                        writeln!(f, "   imul {}",rightregs1[0].to_string())?;
-                        o = leftregs1;
-                    }
-                    else {
-                        let right = com_expect!(loc,self.right.as_ref(),"Error: Cannot evaluate Op '{}' without left parameter",Op::STAR  .to_string());
-                        let rightregs1 = right.LEIRnasm(regs.to_vec(), f, program, build, local_vars, buffers, stack_size, loc)?;
-                        let leftregs1 = left.LEIRnasm(regs[1..].to_vec(), f, program, build, local_vars, buffers, stack_size, loc)?;
-                        com_assert!(loc,leftregs1.len() == 1, "TODO: Handle multi-parameter loading for expressions!");
-                        com_assert!(loc,rightregs1.len() == 1, "TODO: Handle multi-parameter loading for expressions!");
-                        
-                        writeln!(f, "   cqo")?;
-                        writeln!(f, "   imul {}",rightregs1[0].to_string())?;
-                        o = leftregs1;
+                    com_assert!(loc,regs[0].to_byte_size(8) == Register::RAX,"Error: Cannot do multiplication with output register different from RAX");
+                    let right = com_expect!(loc,self.right.as_ref(),"Error: Cannot evaluate Op '{}' without left parameter",Op::DIV.to_string());
+                    //if left.is_ofp() 
+                    match right {
+                        Expression::expr(right_expr) => {
+                            let leftregs1 = left.LEIRnasm(regs.clone(), f, program, build, local_vars, buffers, stack_size, loc)?;
+                            com_assert!(loc,leftregs1.len() == 1, "TODO: Handle multi-parameter loading for expressions!");
+                            let rightregs1 = right_expr.eval_nasm(regs[1..].to_vec(), f, program, build, local_vars, buffers, stack_size, loc)?;
+                            com_assert!(loc,rightregs1.len() == 1, "TODO: Handle multi-parameter loading for expressions!");
+                            if leftregs1[0].to_byte_size(8) != Register::RAX {
+                                writeln!(f, "   mov {}, {}",Register::RAX.to_byte_size(leftregs1[0].size()),leftregs1[0])?;
+                            }
+                            writeln!(f,"   cqo")?;
+                            writeln!(f, "   imul {}",rightregs1[0])?;
+                            o = vec![Register::RAX.to_byte_size(leftregs1[0].size())];
+                        }
+                        Expression::val(right_val) => {
+                            let left_oregs = left.LEIRnasm(regs.clone(), f, program, build, local_vars, buffers, stack_size, loc)?;
+                            com_assert!(loc,left_oregs.len() == 1, "TODO: Handle multi-parameter loading for expressions!");
+                            if left_oregs[0].to_byte_size(8) != Register::RAX {
+                                writeln!(f, "   mov {}, {}",Register::RAX.to_byte_size(left_oregs[0].size()),left_oregs[0])?;
+                            }
+                            match right_val {
+                                OfP::GLOBALVAR(v) => {
+                                    writeln!(f,"   cqo")?;
+                                    writeln!(f,"   imul {} [_GLOBL_{}]",size_to_nasm_type(left_oregs[0].size()),v)?;
+                                }
+                                OfP::LOCALVAR(v) => {
+                                    let ov = get_local_build(local_vars,v).unwrap();
+                                    writeln!(f,"   cqo")?;
+                                    if stack_size-ov.operand > 0 {
+                                        writeln!(f,"   imul {} [rsp+{}]",size_to_nasm_type(ov.typ.get_size(program)),stack_size-ov.operand)?;
+                                    }
+                                    else {
+                                        writeln!(f,"   imul {} [rsp]",size_to_nasm_type(ov.typ.get_size(program)))?;
+                                    }
+                                    
+                                }
+                                _ => {
+                                    let right = right_val.LOIRGNasm(vec![regs[1].clone()], f, program, build, local_vars, buffers, stack_size, loc)?;
+                                    writeln!(f,"   cqo")?;
+                                    writeln!(f,"   imul {}",right[0],)?;
+                                }
+                            }
+                            o = vec![Register::RAX.to_byte_size(left_oregs[0].size())];
+                        }
                     }
                 }
                 else {
