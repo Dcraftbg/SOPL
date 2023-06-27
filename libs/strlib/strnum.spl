@@ -1,0 +1,25 @@
+func strtoi(str: *char, size: size_t : int) {
+    let result: int = 0;
+    let max_chars: int = 12;
+    if max_chars > size {
+        max_chars = size;
+    }
+    let i: int = 0;
+    while i < max_chars {   
+        result = result*10;
+        let c: char = (*(str+i));
+        let d: int = c - 48;
+        result += d;
+        i += 1;
+    }
+    return result;
+}
+func itostr(i: int,dst: *char, size: size_t) {
+
+}
+//Testing
+include "../libc/stdio.spl"
+func main(){
+    let result: int = strtoi("1234",4);
+    printf("Result: %d\n",result);
+}

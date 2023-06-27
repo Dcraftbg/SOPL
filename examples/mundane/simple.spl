@@ -1,0 +1,8 @@
+include "../../libs/libc/stdio.spl"
+func main(){
+    {
+        let i: int = 0;
+        @goto("break")
+    }
+    @makelabel("break")
+}

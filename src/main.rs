@@ -862,90 +862,369 @@ impl ExprTree {
         match self.op {
             Op::NONE  => com_error!(loc,"Error: Cannot evaluate NONE operation!"),
             Op::PLUS  => {
-                let left = com_expect!(loc,self.left.as_ref(),"Error: Cannot evaluate Op '{}' without left parameter",Op::PLUS .to_string());
-                if left.is_ofp() {
-                    com_assert!(loc,regs.len() > 1, "TODO: Handle multi-parameter loading for expressions!");
-                    let right       = com_expect!(loc,self.right.as_ref(),"Error: Cannot evaluate Op '{}' without left parameter",Op::PLUS .to_string());
-                    
-                    let mut rightregs1= right.LEIRnasm(regs.to_vec(), f, program, build, local_vars, buffers, stack_size, loc)?;
-                    
-                    let mut leftregs1 = left.LEIRnasm(regs[1..].to_vec(), f, program, build, local_vars, buffers, stack_size, loc)?;
-                    com_assert!(loc,rightregs1.len() == 1, "TODO: Handle multi-parameter loading for expressions!");
-                    if leftregs1[0].size() > rightregs1[0].size() {
-                        rightregs1[0] = rightregs1[0].to_byte_size(leftregs1[0].size());
-                    }
-                    if leftregs1[0].size() < rightregs1[0].size() {
-                        leftregs1[0] = leftregs1[0].to_byte_size(leftregs1[0].size());
-                    }
-                    writeln!(f, "   add {}, {}",rightregs1[0].to_string(),leftregs1[0].to_string())?;
-                    o = rightregs1;
+                let left = com_expect!(loc,self.left.as_ref(),"Error: Cannot evaluate Op '{}' without left parameter",Op::PLUS.to_string());
+                let right       = com_expect!(loc,self.right.as_ref(),"Error: Cannot evaluate Op '{}' without left parameter",Op::PLUS.to_string());
+                
+                let res_right = right.result_of_c(program, build, local_vars, loc).unwrap();
+                let res_left = left.result_of_c(program, build, local_vars, loc).unwrap();
+
+                if res_right.get_size(program) > res_left.get_size(program) {
+                    writeln!(f, "   xor {}, {}",regs[1],regs[1])?;
                 }
-                else {
-                    
-                    
-                    let mut leftregs1 = left.LEIRnasm(regs.to_vec(), f, program, build, local_vars, buffers, stack_size, loc)?;
-                    com_assert!(loc,regs.len() > 1, "TODO: Handle multi-parameter loading for expressions!");
-                    
-                    let right       = com_expect!(loc,self.right.as_ref(),"Error: Cannot evaluate Op '{}' without left parameter",Op::PLUS.to_string());
-                    let mut rightregs1= right.LEIRnasm(regs[1..].to_vec(), f, program, build, local_vars, buffers, stack_size, loc)?;
-                    if leftregs1[0].size() > rightregs1[0].size() {
-                        rightregs1[0] = rightregs1[0].to_byte_size(leftregs1[0].size());
-                    }
-                    if leftregs1[0].size() < rightregs1[0].size() {
-                        leftregs1[0] = rightregs1[0].to_byte_size(leftregs1[0].size());
-                    }
-                    com_assert!(loc,rightregs1.len() == 1, "TODO: Handle multi-parameter loading for expressions!");
-                    writeln!(f, "   add {}, {}",leftregs1[0].to_string(),rightregs1[0].to_string())?;
-                    o = leftregs1;
+                else if res_right.get_size(program) < res_left.get_size(program) {
+                    writeln!(f, "   xor {}, {}",regs[0],regs[0])?;
                 }
+
+                match left {
+                    Expression::expr(left_expr) => {
+                        match right {
+                            Expression::expr(right_expr) => {
+                                let left_oregs = left_expr.eval_nasm(regs.clone(), f, program, build, local_vars, buffers, stack_size, loc)?;
+                                let right_oregs = right_expr.eval_nasm(regs[1..].to_vec(), f, program, build, local_vars, buffers, stack_size, loc)?;
+                                writeln!(f, "   add {}, {}",left_oregs[0],right_oregs[0])?;
+                                o = left_oregs;
+                            },
+                            Expression::val(right_val) => {
+                                match right_val {
+                                    OfP::CONST(v) => {
+                                        let left_oregs = left_expr.eval_nasm(regs.clone(), f, program, build, local_vars, buffers, stack_size, loc)?;
+                                        writeln!(f,"   add {}, {}",left_oregs[0],v.get_num_data())?;
+                                        o = left_oregs;
+                                    }
+                                    OfP::GLOBALVAR(v) => {
+                                        let left_oregs = left_expr.eval_nasm(regs.clone(), f, program, build, local_vars, buffers, stack_size, loc)?;
+                                        writeln!(f,"   add {}, [_GLOBL_{}]",left_oregs[0],v)?;
+                                        o = left_oregs
+                                    }
+                                    OfP::LOCALVAR(v) => {
+                                        let left_oregs = left_expr.eval_nasm(regs.to_vec(), f, program, build, local_vars, buffers, stack_size, loc)?;
+                                        let ov = get_local_build(local_vars,v).unwrap();
+                                        if stack_size-ov.operand > 0 {
+                                            writeln!(f,"   add {}, {} [rsp+{}]",left_oregs[0],size_to_nasm_type(ov.typ.get_size(program)),stack_size-ov.operand)?;
+                                        }
+                                        else {
+                                            writeln!(f,"   add {}, {} [rsp]",left_oregs[0],size_to_nasm_type(ov.typ.get_size(program)))?;
+                                        }
+                                        o = left_oregs
+                                    }
+                                    _ => {
+                                        let right = right_val.LOIRGNasm(vec![regs[0].clone()], f, program, build, local_vars, buffers, stack_size, loc)?;
+                                        let left_oregs = left_expr.eval_nasm(regs[1..].to_vec(), f, program, build, local_vars, buffers, stack_size, loc)?;
+                                        writeln!(f,"   add {}, {}",right[0],left_oregs[0])?;
+                                        o = right;
+                                    }
+                                }
+                            },
+                        }
+                    }
+                    Expression::val(left_val) => {
+                        match right {
+                            Expression::expr(right_expr) => {
+                                match left_val {
+                                    OfP::CONST(v) => {
+                                        let right_oregs = right_expr.eval_nasm(regs.clone(), f, program, build, local_vars, buffers, stack_size, loc)?;
+                                        writeln!(f,"   add {}, {}",right_oregs[0],v.get_num_data())?;
+                                        o = right_oregs;
+                                    }
+                                    OfP::GLOBALVAR(v) => {
+                                        let right_oregs = right_expr.eval_nasm(regs.clone(), f, program, build, local_vars, buffers, stack_size, loc)?;
+                                        writeln!(f,"   add {}, [_GLOBL_{}]",right_oregs[0],v)?;
+                                        o = right_oregs
+                                    }
+                                    OfP::LOCALVAR(v) => {
+                                        let right_oregs = right_expr.eval_nasm(regs.to_vec(), f, program, build, local_vars, buffers, stack_size, loc)?;
+                                        let ov = get_local_build(local_vars,v).unwrap();
+                                        if stack_size-ov.operand > 0 {
+                                            writeln!(f,"   add {}, {} [rsp+{}]",right_oregs[0],size_to_nasm_type(ov.typ.get_size(program)),stack_size-ov.operand)?;
+                                        }
+                                        else {
+                                            writeln!(f,"   add {}, {} [rsp]",right_oregs[0],size_to_nasm_type(ov.typ.get_size(program)))?;
+                                        }
+                                        o = right_oregs
+                                    }
+                                    _ => {
+                                        let right = left_val.LOIRGNasm(vec![regs[0].clone()], f, program, build, local_vars, buffers, stack_size, loc)?;
+                                        let right_oregs = right_expr.eval_nasm(regs[1..].to_vec(), f, program, build, local_vars, buffers, stack_size, loc)?;
+                                        writeln!(f,"   add {}, {}",right[0],right_oregs[0])?;
+                                        o = right;
+                                    }
+                                }
+                            },
+                            Expression::val(right_val) => {
+                                match right_val {
+                                    OfP::CONST(v) => {
+                                        let left_oregs = left_val.LOIRGNasm(regs, f, program, build, local_vars, buffers, stack_size, loc)?;
+                                        writeln!(f,"   add {}, {}",left_oregs[0],v.get_num_data())?;
+                                        o = left_oregs;
+                                    }
+                                    OfP::GLOBALVAR(v) => {
+                                        let left_oregs = left_val.LOIRGNasm(regs, f, program, build, local_vars, buffers, stack_size, loc)?;
+                                        writeln!(f,"   add {}, [_GLOBL_{}]",left_oregs[0],v)?;
+                                        o = left_oregs
+                                    }
+                                    OfP::LOCALVAR(v) => {
+                                        let left_oregs = left_val.LOIRGNasm(regs, f, program, build, local_vars, buffers, stack_size, loc)?;
+                                        let ov = get_local_build(local_vars,v).unwrap();
+                                        if stack_size-ov.operand > 0 {
+                                            writeln!(f,"   add {}, {} [rsp+{}]",left_oregs[0],size_to_nasm_type(ov.typ.get_size(program)),stack_size-ov.operand)?;
+                                        }
+                                        else {
+                                            writeln!(f,"   add {}, {} [rsp]",left_oregs[0],size_to_nasm_type(ov.typ.get_size(program)))?;
+                                        }
+                                        o = left_oregs
+                                    }
+                                    _ => {
+                                        let right = right_val.LOIRGNasm(vec![regs[0].clone()], f, program, build, local_vars, buffers, stack_size, loc)?;
+                                        let left_oregs = left_val.LOIRGNasm(regs, f, program, build, local_vars, buffers, stack_size, loc)?;
+                                        writeln!(f,"   add {}, {}",right[0],left_oregs[0])?;
+                                        o = right;
+                                    }
+                                }
+                            },
+                        }
+                    }
+                }
+
+                // if left.is_ofp() {
+                //     com_assert!(loc,regs.len() > 1, "TODO: Handle multi-parameter loading for expressions!");
+
+                //     let res_right = right.result_of_c(program, build, local_vars, loc).unwrap();
+                //     let res_left = left.result_of_c(program, build, local_vars, loc).unwrap();
+
+                //     if res_right.get_size(program) > res_left.get_size(program) {
+                //         writeln!(f, "   xor {}, {}",regs[1],regs[1])?;
+                //     }
+                //     else if res_right.get_size(program) < res_left.get_size(program) {
+                //         writeln!(f, "   xor {}, {}",regs[0],regs[0])?;
+                //     }
+
+                //     let mut rightregs1= right.LEIRnasm(regs.to_vec(), f, program, build, local_vars, buffers, stack_size, loc)?;
+                    
+                //     let mut leftregs1 = left.LEIRnasm(regs[1..].to_vec(), f, program, build, local_vars, buffers, stack_size, loc)?;
+                //     com_assert!(loc,rightregs1.len() == 1, "TODO: Handle multi-parameter loading for expressions!");
+                //     if leftregs1[0].size() > rightregs1[0].size() {
+                //         rightregs1[0] = rightregs1[0].to_byte_size(leftregs1[0].size());
+                //     }
+                //     if leftregs1[0].size() < rightregs1[0].size() {
+                //         leftregs1[0] = leftregs1[0].to_byte_size(rightregs1[0].size());
+                //     }
+                //     writeln!(f, "   add {}, {}",leftregs1[0].to_string(),rightregs1[0].to_string())?;
+                //     o = leftregs1;
+                // }
+                // else {
+                //     let right       = com_expect!(loc,self.right.as_ref(),"Error: Cannot evaluate Op '{}' without left parameter",Op::PLUS.to_string());
+                //     let res_right = right.result_of_c(program, build, local_vars, loc).unwrap();
+                //     let res_left = left.result_of_c(program, build, local_vars, loc).unwrap();
+
+                //     if res_right.get_size(program) > res_left.get_size(program) {
+                //         writeln!(f, "   xor {}, {}",regs[1],regs[1])?;
+                //     }
+                //     else if res_right.get_size(program) < res_left.get_size(program) {
+                //         writeln!(f, "   xor {}, {}",regs[0],regs[0])?;
+                //     }
+                //     let mut leftregs1 = left.LEIRnasm(regs.to_vec(), f, program, build, local_vars, buffers, stack_size, loc)?;
+                //     com_assert!(loc,regs.len() > 1, "TODO: Handle multi-parameter loading for expressions!");
+                    
+                //     let mut rightregs1= right.LEIRnasm(regs[1..].to_vec(), f, program, build, local_vars, buffers, stack_size, loc)?;
+                //     if leftregs1[0].size() > rightregs1[0].size() {
+                //         rightregs1[0] = rightregs1[0].to_byte_size(leftregs1[0].size());
+                //     }
+                //     if leftregs1[0].size() < rightregs1[0].size() {
+                //         leftregs1[0] = leftregs1[0].to_byte_size(rightregs1[0].size());
+                //     }
+                //     com_assert!(loc,rightregs1.len() == 1, "TODO: Handle multi-parameter loading for expressions!");
+                //     writeln!(f, "   add {}, {}",leftregs1[0].to_string(),rightregs1[0].to_string())?;
+                //     o = leftregs1;
+                // }
             },
             Op::MINUS => {
                 let left = com_expect!(loc,self.left.as_ref(),"Error: Cannot evaluate Op '{}' without left parameter",Op::MINUS.to_string());
-                if left.is_ofp() {
-                    com_assert!(loc,regs.len() > 1, "TODO: Handle multi-parameter loading for expressions!");
-                    let right       = com_expect!(loc,self.right.as_ref(),"Error: Cannot evaluate Op '{}' without left parameter",Op::MINUS.to_string());
-                    let rightregs1= right.LEIRnasm(regs.to_vec(), f, program, build, local_vars, buffers, stack_size, loc)?;
-                    let leftregs1 = left.LEIRnasm(regs[1..].to_vec(), f, program, build, local_vars, buffers, stack_size, loc)?;
-                    com_assert!(loc,rightregs1.len() == 1, "TODO: Handle multi-parameter loading for expressions!");
-                    writeln!(f, "   sub {}, {}",leftregs1[0].to_string(),rightregs1[0].to_string())?;
-                    o = leftregs1;
+                let right       = com_expect!(loc,self.right.as_ref(),"Error: Cannot evaluate Op '{}' without left parameter",Op::MINUS.to_string());
+                
+                let res_right = right.result_of_c(program, build, local_vars, loc).unwrap();
+                let res_left = left.result_of_c(program, build, local_vars, loc).unwrap();
+
+                if res_right.get_size(program) > res_left.get_size(program) {
+                    writeln!(f, "   xor {}, {}",regs[1],regs[1])?;
                 }
-                else {
-                    let leftregs1 = left.LEIRnasm(regs.to_vec(), f, program, build, local_vars, buffers, stack_size, loc)?;
-                    com_assert!(loc,regs.len() > 1, "TODO: Handle multi-parameter loading for expressions!");
-                    let right       = com_expect!(loc,self.right.as_ref(),"Error: Cannot evaluate Op '{}' without left parameter",Op::MINUS.to_string());
-                    let rightregs1= right.LEIRnasm(regs[1..].to_vec(), f, program, build, local_vars, buffers, stack_size, loc)?;
-                    com_assert!(loc,rightregs1.len() == 1, "TODO: Handle multi-parameter loading for expressions!");
-                    writeln!(f, "   sub {}, {}",leftregs1[0].to_string(),rightregs1[0].to_string())?;
-                    o = leftregs1;
+                else if res_right.get_size(program) < res_left.get_size(program) {
+                    writeln!(f, "   xor {}, {}",regs[0],regs[0])?;
+                }
+
+                match left {
+                    Expression::expr(left_expr) => {
+                        match right {
+                            Expression::expr(right_expr) => {
+                                let left_oregs = left_expr.eval_nasm(regs.clone(), f, program, build, local_vars, buffers, stack_size, loc)?;
+                                let right_oregs = right_expr.eval_nasm(regs[1..].to_vec(), f, program, build, local_vars, buffers, stack_size, loc)?;
+                                writeln!(f, "   sub {}, {}",left_oregs[0],right_oregs[0])?;
+                                o = left_oregs;
+                            },
+                            Expression::val(right_val) => {
+                                match right_val {
+                                    OfP::CONST(v) => {
+                                        let left_oregs = left_expr.eval_nasm(regs.clone(), f, program, build, local_vars, buffers, stack_size, loc)?;
+                                        writeln!(f,"   sub {}, {}",left_oregs[0],v.get_num_data())?;
+                                        o = left_oregs;
+                                    }
+                                    OfP::GLOBALVAR(v) => {
+                                        let left_oregs = left_expr.eval_nasm(regs.clone(), f, program, build, local_vars, buffers, stack_size, loc)?;
+                                        writeln!(f,"   sub {}, [_GLOBL_{}]",left_oregs[0],v)?;
+                                        o = left_oregs
+                                    }
+                                    OfP::LOCALVAR(v) => {
+                                        let left_oregs = left_expr.eval_nasm(regs.to_vec(), f, program, build, local_vars, buffers, stack_size, loc)?;
+                                        let ov = get_local_build(local_vars,v).unwrap();
+                                        if stack_size-ov.operand > 0 {
+                                            writeln!(f,"   sub {}, {} [rsp+{}]",left_oregs[0],size_to_nasm_type(ov.typ.get_size(program)),stack_size-ov.operand)?;
+                                        }
+                                        else {
+                                            writeln!(f,"   sub {}, {} [rsp]",left_oregs[0],size_to_nasm_type(ov.typ.get_size(program)))?;
+                                        }
+                                        o = left_oregs
+                                    }
+                                    _ => {
+                                        let right = right_val.LOIRGNasm(vec![regs[0].clone()], f, program, build, local_vars, buffers, stack_size, loc)?;
+                                        let left_oregs = left_expr.eval_nasm(regs[1..].to_vec(), f, program, build, local_vars, buffers, stack_size, loc)?;
+                                        writeln!(f,"   sub {}, {}",right[0],left_oregs[0])?;
+                                        o = right;
+                                    }
+                                }
+                            },
+                        }
+                    }
+                    Expression::val(left_val) => {
+                        match right {
+                            Expression::expr(right_expr) => {
+                                match left_val {
+                                    OfP::CONST(v) => {
+                                        let right_oregs = right_expr.eval_nasm(regs.clone(), f, program, build, local_vars, buffers, stack_size, loc)?;
+                                        writeln!(f,"   sub {}, {}",right_oregs[0],v.get_num_data())?;
+                                        o = right_oregs;
+                                    }
+                                    OfP::GLOBALVAR(v) => {
+                                        let right_oregs = right_expr.eval_nasm(regs.clone(), f, program, build, local_vars, buffers, stack_size, loc)?;
+                                        writeln!(f,"   sub {}, [_GLOBL_{}]",right_oregs[0],v)?;
+                                        o = right_oregs
+                                    }
+                                    OfP::LOCALVAR(v) => {
+                                        let right_oregs = right_expr.eval_nasm(regs.to_vec(), f, program, build, local_vars, buffers, stack_size, loc)?;
+                                        let ov = get_local_build(local_vars,v).unwrap();
+                                        if stack_size-ov.operand > 0 {
+                                            writeln!(f,"   sub {}, {} [rsp+{}]",right_oregs[0],size_to_nasm_type(ov.typ.get_size(program)),stack_size-ov.operand)?;
+                                        }
+                                        else {
+                                            writeln!(f,"   sub {}, {} [rsp]",right_oregs[0],size_to_nasm_type(ov.typ.get_size(program)))?;
+                                        }
+                                        o = right_oregs
+                                    }
+                                    _ => {
+                                        let right = left_val.LOIRGNasm(vec![regs[0].clone()], f, program, build, local_vars, buffers, stack_size, loc)?;
+                                        let right_oregs = right_expr.eval_nasm(regs[1..].to_vec(), f, program, build, local_vars, buffers, stack_size, loc)?;
+                                        writeln!(f,"   sub {}, {}",right[0],right_oregs[0])?;
+                                        o = right;
+                                    }
+                                }
+                            },
+                            Expression::val(right_val) => {
+                                match right_val {
+                                    OfP::CONST(v) => {
+                                        let left_oregs = left_val.LOIRGNasm(regs, f, program, build, local_vars, buffers, stack_size, loc)?;
+                                        writeln!(f,"   sub {}, {}",left_oregs[0],v.get_num_data())?;
+                                        o = left_oregs;
+                                    }
+                                    OfP::GLOBALVAR(v) => {
+                                        let left_oregs = left_val.LOIRGNasm(regs, f, program, build, local_vars, buffers, stack_size, loc)?;
+                                        writeln!(f,"   sub {}, [_GLOBL_{}]",left_oregs[0],v)?;
+                                        o = left_oregs
+                                    }
+                                    OfP::LOCALVAR(v) => {
+                                        let left_oregs = left_val.LOIRGNasm(regs, f, program, build, local_vars, buffers, stack_size, loc)?;
+                                        let ov = get_local_build(local_vars,v).unwrap();
+                                        if stack_size-ov.operand > 0 {
+                                            writeln!(f,"   sub {}, {} [rsp+{}]",left_oregs[0],size_to_nasm_type(ov.typ.get_size(program)),stack_size-ov.operand)?;
+                                        }
+                                        else {
+                                            writeln!(f,"   sub {}, {} [rsp]",left_oregs[0],size_to_nasm_type(ov.typ.get_size(program)))?;
+                                        }
+                                        o = left_oregs
+                                    }
+                                    _ => {
+                                        let right = right_val.LOIRGNasm(vec![regs[0].clone()], f, program, build, local_vars, buffers, stack_size, loc)?;
+                                        let left_oregs = left_val.LOIRGNasm(regs, f, program, build, local_vars, buffers, stack_size, loc)?;
+                                        writeln!(f,"   sub {}, {}",right[0],left_oregs[0])?;
+                                        o = right;
+                                    }
+                                }
+                            },
+                        }
+                    }
                 }
 
             },
             Op::DIV   => {
                 com_assert!(loc,regs[0].to_byte_size(8) == Register::RAX,"Error: Cannot do division with output register different from RAX");
                 let left = com_expect!(loc,self.left.as_ref(),"Error: Cannot evaluate Op '{}' without left parameter",Op::DIV.to_string());
-                if left.is_ofp() {
-                    let leftregs1 = left.LEIRnasm(regs.clone(), f, program, build, local_vars, buffers, stack_size, loc)?;
-                    com_assert!(loc,leftregs1.len() == 1, "TODO: Handle multi-parameter loading for expressions!");
-                    let right = com_expect!(loc,self.right.as_ref(),"Error: Cannot evaluate Op '{}' without left parameter",Op::DIV.to_string());
-                    let rightregs1 = right.LEIRnasm(regs[1..].to_vec(), f, program, build, local_vars, buffers, stack_size, loc)?;
-                    com_assert!(loc,rightregs1.len() == 1, "TODO: Handle multi-parameter loading for expressions!");
-                    
-                    writeln!(f, "   cqo")?;
-                    writeln!(f, "   idiv {}",rightregs1[0].to_string())?;
-                    o = leftregs1;
+                let right = com_expect!(loc,self.right.as_ref(),"Error: Cannot evaluate Op '{}' without left parameter",Op::DIV.to_string());
+                //if left.is_ofp() 
+                match right {
+                    Expression::expr(right_expr) => {
+                        let leftregs1 = left.LEIRnasm(regs.clone(), f, program, build, local_vars, buffers, stack_size, loc)?;
+                        com_assert!(loc,leftregs1.len() == 1, "TODO: Handle multi-parameter loading for expressions!");
+                        let rightregs1 = right_expr.eval_nasm(regs[1..].to_vec(), f, program, build, local_vars, buffers, stack_size, loc)?;
+                        com_assert!(loc,rightregs1.len() == 1, "TODO: Handle multi-parameter loading for expressions!");
+                        if leftregs1[0].to_byte_size(8) != Register::RAX {
+                            writeln!(f, "   mov {}, {}",Register::RAX.to_byte_size(leftregs1[0].size()),leftregs1[0])?;
+                        }
+                        writeln!(f,"   cqo")?;
+                        writeln!(f, "   idiv {}",rightregs1[0])?;
+                        o = vec![Register::RAX.to_byte_size(leftregs1[0].size())];
+                    }
+                    Expression::val(right_val) => {
+                        let left_oregs = left.LEIRnasm(regs.clone(), f, program, build, local_vars, buffers, stack_size, loc)?;
+                        com_assert!(loc,left_oregs.len() == 1, "TODO: Handle multi-parameter loading for expressions!");
+                        if left_oregs[0].to_byte_size(8) != Register::RAX {
+                            writeln!(f, "   mov {}, {}",Register::RAX.to_byte_size(left_oregs[0].size()),left_oregs[0])?;
+                        }
+                        match right_val {
+                            OfP::GLOBALVAR(v) => {
+                                writeln!(f,"   cqo")?;
+                                writeln!(f,"   idiv {} [_GLOBL_{}]",size_to_nasm_type(left_oregs[0].size()),v)?;
+                            }
+                            OfP::LOCALVAR(v) => {
+                                let ov = get_local_build(local_vars,v).unwrap();
+                                writeln!(f,"   cqo")?;
+                                if stack_size-ov.operand > 0 {
+                                    writeln!(f,"   idiv {} [rsp+{}]",size_to_nasm_type(ov.typ.get_size(program)),stack_size-ov.operand)?;
+                                }
+                                else {
+                                    writeln!(f,"   idiv {} [rsp]",size_to_nasm_type(ov.typ.get_size(program)))?;
+                                }
+                                
+                            }
+                            _ => {
+                                let right = right_val.LOIRGNasm(vec![regs[1].clone()], f, program, build, local_vars, buffers, stack_size, loc)?;
+                                writeln!(f,"   cqo")?;
+                                writeln!(f,"   idiv {}",right[0],)?;
+                            }
+                        }
+                        o = vec![Register::RAX.to_byte_size(left_oregs[0].size())];
+                    }
                 }
-                else {
-                    let right = com_expect!(loc,self.right.as_ref(),"Error: Cannot evaluate Op '{}' without left parameter",Op::DIV.to_string());
-                    let rightregs1 = right.LEIRnasm(regs.to_vec(), f, program, build, local_vars, buffers, stack_size, loc)?;
-                    let leftregs1 = left.LEIRnasm(regs[1..].to_vec(), f, program, build, local_vars, buffers, stack_size, loc)?;
-                    com_assert!(loc,leftregs1.len() == 1, "TODO: Handle multi-parameter loading for expressions!");
-                    com_assert!(loc,rightregs1.len() == 1, "TODO: Handle multi-parameter loading for expressions!");
-                    
-                    writeln!(f, "   cqo")?;
-                    writeln!(f, "   idiv {}",rightregs1[0].to_string())?;
-                    o = leftregs1;
-                }
+                // {
+                //     let leftregs1 = left.LEIRnasm(regs.clone(), f, program, build, local_vars, buffers, stack_size, loc)?;
+                //     com_assert!(loc,leftregs1.len() == 1, "TODO: Handle multi-parameter loading for expressions!");
+                //     let rightregs1 = right.LEIRnasm(regs[1..].to_vec(), f, program, build, local_vars, buffers, stack_size, loc)?;
+                //     com_assert!(loc,rightregs1.len() == 1, "TODO: Handle multi-parameter loading for expressions!");
+                //     if leftregs1[0].to_byte_size(8) != Register::RAX {
+                //         writeln!(f, "   mov {}, {}",Register::RAX.to_byte_size(leftregs1[0].size()),leftregs1[0])?;
+                //     }
+
+                //     writeln!(f, "   cqo")?;
+                //     writeln!(f, "   idiv {}",rightregs1[0].to_string())?;
+                //     o = vec![Register::RAX.to_byte_size(leftregs1[0].size())];
+                // }
+                
             },
             Op::REMAINDER => {
                 com_assert!(loc,regs[0].to_byte_size(8) == Register::RAX,"Error: Cannot do division with output register different from RAX");
@@ -1106,7 +1385,6 @@ impl ExprTree {
             },
 
         }
-        
         Ok(o)
         //todo!("ERROR: this should stop here")
     }
@@ -1232,9 +1510,18 @@ fn tokens_to_expression(body: &[Token],build: &mut BuildProgram, program: &CmdPr
             }
             else if *op == Op::STAR {//this means its a deref
             }
-
+            else if currentETree.left.is_none() && currentETree.op == Op::STAR {
+                //println!("currentETree before: {:?}",currentETree);
+                let mut tmp_eTree = ExprTree::new();
+                tmp_eTree.left = Some(Expression::expr(Box::new(currentETree)));
+                tmp_eTree.op = op.clone();
+                //currentETree = tmp_eTree;
+                todo!("{}: pls just use a temporary value here! this shit is absolutely broken rn",token.loc_display());
+                //println!("currentETree after: {:?}",currentETree);
+            }
             else {
-                par_assert!(token, currentETree.left.is_some(), "Error: Cannot have an Operator different from NOT without a left side! Found op: {}",op.to_string());
+                //println!("currentETree: {:?}",currentETree);
+                par_assert!(token, currentETree.left.is_some(), "Error: Cannot have an Operator different from NOT or STAR without a left side! Found op: {}",op.to_string());
             }
             currentETree.op = op.clone();
             let mut opo = &Op::NONE;
@@ -1271,7 +1558,6 @@ fn tokens_to_expression(body: &[Token],build: &mut BuildProgram, program: &CmdPr
                     while bracketcount > org_count {
                         i2 += 1;
                         if let Some(tok) = body.get(i2) {
-                            
                             match tok.typ {
                                 TokenType::IntrinsicType(it) => {
                                     match it {
@@ -1302,6 +1588,7 @@ fn tokens_to_expression(body: &[Token],build: &mut BuildProgram, program: &CmdPr
                 currentETree.left = Some(buf);
                 currentETree.op = opo.to_owned();
             }
+            //println!("currentETree after everything: {:?}",currentETree);
             i = i2
         }
         else if let TokenType::WordType(f) = &body[0].typ {
@@ -1358,10 +1645,12 @@ fn tokens_to_expression(body: &[Token],build: &mut BuildProgram, program: &CmdPr
                         i += 1;
                     }
                     let expr = tokens_to_expression(&body[index_from..i-1], build, program, locals,buffers);
-                    if currentETree.left.is_none()  && currentETree.right.is_none() && currentETree.op == Op::NONE && expr.is_expr(){
-                        currentETree = *(*expr.unwrap_expr()).clone();
-                    }
-                    else if currentETree.left.is_none() {
+                    
+                    // if currentETree.left.is_none()  && currentETree.right.is_none() && currentETree.op == Op::NONE && expr.is_expr(){
+                    //     currentETree = *(*expr.unwrap_expr()).clone();
+                    // }
+                    //else
+                    if currentETree.left.is_none() && currentETree.op == Op::NONE{
                         currentETree.left = Some(expr);
                     }
                     else if currentETree.right.is_none() && currentETree.op != Op::NONE {
@@ -1378,7 +1667,9 @@ fn tokens_to_expression(body: &[Token],build: &mut BuildProgram, program: &CmdPr
         else {
             par_error!(token, "Error: unknown token type in expression: {}",token.typ.to_string(false))
         }
-
+    }
+    if currentETree.right.is_none() && currentETree.op == Op::NONE && currentETree.left.is_some() {
+        return currentETree.left.unwrap()
     }
     Expression::expr(Box::new(currentETree))
 }
@@ -4830,6 +5121,7 @@ fn nasm_x86_64_prep_args(program: &CmdProgram, build: &BuildProgram, f: &mut Fil
             shadow_space = ops.shadow_space;
         }
     }
+    stack_size += stack_size%8;
     if stack_size-org_stack_size+shadow_space > 0 {
         writeln!(f, "   sub rsp, {}",stack_size-org_stack_size+shadow_space)?;
     }
@@ -4901,6 +5193,7 @@ fn get_local_build<'a>(currentLocals: &'a Vec<HashMap<String, LocalVariable>>, n
 }
 
 fn nasm_x86_64_handle_scope(f: &mut File, build: &BuildProgram, program: &CmdProgram, scope: TCScopeType, local_vars: &mut Vec<HashMap<String, LocalVariable>>, mut stack_size: usize, func_stack_begin: usize, inst_count: &mut usize) -> io::Result<()> {
+    //println!("Gotten stack_size: {} ",stack_size);
     *inst_count += 1;
     let expect_loc_t = LinkedHashMap::new();
     let contract_loc_t = FunctionContract { Inputs: LinkedHashMap::new(), Outputs: Vec::new()};
@@ -4912,6 +5205,10 @@ fn nasm_x86_64_handle_scope(f: &mut File, build: &BuildProgram, program: &CmdPro
         let _ = nasm_x86_64_load_args(f, &scope, build, program)?;
     }
     for (name, val) in expect_locals.iter() {
+        if stack_size%8+val.get_size(program)>8 {
+           // println!("Adding padding...");
+            stack_size+=8-stack_size%8;
+        }
         stack_size += val.get_size(program);
         let res = local_vars.len()-1;
         local_vars[res].insert(name.clone(), LocalVariable { typ: val.clone(), operand: stack_size });
@@ -4922,11 +5219,14 @@ fn nasm_x86_64_handle_scope(f: &mut File, build: &BuildProgram, program: &CmdPro
         stack_size += buf.size*buf.typ.get_size(program);
         buf.offset = stack_size;
     }
+    if stack_size%8 > 0 {
+        stack_size+=8-stack_size%8;
+    }
     
+    //println!("stack_size after: {}",stack_size);
+    //println!("stack_size%8: {}",stack_size%8);
     let dif = stack_size-stack_size_org;
-    let additional = dif%8;
-    let dif = dif + additional;
-    stack_size+=additional;
+    
     if dif > 0 {
         writeln!(f, "   sub rsp, {}",dif)?;
     }
@@ -5133,7 +5433,7 @@ fn nasm_x86_64_handle_scope(f: &mut File, build: &BuildProgram, program: &CmdPro
                             if sp_taken-stack_size+shadow_space > 0 {
                                 writeln!(f, "   add rsp, {}",sp_taken-stack_size+shadow_space)?
                             }
-                            writeln!(f, "   cmp {}, 0",Register::RAX.to_string())?;
+                            writeln!(f, "   cmp {}, 0",Register::AL.to_string())?;
                         },
                         _ => todo!()
                     }
@@ -5251,7 +5551,7 @@ fn nasm_x86_64_handle_scope(f: &mut File, build: &BuildProgram, program: &CmdPro
                             if sp_taken-stack_size+shadow_space > 0 {
                                 writeln!(f, "   add rsp, {}",sp_taken-stack_size+shadow_space)?
                             }
-                            writeln!(f, "   cmp {}, 0",Register::RAX.to_string())?;
+                            writeln!(f, "   cmp {}, 0",Register::AL.to_string())?;
                         },
                         _ => todo!()
                     }
@@ -5340,9 +5640,16 @@ fn nasm_x86_64_handle_scope(f: &mut File, build: &BuildProgram, program: &CmdPro
             Instruction::GOTO(lname, s) => {
                 let mut total_drop: usize = 0;
                 for vars in &local_vars[s.to_owned()..] {
+                    //println!("Passing by vars: {:?}",vars);
                     for v in vars.values() {
+                        if total_drop%8+v.typ.get_size(program) > 8 {
+                            total_drop+=8-total_drop%8;
+                        }
                         total_drop += v.typ.get_size(program);
                     }
+                }
+                if total_drop%8 > 0 {
+                    total_drop += 8-total_drop%8;
                 }
                 if total_drop > 0 {
                     writeln!(f, "   add rsp, {}",total_drop)?;
@@ -5497,13 +5804,20 @@ fn to_nasm_x86_64(build: &mut BuildProgram, program: &CmdProgram) -> io::Result<
         if function_name == "main" {
             let mut argsize: usize = 0;
             for (_,local) in function.locals.iter() {
+                if argsize%8+local.get_size(program) > 8 {
+                    argsize += 8-argsize%8;
+                }
                 argsize += local.get_size(program);
             }
             for buf in function.buffers.iter() {
                 argsize += buf.size*buf.typ.get_size(program);
             }
-            argsize += argsize%8;
-            writeln!(&mut f, "   add rsp, {}",argsize)?;
+            if argsize%8 > 0 {
+                argsize += 8-argsize%8;
+            }
+            if argsize > 0 {
+                writeln!(&mut f, "   add rsp, {}",argsize)?;
+            }
             writeln!(&mut f, "   xor rax,rax")?;
             writeln!(&mut f, "   ret")?;
         }
@@ -5512,7 +5826,7 @@ fn to_nasm_x86_64(build: &mut BuildProgram, program: &CmdProgram) -> io::Result<
 
 }
 
-
+#[derive(Debug)]
 enum TCScopeType<'a> {
     FUNCTION(String),
     NORMAL(&'a NormalScope)

@@ -1,0 +1,6 @@
+include "../../libs/libc/stdio.spl"
+func main(){
+    let n: *char = "123";
+    let n_num: int = (*(n+1)) - 48;
+    printf("n_num: %d\n",n_num);
+}

@@ -16,8 +16,9 @@ func main(){
             }
         }
         if c {
-            printf("Found it: %d\n",num);
-            exit(0)
+            @goto("break")
         }
     }
+    @makelabel("break")
+    printf("Found it: %d\n",num);
 }

@@ -1,0 +1,46 @@
+func power_of(n: int, p: int : int) {
+    
+    let i: int = 1;
+    let res: int = n;
+    while i < p {
+        res = res*n;
+        i+=1;
+    }    
+    return res;
+}
+// Debug
+// include "../libc/stdio.spl"
+func floorSqrt(x: int) {
+    if x == 0 {return x;}
+    if x == 1 {return x;}
+    let start: int = 1;
+    let end_: int = x/2;
+    let ans: int = 0;
+    while start <= end_ {
+        let mid: int = (start+end_)/2;
+        // printf("mid: %d for start=%d and end=%d\n",mid,start,end_);
+        if mid*mid == x {
+            return mid;
+        }
+        if mid*mid < x {
+            start = mid+1;
+            ans=mid;
+        }
+        else {
+            end_ = mid- 1;
+        }
+    }
+    return ans;
+}
+//Testing
+//include "../libc/stdio.spl"
+//func main(){
+//    //let i: int = 5;
+//    //let p: int = 4;
+//    //let res: int = power_of(i,p);
+//    //printf("i: %d, i^%d = %d\n",i,p,res);
+//    let x: int = 10;
+//    let sqrt_of: int = floorSqrt(x);
+//    printf("sqrt_of: %d is %d",x,sqrt_of);
+//    //printf("Res= %d\n",res);
+//}

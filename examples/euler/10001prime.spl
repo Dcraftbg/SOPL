@@ -1,4 +1,4 @@
-const prime_l = 6;
+const prime_l = 10_001;
 include "../../libs/libc/stdio.spl"
 extern "C" exit(int);
 func TODO(msg: *char){
@@ -6,11 +6,27 @@ func TODO(msg: *char){
     puts(msg);
     exit(1);
 }
-func main(){
-    TODO("implement this problem cuz im too lazy rn!");
-    let i: int;
-    i = 0;
-    while i < prime_l {
-
+func is_prime(num: int : bool) {
+    let divisor: int = 2;
+    while num%divisor != 0 {
+        divisor += 1;
     }
+    return divisor == num;
+}
+func get_prime_at(i: int : int) {
+    let num: int = 2;
+    let count: int = 0;
+    while count < i {
+        if is_prime(num) {
+            count += 1;
+        }
+        if count < i {
+            num += 1;   
+        }
+    }
+    return num;
+}
+func main(){
+    let res: int = get_prime_at(prime_l);
+    printf("Prime at %d is: %d\n",prime_l,res);
 }
