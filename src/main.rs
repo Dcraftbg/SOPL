@@ -1421,7 +1421,24 @@ fn tokens_to_expression(body: &[Token],build: &mut BuildProgram, program: &CmdPr
     
         i += 1;
     
-        if let Some(val) = OfP::from_token(token, build, program, locals) {
+        if let Some(mut val) = OfP::from_token(token, build, program, locals) {
+            if currentETree.op == Op::NONE && currentETree.left.is_some() && currentETree.right.is_none() && match &val {OfP::CONST(c) => {match c { RawConstValueType::INT(i) => *i < 0, RawConstValueType::LONG(i) => *i < 0, _ => false}},_ => false}{
+                currentETree.op = Op::MINUS;
+                match val {
+                    OfP::CONST(c) => {
+                        match c {
+                            RawConstValueType::INT(v) => {
+                                val = OfP::CONST(RawConstValueType::INT(v.abs()))
+                            }
+                            RawConstValueType::LONG(v) => {
+                                val = OfP::CONST(RawConstValueType::LONG(v.abs()))
+                            }
+                            _ => panic!("Unreachable")
+                        }
+                    }
+                    _ => panic!("Unreachable!")
+                }
+            }
             par_assert!(token,currentETree.left.is_none() || (currentETree.op != Op::NONE && currentETree.right.is_none()),"Error: Cannot have multiple Ofp values consecutively!");
             if currentETree.left.is_none() {
                 currentETree.left = Some(Expression::val(val))
