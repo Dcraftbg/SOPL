@@ -79,7 +79,7 @@ func strfind(src: *char, size_src: size_t, srca: *char,size_srca: size_t : *char
 //include "../libc/stdio.spl"
 func strrev(src: *char, size: size_t) {
     let i: size_t = 0;
-    let mid: size_t = size/2;
+    let mid: size_t = size>>1;
     while i < mid {
         let c: char = *(src+i);
         *(src+i) = *(src+size-i- 1);
@@ -114,13 +114,13 @@ func strextend(dst: *char, size: size_t, src: *char, asize: size_t) {
 // Testing
 //include "../libc/stdio.spl"
 //func main(){
-//
-//    let c: *char = "Hello        ";
-//    printf("Starting with: %s\n",c);
-//    strrev(c, 5);
-//    strrev(c, 5);
-//    strextend(c, 5, "World", 5);
-//    printf("c: %s",c);
+//    let buf: [char, 500];
+//    strset(buf, 500, 0);
+//    strcpy(buf, "Hello",5);
+//    strextend(buf, 5, "World", 5);
+//    let len: size_t = cstrlen(buf);
+//    strrev(buf, len);
+//    printf("buf: %s",buf);
 //}
 // func main(){
 //    //let c: *char = "Hello";
