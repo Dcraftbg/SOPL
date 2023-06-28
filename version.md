@@ -1,8 +1,9 @@
 **(Latest patch versions in github history and at the top of Change Log)**
 
-Newest Version: [0.15A](#015a)
+Newest Version: [0.15.1A](#0151a)
 # Manual:
-  - [0.15A](#015a)
+  - [0.15A](#015a)  
+    - [0.15A](#015a)  
   - [0.14A](#014a)
   - [0.13.3A](#0133a)
     - [0.13.2A](#0132a)
@@ -47,6 +48,10 @@ Newest Version: [0.15A](#015a)
   - [0.2A](#02a)
   - [0.1A](#01a)
 # Change Log
+ ## 0.15.1A
+   - Various bug fixes
+   - Added binary operators << >> |
+   - Added todos for ~ operator
  ## 0.15A
    - Added mathlib.spl
    - Changed expressions
