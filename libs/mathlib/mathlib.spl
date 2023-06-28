@@ -18,7 +18,6 @@ func floorSqrt(x: int) {
     let ans: int = 0;
     while start <= end_ {
         let mid: int = (start+end_)/2;
-        // printf("mid: %d for start=%d and end=%d\n",mid,start,end_);
         if mid*mid == x {
             return mid;
         }

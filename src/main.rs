@@ -879,8 +879,14 @@ impl ExprTree {
                     Expression::expr(left_expr) => {
                         match right {
                             Expression::expr(right_expr) => {
-                                let left_oregs = left_expr.eval_nasm(regs.clone(), f, program, build, local_vars, buffers, stack_size, loc)?;
-                                let right_oregs = right_expr.eval_nasm(regs[1..].to_vec(), f, program, build, local_vars, buffers, stack_size, loc)?;
+                                let mut left_oregs = left_expr.eval_nasm(regs.clone(), f, program, build, local_vars, buffers, stack_size, loc)?;
+                                let mut right_oregs = right_expr.eval_nasm(regs[1..].to_vec(), f, program, build, local_vars, buffers, stack_size, loc)?;
+                                if left_oregs[0].size() > right_oregs[0].size() {
+                                    right_oregs[0] = right_oregs[0].to_byte_size(left_oregs[0].size());
+                                }
+                                else if left_oregs[0].size() < right_oregs[0].size() {
+                                    left_oregs[0] = left_oregs[0].to_byte_size(right_oregs[0].size());
+                                }
                                 writeln!(f, "   add {}, {}",left_oregs[0],right_oregs[0])?;
                                 o = left_oregs;
                             },
@@ -891,27 +897,17 @@ impl ExprTree {
                                         writeln!(f,"   add {}, {}",left_oregs[0],v.get_num_data())?;
                                         o = left_oregs;
                                     }
-                                    OfP::GLOBALVAR(v) => {
-                                        let left_oregs = left_expr.eval_nasm(regs.clone(), f, program, build, local_vars, buffers, stack_size, loc)?;
-                                        writeln!(f,"   add {}, [_GLOBL_{}]",left_oregs[0],v)?;
-                                        o = left_oregs
-                                    }
-                                    OfP::LOCALVAR(v) => {
-                                        let left_oregs = left_expr.eval_nasm(regs.to_vec(), f, program, build, local_vars, buffers, stack_size, loc)?;
-                                        let ov = get_local_build(local_vars,v).unwrap();
-                                        if stack_size-ov.operand > 0 {
-                                            writeln!(f,"   add {}, {} [rsp+{}]",left_oregs[0],size_to_nasm_type(ov.typ.get_size(program)),stack_size-ov.operand)?;
-                                        }
-                                        else {
-                                            writeln!(f,"   add {}, {} [rsp]",left_oregs[0],size_to_nasm_type(ov.typ.get_size(program)))?;
-                                        }
-                                        o = left_oregs
-                                    }
                                     _ => {
-                                        let right = right_val.LOIRGNasm(vec![regs[0].clone()], f, program, build, local_vars, buffers, stack_size, loc)?;
-                                        let left_oregs = left_expr.eval_nasm(regs[1..].to_vec(), f, program, build, local_vars, buffers, stack_size, loc)?;
-                                        writeln!(f,"   add {}, {}",right[0],left_oregs[0])?;
-                                        o = right;
+                                        let mut left_oregs = left_expr.eval_nasm(regs.to_vec(), f, program, build, local_vars, buffers, stack_size, loc)?;
+                                        let mut right = right_val.LOIRGNasm(vec![regs[1]], f, program, build, local_vars, buffers, stack_size, loc)?;
+                                        if right[0].size() > left_oregs[0].size() {
+                                            left_oregs[0] = left_oregs[0].to_byte_size(right[0].size());
+                                        }
+                                        else if right[0].size() < left_oregs[0].size() {
+                                            right[0] = right[0].to_byte_size(left_oregs[0].size());
+                                        }
+                                        writeln!(f,"   add {}, {}",left_oregs[0],right[0])?;
+                                        o = left_oregs;
                                     }
                                 }
                             },
@@ -926,27 +922,18 @@ impl ExprTree {
                                         writeln!(f,"   add {}, {}",right_oregs[0],v.get_num_data())?;
                                         o = right_oregs;
                                     }
-                                    OfP::GLOBALVAR(v) => {
-                                        let right_oregs = right_expr.eval_nasm(regs.clone(), f, program, build, local_vars, buffers, stack_size, loc)?;
-                                        writeln!(f,"   add {}, [_GLOBL_{}]",right_oregs[0],v)?;
-                                        o = right_oregs
-                                    }
-                                    OfP::LOCALVAR(v) => {
-                                        let right_oregs = right_expr.eval_nasm(regs.to_vec(), f, program, build, local_vars, buffers, stack_size, loc)?;
-                                        let ov = get_local_build(local_vars,v).unwrap();
-                                        if stack_size-ov.operand > 0 {
-                                            writeln!(f,"   add {}, {} [rsp+{}]",right_oregs[0],size_to_nasm_type(ov.typ.get_size(program)),stack_size-ov.operand)?;
-                                        }
-                                        else {
-                                            writeln!(f,"   add {}, {} [rsp]",right_oregs[0],size_to_nasm_type(ov.typ.get_size(program)))?;
-                                        }
-                                        o = right_oregs
-                                    }
+
                                     _ => {
-                                        let right = left_val.LOIRGNasm(vec![regs[0].clone()], f, program, build, local_vars, buffers, stack_size, loc)?;
-                                        let right_oregs = right_expr.eval_nasm(regs[1..].to_vec(), f, program, build, local_vars, buffers, stack_size, loc)?;
-                                        writeln!(f,"   add {}, {}",right[0],right_oregs[0])?;
-                                        o = right;
+                                        let mut right_oregs = right_expr.eval_nasm(regs.to_vec(), f, program, build, local_vars, buffers, stack_size, loc)?;
+                                        let mut left = left_val.LOIRGNasm(vec![regs[1].clone()], f, program, build, local_vars, buffers, stack_size, loc)?;
+                                        if left[0].size() > right_oregs[0].size() {
+                                            right_oregs[0] = right_oregs[0].to_byte_size(left[0].size());
+                                        }
+                                        else if left[0].size() < right_oregs[0].size() {
+                                            left[0] = left[0].to_byte_size(right_oregs[0].size());
+                                        }
+                                        writeln!(f,"   add {}, {}",right_oregs[0],left[0])?;
+                                        o = right_oregs;
                                     }
                                 }
                             },
@@ -957,85 +944,23 @@ impl ExprTree {
                                         writeln!(f,"   add {}, {}",left_oregs[0],v.get_num_data())?;
                                         o = left_oregs;
                                     }
-                                    OfP::GLOBALVAR(v) => {
-                                        let left_oregs = left_val.LOIRGNasm(regs, f, program, build, local_vars, buffers, stack_size, loc)?;
-                                        writeln!(f,"   add {}, [_GLOBL_{}]",left_oregs[0],v)?;
-                                        o = left_oregs
-                                    }
-                                    OfP::LOCALVAR(v) => {
-                                        let left_oregs = left_val.LOIRGNasm(regs, f, program, build, local_vars, buffers, stack_size, loc)?;
-                                        let ov = get_local_build(local_vars,v).unwrap();
-                                        if stack_size-ov.operand > 0 {
-                                            writeln!(f,"   add {}, {} [rsp+{}]",left_oregs[0],size_to_nasm_type(ov.typ.get_size(program)),stack_size-ov.operand)?;
-                                        }
-                                        else {
-                                            writeln!(f,"   add {}, {} [rsp]",left_oregs[0],size_to_nasm_type(ov.typ.get_size(program)))?;
-                                        }
-                                        o = left_oregs
-                                    }
                                     _ => {
-                                        let right = right_val.LOIRGNasm(vec![regs[0].clone()], f, program, build, local_vars, buffers, stack_size, loc)?;
-                                        let left_oregs = left_val.LOIRGNasm(regs, f, program, build, local_vars, buffers, stack_size, loc)?;
-                                        writeln!(f,"   add {}, {}",right[0],left_oregs[0])?;
-                                        o = right;
+                                        let mut left_oregs = left_val.LOIRGNasm(regs.clone(), f, program, build, local_vars, buffers, stack_size, loc)?;
+                                        let mut right = right_val.LOIRGNasm(vec![regs[1].clone()], f, program, build, local_vars, buffers, stack_size, loc)?;
+                                        if right[0].size() > left_oregs[0].size() {
+                                            left_oregs[0] = left_oregs[0].to_byte_size(right[0].size());
+                                        }
+                                        else if right[0].size() < left_oregs[0].size() {
+                                            right[0] = right[0].to_byte_size(left_oregs[0].size());
+                                        }
+                                        writeln!(f,"   add {}, {}",left_oregs[0],right[0])?;
+                                        o = left_oregs;
                                     }
                                 }
                             },
                         }
                     }
                 }
-
-                // if left.is_ofp() {
-                //     com_assert!(loc,regs.len() > 1, "TODO: Handle multi-parameter loading for expressions!");
-
-                //     let res_right = right.result_of_c(program, build, local_vars, loc).unwrap();
-                //     let res_left = left.result_of_c(program, build, local_vars, loc).unwrap();
-
-                //     if res_right.get_size(program) > res_left.get_size(program) {
-                //         writeln!(f, "   xor {}, {}",regs[1],regs[1])?;
-                //     }
-                //     else if res_right.get_size(program) < res_left.get_size(program) {
-                //         writeln!(f, "   xor {}, {}",regs[0],regs[0])?;
-                //     }
-
-                //     let mut rightregs1= right.LEIRnasm(regs.to_vec(), f, program, build, local_vars, buffers, stack_size, loc)?;
-                    
-                //     let mut leftregs1 = left.LEIRnasm(regs[1..].to_vec(), f, program, build, local_vars, buffers, stack_size, loc)?;
-                //     com_assert!(loc,rightregs1.len() == 1, "TODO: Handle multi-parameter loading for expressions!");
-                //     if leftregs1[0].size() > rightregs1[0].size() {
-                //         rightregs1[0] = rightregs1[0].to_byte_size(leftregs1[0].size());
-                //     }
-                //     if leftregs1[0].size() < rightregs1[0].size() {
-                //         leftregs1[0] = leftregs1[0].to_byte_size(rightregs1[0].size());
-                //     }
-                //     writeln!(f, "   add {}, {}",leftregs1[0].to_string(),rightregs1[0].to_string())?;
-                //     o = leftregs1;
-                // }
-                // else {
-                //     let right       = com_expect!(loc,self.right.as_ref(),"Error: Cannot evaluate Op '{}' without left parameter",Op::PLUS.to_string());
-                //     let res_right = right.result_of_c(program, build, local_vars, loc).unwrap();
-                //     let res_left = left.result_of_c(program, build, local_vars, loc).unwrap();
-
-                //     if res_right.get_size(program) > res_left.get_size(program) {
-                //         writeln!(f, "   xor {}, {}",regs[1],regs[1])?;
-                //     }
-                //     else if res_right.get_size(program) < res_left.get_size(program) {
-                //         writeln!(f, "   xor {}, {}",regs[0],regs[0])?;
-                //     }
-                //     let mut leftregs1 = left.LEIRnasm(regs.to_vec(), f, program, build, local_vars, buffers, stack_size, loc)?;
-                //     com_assert!(loc,regs.len() > 1, "TODO: Handle multi-parameter loading for expressions!");
-                    
-                //     let mut rightregs1= right.LEIRnasm(regs[1..].to_vec(), f, program, build, local_vars, buffers, stack_size, loc)?;
-                //     if leftregs1[0].size() > rightregs1[0].size() {
-                //         rightregs1[0] = rightregs1[0].to_byte_size(leftregs1[0].size());
-                //     }
-                //     if leftregs1[0].size() < rightregs1[0].size() {
-                //         leftregs1[0] = leftregs1[0].to_byte_size(rightregs1[0].size());
-                //     }
-                //     com_assert!(loc,rightregs1.len() == 1, "TODO: Handle multi-parameter loading for expressions!");
-                //     writeln!(f, "   add {}, {}",leftregs1[0].to_string(),rightregs1[0].to_string())?;
-                //     o = leftregs1;
-                // }
             },
             Op::MINUS => {
                 let left = com_expect!(loc,self.left.as_ref(),"Error: Cannot evaluate Op '{}' without left parameter",Op::MINUS.to_string());
@@ -1055,8 +980,14 @@ impl ExprTree {
                     Expression::expr(left_expr) => {
                         match right {
                             Expression::expr(right_expr) => {
-                                let left_oregs = left_expr.eval_nasm(regs.clone(), f, program, build, local_vars, buffers, stack_size, loc)?;
-                                let right_oregs = right_expr.eval_nasm(regs[1..].to_vec(), f, program, build, local_vars, buffers, stack_size, loc)?;
+                                let mut left_oregs = left_expr.eval_nasm(regs.clone(), f, program, build, local_vars, buffers, stack_size, loc)?;
+                                let mut right_oregs = right_expr.eval_nasm(regs[1..].to_vec(), f, program, build, local_vars, buffers, stack_size, loc)?;
+                                if left_oregs[0].size() > right_oregs[0].size() {
+                                    right_oregs[0] = right_oregs[0].to_byte_size(left_oregs[0].size());
+                                }
+                                else if left_oregs[0].size() < right_oregs[0].size() {
+                                    left_oregs[0] = left_oregs[0].to_byte_size(right_oregs[0].size());
+                                }
                                 writeln!(f, "   sub {}, {}",left_oregs[0],right_oregs[0])?;
                                 o = left_oregs;
                             },
@@ -1067,27 +998,17 @@ impl ExprTree {
                                         writeln!(f,"   sub {}, {}",left_oregs[0],v.get_num_data())?;
                                         o = left_oregs;
                                     }
-                                    OfP::GLOBALVAR(v) => {
-                                        let left_oregs = left_expr.eval_nasm(regs.clone(), f, program, build, local_vars, buffers, stack_size, loc)?;
-                                        writeln!(f,"   sub {}, [_GLOBL_{}]",left_oregs[0],v)?;
-                                        o = left_oregs
-                                    }
-                                    OfP::LOCALVAR(v) => {
-                                        let left_oregs = left_expr.eval_nasm(regs.to_vec(), f, program, build, local_vars, buffers, stack_size, loc)?;
-                                        let ov = get_local_build(local_vars,v).unwrap();
-                                        if stack_size-ov.operand > 0 {
-                                            writeln!(f,"   sub {}, {} [rsp+{}]",left_oregs[0],size_to_nasm_type(ov.typ.get_size(program)),stack_size-ov.operand)?;
-                                        }
-                                        else {
-                                            writeln!(f,"   sub {}, {} [rsp]",left_oregs[0],size_to_nasm_type(ov.typ.get_size(program)))?;
-                                        }
-                                        o = left_oregs
-                                    }
                                     _ => {
-                                        let right = right_val.LOIRGNasm(vec![regs[0].clone()], f, program, build, local_vars, buffers, stack_size, loc)?;
-                                        let left_oregs = left_expr.eval_nasm(regs[1..].to_vec(), f, program, build, local_vars, buffers, stack_size, loc)?;
-                                        writeln!(f,"   sub {}, {}",right[0],left_oregs[0])?;
-                                        o = right;
+                                        let mut left_oregs = left_expr.eval_nasm(regs.to_vec(), f, program, build, local_vars, buffers, stack_size, loc)?;
+                                        let mut right = right_val.LOIRGNasm(vec![regs[1]], f, program, build, local_vars, buffers, stack_size, loc)?;
+                                        if right[0].size() > left_oregs[0].size() {
+                                            left_oregs[0] = left_oregs[0].to_byte_size(right[0].size());
+                                        }
+                                        else if right[0].size() < left_oregs[0].size() {
+                                            right[0] = right[0].to_byte_size(left_oregs[0].size());
+                                        }
+                                        writeln!(f,"   sub {}, {}",left_oregs[0],right[0])?;
+                                        o = left_oregs;
                                     }
                                 }
                             },
@@ -1102,27 +1023,18 @@ impl ExprTree {
                                         writeln!(f,"   sub {}, {}",right_oregs[0],v.get_num_data())?;
                                         o = right_oregs;
                                     }
-                                    OfP::GLOBALVAR(v) => {
-                                        let right_oregs = right_expr.eval_nasm(regs.clone(), f, program, build, local_vars, buffers, stack_size, loc)?;
-                                        writeln!(f,"   sub {}, [_GLOBL_{}]",right_oregs[0],v)?;
-                                        o = right_oregs
-                                    }
-                                    OfP::LOCALVAR(v) => {
-                                        let right_oregs = right_expr.eval_nasm(regs.to_vec(), f, program, build, local_vars, buffers, stack_size, loc)?;
-                                        let ov = get_local_build(local_vars,v).unwrap();
-                                        if stack_size-ov.operand > 0 {
-                                            writeln!(f,"   sub {}, {} [rsp+{}]",right_oregs[0],size_to_nasm_type(ov.typ.get_size(program)),stack_size-ov.operand)?;
-                                        }
-                                        else {
-                                            writeln!(f,"   sub {}, {} [rsp]",right_oregs[0],size_to_nasm_type(ov.typ.get_size(program)))?;
-                                        }
-                                        o = right_oregs
-                                    }
+
                                     _ => {
-                                        let right = left_val.LOIRGNasm(vec![regs[0].clone()], f, program, build, local_vars, buffers, stack_size, loc)?;
-                                        let right_oregs = right_expr.eval_nasm(regs[1..].to_vec(), f, program, build, local_vars, buffers, stack_size, loc)?;
-                                        writeln!(f,"   sub {}, {}",right[0],right_oregs[0])?;
-                                        o = right;
+                                        let mut right_oregs = right_expr.eval_nasm(regs.to_vec(), f, program, build, local_vars, buffers, stack_size, loc)?;
+                                        let mut left = left_val.LOIRGNasm(vec![regs[1].clone()], f, program, build, local_vars, buffers, stack_size, loc)?;
+                                        if left[0].size() > right_oregs[0].size() {
+                                            right_oregs[0] = right_oregs[0].to_byte_size(left[0].size());
+                                        }
+                                        else if left[0].size() < right_oregs[0].size() {
+                                            left[0] = left[0].to_byte_size(right_oregs[0].size());
+                                        }
+                                        writeln!(f,"   sub {}, {}",right_oregs[0],left[0])?;
+                                        o = right_oregs;
                                     }
                                 }
                             },
@@ -1133,34 +1045,23 @@ impl ExprTree {
                                         writeln!(f,"   sub {}, {}",left_oregs[0],v.get_num_data())?;
                                         o = left_oregs;
                                     }
-                                    OfP::GLOBALVAR(v) => {
-                                        let left_oregs = left_val.LOIRGNasm(regs, f, program, build, local_vars, buffers, stack_size, loc)?;
-                                        writeln!(f,"   sub {}, [_GLOBL_{}]",left_oregs[0],v)?;
-                                        o = left_oregs
-                                    }
-                                    OfP::LOCALVAR(v) => {
-                                        let left_oregs = left_val.LOIRGNasm(regs, f, program, build, local_vars, buffers, stack_size, loc)?;
-                                        let ov = get_local_build(local_vars,v).unwrap();
-                                        if stack_size-ov.operand > 0 {
-                                            writeln!(f,"   sub {}, {} [rsp+{}]",left_oregs[0],size_to_nasm_type(ov.typ.get_size(program)),stack_size-ov.operand)?;
-                                        }
-                                        else {
-                                            writeln!(f,"   sub {}, {} [rsp]",left_oregs[0],size_to_nasm_type(ov.typ.get_size(program)))?;
-                                        }
-                                        o = left_oregs
-                                    }
                                     _ => {
-                                        let right = right_val.LOIRGNasm(vec![regs[0].clone()], f, program, build, local_vars, buffers, stack_size, loc)?;
-                                        let left_oregs = left_val.LOIRGNasm(regs, f, program, build, local_vars, buffers, stack_size, loc)?;
-                                        writeln!(f,"   sub {}, {}",right[0],left_oregs[0])?;
-                                        o = right;
+                                        let mut left_oregs = left_val.LOIRGNasm(regs.clone(), f, program, build, local_vars, buffers, stack_size, loc)?;
+                                        let mut right = right_val.LOIRGNasm(vec![regs[1].clone()], f, program, build, local_vars, buffers, stack_size, loc)?;
+                                        if right[0].size() > left_oregs[0].size() {
+                                            left_oregs[0] = left_oregs[0].to_byte_size(right[0].size());
+                                        }
+                                        else if right[0].size() < left_oregs[0].size() {
+                                            right[0] = right[0].to_byte_size(left_oregs[0].size());
+                                        }
+                                        writeln!(f,"   sub {}, {}",left_oregs[0],right[0])?;
+                                        o = left_oregs;
                                     }
                                 }
                             },
                         }
                     }
                 }
-
             },
             Op::DIV   => {
                 com_assert!(loc,regs[0].to_byte_size(8) == Register::RAX,"Error: Cannot do division with output register different from RAX");

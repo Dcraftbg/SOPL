@@ -75,6 +75,25 @@ func strfind(src: *char, size_src: size_t, srca: *char,size_srca: size_t : *char
         return src+found_index;
     }
 }
+//Debug
+//include "../libc/stdio.spl"
+func strrev(src: *char, size: size_t) {
+    let i: size_t = 0;
+    let mid: size_t = size/2;
+    while i < mid {
+        let c: char = *(src+i);
+        *(src+i) = *(src+size-i- 1);
+        *(src+size-i- 1) = c;
+        i += 1;
+    }
+}
+func strextend(dst: *char, size: size_t, src: *char, asize: size_t) {
+    let i: size_t = 0;
+    while i < asize {
+        *(dst+size+i) = *(src+i);
+        i+=1;
+    }
+}
 // func str_to_lowercase(src: *char, size: size_t) {
 //     let i: size_t = 0;
 //     while i < size {
@@ -93,7 +112,16 @@ func strfind(src: *char, size_src: size_t, srca: *char,size_srca: size_t : *char
 // }
 
 // Testing
-// include "../libc/stdio.spl"
+include "../libc/stdio.spl"
+func main(){
+
+    let c: *char = "Hello        ";
+    printf("Starting with: %s\n",c);
+    strrev(c, 5);
+    strrev(c, 5);
+    strextend(c, 5, "World", 5);
+    printf("c: %s",c);
+}
 // func main(){
 //    //let c: *char = "Hello";
 //    // let clen: size_t = cstrlen(c);
