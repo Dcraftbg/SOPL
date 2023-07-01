@@ -3193,16 +3193,32 @@ impl OfP {
                         match str.Typ {
                             ProgramStringType::STR => {
                                 com_assert!(loc,regs.len() > 1, "Error: Cannot load Ofp into register!");
-                                let reg = regs[0];
                                 let reg1 = regs[1];
-                                writeln!(f, "   lea {}, [rel _STRING_{}_]",reg.to_string(),val.to_string().replace("-", ""))?;
+                                let reg = if program.architecture.bits == 32 {
+                                    let reg = regs[0].to_byte_size(4);
+                                    writeln!(f, "   mov {}, _STRING_{}_",reg.to_string(),val.to_string().replace("-", ""))?;
+                                    reg
+                                }
+                                else {
+                                    let reg = regs[0].to_byte_size(8);
+                                    writeln!(f, "   lea {}, [rel _STRING_{}_]",reg.to_string(),val.to_string().replace("-", ""))?;
+                                    reg
+                                };
                                 writeln!(f, "   mov {}, {}",reg1.to_string(),build.stringdefs.get(val).unwrap().Data.len())?;
                                 out.push(reg);
                                 out.push(reg1);
                             },
                             ProgramStringType::CSTR => {
-                                let reg = regs[0];
-                                writeln!(f, "   lea {}, [rel _STRING_{}_]",reg.to_string(),val.to_string().replace("-", ""))?;
+                                let reg = if program.architecture.bits == 32 {
+                                    let reg = regs[0].to_byte_size(4);
+                                    writeln!(f, "   mov {}, _STRING_{}_",reg.to_string(),val.to_string().replace("-", ""))?;
+                                    reg
+                                }
+                                else {
+                                    let reg = regs[0].to_byte_size(8);
+                                    writeln!(f, "   lea {}, [rel _STRING_{}_]",reg.to_string(),val.to_string().replace("-", ""))?;
+                                    reg
+                                };
                                 out.push(reg);
                             },
                         }
@@ -3638,7 +3654,7 @@ impl RawConstValueType {
             RawConstValueType::PTR(_,val) => val.clone(),
         }
     }
-    fn LRNasm(&self, f: &mut File, build: &BuildProgram, iregs: &Vec<Register>) -> std::io::Result<Vec<Register>> {
+    fn LRNasm(&self, f: &mut File, build: &BuildProgram, program: &CmdProgram, iregs: &Vec<Register>) -> std::io::Result<Vec<Register>> {
         let o: Vec<Register>;
         match self {
             RawConstValueType::INT(val) => {
@@ -3655,15 +3671,34 @@ impl RawConstValueType {
                 let sstr = build.stringdefs.get(id).unwrap();
                 match sstr.Typ {
                     ProgramStringType::STR  => {
-                        let oreg = iregs[0].to_byte_size(8); //TODO: Fix this just in case you are still running in 32 bit mode
+                        
+                        
                         let oreg2 = iregs[0].to_byte_size(8);
-                        writeln!(f, "   lea {}, [rel _STRING_{}_]",oreg.to_string(),id.to_string().replace("-", ""))?;
+                        let oreg = if program.architecture.bits == 32 {
+                            let reg = iregs[0].to_byte_size(4);
+                            writeln!(f, "   mov {}, _STRING_{}_",reg.to_string(),id.to_string().replace("-", ""))?;
+                            reg
+                        }
+                        else {
+                            let reg = iregs[0].to_byte_size(8);
+                            writeln!(f, "   lea {}, [rel _STRING_{}_]",reg.to_string(),id.to_string().replace("-", ""))?;
+                            reg
+                        };
+                        //writeln!(f, "   lea {}, [rel _STRING_{}_]",oreg.to_string(),id.to_string().replace("-", ""))?;
                         writeln!(f, "   mov {}, {}",oreg2.to_string(),sstr.Data.len())?;
                         o = vec![oreg]
                     },
                     ProgramStringType::CSTR => {
-                        let oreg = iregs[0].to_byte_size(8);
-                        writeln!(f, "   lea {}, [rel _STRING_{}_]",oreg.to_string(),id.to_string().replace("-", ""))?;
+                        let oreg = if program.architecture.bits == 32 {
+                            let reg = iregs[0].to_byte_size(4);
+                            writeln!(f, "   mov {}, _STRING_{}_",reg.to_string(),id.to_string().replace("-", ""))?;
+                            reg
+                        }
+                        else {
+                            let reg = iregs[0].to_byte_size(8);
+                            writeln!(f, "   lea {}, [rel _STRING_{}_]",reg.to_string(),id.to_string().replace("-", ""))?;
+                            reg
+                        };
                         o = vec![oreg]
                     },
                 }
@@ -5376,9 +5411,9 @@ fn nasm_x86_64_prep_args(program: &CmdProgram, build: &BuildProgram, f: &mut Fil
                 }
             }
             OfP::CONST(val)  => {
-                let oregs = val.LRNasm(f, build, &vec![Register::RAX, Register::RBX])?;
-
-
+                let oregs = val.LRNasm(f, build, program,&vec![Register::RAX, Register::RBX])?;
+                //println!("oregs = {:?}",oregs);
+                //println!("stack_size before = {}",stack_size);
                 if program.architecture.options.argumentPassing == ArcPassType::PUSHALL ||  program.architecture.options.argumentPassing.custom_get().is_none() ||  program.architecture.options.argumentPassing.custom_unwrap().nums_ptrs.is_none(){
                     for oreg in oregs {
                         stack_size += oreg.size();
@@ -5403,6 +5438,7 @@ fn nasm_x86_64_prep_args(program: &CmdProgram, build: &BuildProgram, f: &mut Fil
                         panic!("Unreachable")
                     }
                 }
+                //println!("stack_size after = {}",stack_size);
             }
             _ => todo!(),
         }
@@ -5413,7 +5449,11 @@ fn nasm_x86_64_prep_args(program: &CmdProgram, build: &BuildProgram, f: &mut Fil
             shadow_space = ops.shadow_space;
         }
     }
-    stack_size += stack_size%8;
+    //println!("Final stack_size={}",stack_size);
+    if program.architecture.bits == 64 {
+        stack_size += 8-stack_size%8;
+    }
+    //println!("Final stack_size={}",stack_size);
     if stack_size-org_stack_size+shadow_space > 0 {
         writeln!(f, "   sub rsp, {}",stack_size-org_stack_size+shadow_space)?;
     }
