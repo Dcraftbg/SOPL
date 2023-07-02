@@ -16,6 +16,7 @@ Made for easy navigation around the README.md
 - [Quickstart](#quickstart)
 - [Build platforms](#build)
 - [Requirements](#Requirements)
+- [Tools](#tools)
 - [Flags and versions](#flags-and-versions)
 - [NEWS](news.md)
 - [Plans](#plans)
@@ -75,6 +76,17 @@ interrupt 128
 **NASM**:
 - Any nasm version that can support 64 bit or 32 bit assembly.
 - Any linker or executable builder (gcc, ld, etc.)
+
+## Tools
+SOPL has a few tools to make your life easier!
+
+One of the most major ones is [lighthouse](https://github.com/Dimitar85898/Lighthouse). Lighthouse makes organizing your projects A LOT simpler.
+It also makes building, testing and running your code a lot easier.
+You can follow the "How to get started" over at the repository (https://github.com/Dimitar85898/Lighthouse). 
+It is highly recommended to use lighthouse! Lighthouse is an awesome tool that should make it better and easier to build with SOPL - you don't have to manage any flags or anything, everything is built for you, however this doesn't stop the endless customization you can have with normal SOPL - simply edit the lighthouse.cfg file that gets generated on every new project. For more information check out the repo.
+
+One other tool that isn't as major is sopl_test which is generally only recommended to be used by the developer of the language since its only purpose is to test if all of the examples work as intentionally
+
 ## Flags and Versions
 
 Whenever something gets added you will see that 99% of the time [version.md](version.md) gets updated. Thats because it contains the necessary information about any new versions that come out.

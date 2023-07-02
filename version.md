@@ -2,7 +2,7 @@
 
 Newest Version: [0.15.1A](#0151a)
 # Manual:
-  - [0.15A](#015a)  
+  - [0.15.1A](#0151a)  
     - [0.15A](#015a)  
   - [0.14A](#014a)
   - [0.13.3A](#0133a)
@@ -48,6 +48,8 @@ Newest Version: [0.15.1A](#0151a)
   - [0.2A](#02a)
   - [0.1A](#01a)
 # Change Log
+ ## 0.15.2A
+   - Added cfg support with lighthouse for the examples architectures
  ## 0.15.1A
    - Various bug fixes
    - Added binary operators << >> |
