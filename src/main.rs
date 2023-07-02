@@ -4429,7 +4429,7 @@ fn contains_local<'a>(currentLocals: &'a Vec<Locals>, name: &String) -> bool {
     }
     false
 }
-fn parse_token_to_build_inst(token: Token,lexer: &mut Lexer, program: &mut CmdProgram, build: &mut BuildProgram, scopeStack: &mut ScopeStack, currentLocals: &mut Vec<Locals>, currentLabels: &mut HashSet<String>, expectedLabels: &mut HashMap<String, Vec<(ProgramLocation,*mut Instruction)>>){
+fn parse_token_to_build_inst(token: Token,lexer: &mut Lexer, program: &mut CmdProgram, build: &mut BuildProgram, scopeStack: &mut ScopeStack, currentLocals: &mut Vec<Locals>, currentLabels: &mut HashSet<String>, expectedLabels: &mut HashMap<String, Vec<(ProgramLocation,*mut Instruction)>>, include_folders: &HashSet<PathBuf>){
     match token.typ {
         TokenType::WordType(ref word) => {
             par_assert!(token,scopeStack.len() > 0, "Undefined Word Call outside of entry point! '{}'",word);
@@ -4687,13 +4687,24 @@ fn parse_token_to_build_inst(token: Token,lexer: &mut Lexer, program: &mut CmdPr
                         TokenType::StringType(path) | TokenType::CStringType(path) => {
                             let p = PathBuf::from(&program.path);
                             let p = p.parent().unwrap();
-                            let include_p  = PathBuf::from(path);
-                            let info = par_expect!(token,fs::read_to_string(String::from(p.join(&include_p).to_str().unwrap().replace("\\", "/"))),"Error: could not open file: {}",String::from(p.join(&include_p).to_str().unwrap()).replace("\\", "/"));
+                            let include_p = PathBuf::from(&path);
+                            let mut opath=  p.join(&include_p).to_str().unwrap().replace("\\", "/");
+                            
+                            for p_path in include_folders.iter() {
+                                let p_buf = PathBuf::from(p_path.to_str().unwrap().to_owned()+"/"+path.as_str());
+                                if p_buf.exists() {
+                                    opath=p_buf.to_string_lossy().to_owned().to_string();
+                                    break;
+                                }
+                            }
+                            
+                            //let info = par_expect!(token,fs::read_to_string(opath),"Error: could not open file: {}",String::from(p.join(&include_p).to_str().unwrap()).replace("\\", "/"));
+                            let info = par_expect!(token, fs::read_to_string(&opath), "Error: could not read from file {}!",opath);
                             let mut lf = Lexer::new(&info,lexer.Intrinsics,lexer.Definitions,HashSet::new());
                             lf.currentLocation.file = Rc::new(String::from(p.join(&include_p).to_str().unwrap().replace("\\", "/")));
                             let mut nprogram = program.clone();
                             nprogram.path = String::from(p.join(&include_p).to_str().unwrap().replace("\\", "/"));
-                            let mut build2 = parse_tokens_to_build(&mut lf, &mut nprogram);
+                            let mut build2 = parse_tokens_to_build(&mut lf, &mut nprogram,include_folders);
                             build.externals.extend(build2.externals);
                             for (strdefId,_strdef) in build2.stringdefs.iter() {
                                 let orgstrdefId  = strdefId.clone();
@@ -5222,14 +5233,14 @@ fn parse_token_to_build_inst(token: Token,lexer: &mut Lexer, program: &mut CmdPr
     }
 
 }
-fn parse_tokens_to_build(lexer: &mut Lexer, program: &mut CmdProgram) -> BuildProgram {
+fn parse_tokens_to_build(lexer: &mut Lexer, program: &mut CmdProgram, include_folders: &HashSet<PathBuf>) -> BuildProgram {
     let mut build: BuildProgram = BuildProgram::new();
     let mut scopeStack: ScopeStack = vec![];
     let mut currentLocals: Vec<Locals> = Vec::new();
     let mut currentLabels: HashSet<String> = HashSet::new();
     let mut expectedLabels: HashMap<String,Vec<(ProgramLocation,*mut Instruction)>> = HashMap::new();
     while let Some(token) = lexer.next() {
-        parse_token_to_build_inst(token, lexer, program, &mut build, &mut scopeStack, &mut currentLocals, &mut currentLabels, &mut expectedLabels);
+        parse_token_to_build_inst(token, lexer, program, &mut build, &mut scopeStack, &mut currentLocals, &mut currentLabels, &mut expectedLabels,include_folders);
     }
     
     build
@@ -6534,6 +6545,7 @@ fn main() {
     else {
         println!("[NOTE] No architecture found for {}_{}! Please specify the output architecture!",env::consts::OS,env::consts::ARCH);
     }
+    let mut include_folders:HashSet<PathBuf>  = HashSet::new();
     cfor!(let mut i: usize = 0; i < args.len(); i+=1; {
         let flag = args.get(i).unwrap();
         match flag.as_str() {
@@ -6593,6 +6605,17 @@ fn main() {
             "-usage" => {
                 usage(&program_n);
                 exit(0);
+            }
+            "-i" => {
+                while i < args.len() && args[i].ends_with(",") {
+                    include_folders.insert(PathBuf::from(&args[i][..args[i].len()-2]));
+                    i += 1;
+                }
+                if args.len() == i {
+                    panic!("Last element of -i should not end on ,");
+                }
+                i+=1;
+                include_folders.insert(PathBuf::from(&args[i]));
             }
             "-arc" => {
                 let val = args.get(i+1).expect("Error: Unexpected built-in target or path to json");
@@ -6661,7 +6684,7 @@ fn main() {
     Intrinsics.insert("@goto".to_string(), IntrinsicType::GOTO);
     Intrinsics.insert("@makelabel".to_string(), IntrinsicType::MAKELABEL);
 
-
+    
     let mut Definitions: HashMap<String,VarType> = HashMap::new();
     Definitions.insert("int".to_string(), VarType::INT);
     Definitions.insert("char".to_string(), VarType::CHAR);
@@ -6685,7 +6708,7 @@ fn main() {
     let oinfo = info.unwrap();
     let mut lexer = Lexer::new(&oinfo, & Intrinsics, &Definitions, HashSet::new());
     lexer.currentLocation.file = Rc::new(program.path.clone());
-    let mut build = parse_tokens_to_build(&mut lexer, &mut program);
+    let mut build = parse_tokens_to_build(&mut lexer, &mut program, &include_folders);
     if program.use_type_checking {
         type_check_build(&mut build, &program);
     }
