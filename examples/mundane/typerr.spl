@@ -1,0 +1,7 @@
+include "../../libs/libc/stdio.spl"
+func print_msg(msg: *char) {
+    puts(msg);
+}
+func main(){
+    print_msg("Hello","World")
+}

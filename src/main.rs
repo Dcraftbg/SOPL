@@ -3108,6 +3108,16 @@ enum OfP {
 }
 
 impl OfP {
+    fn to_string(&self, build: &BuildProgram) -> String {
+        match self {
+            Self::REGISTER(reg)    => reg.to_string(),
+            Self::LOCALVAR(v)      => format!("Local var {}",v),
+            Self::BUFFER(b)        => format!("Buffer {}",b),
+            Self::CONST(v)         => v.to_string(build),
+            Self::GLOBALVAR(v)     => format!("Global var {}",v),
+            Self::RESULT(v, _)     => format!("Result of {}",v)
+        }
+    }
     fn var_type_t(&self, build: &BuildProgram, local_vars: &Vec<Locals>, buffers: &Vec<BuildBuf>) -> Option<VarType> {
         
         match self {
@@ -3332,6 +3342,11 @@ struct Function {
     location: ProgramLocation,
     body: Vec<(ProgramLocation,Instruction)>,
     buffers: Vec<BuildBuf>,
+}
+impl Function {
+    fn loc_display(&self) -> String {
+        self.location.loc_display()
+    }
 }
 
 
@@ -3620,6 +3635,14 @@ enum RawConstValueType{
     PTR(Ptr, i64)
 }
 impl RawConstValueType {
+    fn to_string(&self, build: &BuildProgram) -> String {
+        match self {
+            Self::INT(v) => format!("{}",v),
+            Self::LONG(v) => format!("{}",v),
+            Self::STR(v) => format!("{}",build.stringdefs.get(v).unwrap().Data),
+            Self::PTR(_, p) => format!("ptr {}",p)
+        }
+    }
     fn to_type(&self, build: &BuildProgram) -> Vec<VarType> {
         match self {
             RawConstValueType::INT(_) => {
@@ -6369,6 +6392,22 @@ fn type_check_scope(build: &BuildProgram, program: &CmdProgram, scope: TCScopeTy
             Instruction::CALL(funcn, args)             => {
                 let function = typ_expect!(loc, build.functions.get(funcn), "Error: unknown function call to {}, Function may not exist!",funcn);
                 let mut functionIP = function.contract.Inputs.clone();
+                typ_assert!(loc, functionIP.len() == args.len(), "Error: NON-matching function arguments. Expected: \n{}\nBut found: \n{}",
+                {  
+                    let mut o: String = String::new();
+                    for (v,t) in functionIP.iter() {
+                        o += &format!("   {} ({})\n",t.to_string(false),v);
+                    }
+                    &o[..o.len()-1].to_owned()
+                },
+                {
+                    let mut o: String = String::new();
+                    for arg in args.iter() {
+                        o += &format!("   {} ({})\n",arg.var_type_t(build, currentLocals,scope.get_buffers(build)).unwrap().to_string(false),arg.to_string(build))
+                    }
+                    &o[..o.len()-1].to_owned()
+                });
+            
                 //println!("functionIP: {:?}\nargs: {:?}",functionIP,args);
                 for arg in args.iter().rev() {
                     match arg {
