@@ -3235,10 +3235,11 @@ impl OfP {
                 }
             },
             OfP::RESULT(func, args) => {
-                let (sp_taken, shadow_space) = nasm_x86_64_prep_args(program, build, f, args, stack_size, local_vars)?;
+                let sp_taken = nasm_x86_64_prep_args(program, build, f, args, stack_size, local_vars)?;
+                
                 writeln!(f, "   call {}{}",program.architecture.func_prefix,func)?;
-                if sp_taken-stack_size+shadow_space > 0 {
-                    writeln!(f, "   add rsp, {}",sp_taken-stack_size+shadow_space)?
+                if sp_taken-stack_size > 0 {
+                    writeln!(f, "   add rsp, {}",sp_taken-stack_size)?
                 }
                 let reg = regs[0].to_byte_size(build.get_contract_of_symbol(func).unwrap().Outputs.get(0).unwrap_or(&VarType::LONG).get_size(program));
                 if reg.to_byte_size(8) != Register::RAX {
@@ -5363,7 +5364,7 @@ fn optimization_ops(build: &mut BuildProgram, program: &CmdProgram) -> optim_ops
         OptimizationMode::DEBUG => optim_ops { usedStrings: HashMap::new(), usedExterns: HashSet::new(), usedFuncs: HashSet::new() },
     }
 }
-fn nasm_x86_64_prep_args(program: &CmdProgram, build: &BuildProgram, f: &mut File, contract: &Vec<OfP>, mut stack_size: usize, local_vars: &Vec<HashMap<String, LocalVariable>>) -> io::Result<(usize,usize)> {
+fn nasm_x86_64_prep_args(program: &CmdProgram, build: &BuildProgram, f: &mut File, contract: &Vec<OfP>, mut stack_size: usize, local_vars: &Vec<HashMap<String, LocalVariable>>) -> io::Result<usize> {
     
     let org_stack_size = stack_size;
 
@@ -5472,21 +5473,16 @@ fn nasm_x86_64_prep_args(program: &CmdProgram, build: &BuildProgram, f: &mut Fil
             _ => todo!(),
         }
     }
-    let mut shadow_space = 0;
-    if let Some(ops) = program.architecture.options.argumentPassing.custom_get() {
-        if ops.shadow_space > 0 {
-            shadow_space = ops.shadow_space;
-        }
-    }
+    
     //println!("Final stack_size={}",stack_size);
     if program.architecture.bits == 64 {
         stack_size += 8-stack_size%8;
     }
     //println!("Final stack_size={}",stack_size);
-    if stack_size-org_stack_size+shadow_space > 0 {
-        writeln!(f, "   sub rsp, {}",stack_size-org_stack_size+shadow_space)?;
+    if stack_size-org_stack_size > 0 {
+        writeln!(f, "   sub rsp, {}",stack_size-org_stack_size)?; //TODO: Setup stackframe only at the start of the scope
     }
-    Ok((stack_size, shadow_space))
+    Ok(stack_size)
 }
 fn nasm_x86_64_load_args(f: &mut File, scope: &TCScopeType, build: &BuildProgram, program: &CmdProgram) -> io::Result<usize> {
     let mut shadow_space = 0;
@@ -5552,8 +5548,11 @@ fn get_local_build<'a>(currentLocals: &'a Vec<HashMap<String, LocalVariable>>, n
     None
 }
 
-fn nasm_x86_64_handle_scope(f: &mut File, build: &BuildProgram, program: &CmdProgram, scope: TCScopeType, local_vars: &mut Vec<HashMap<String, LocalVariable>>, mut stack_size: usize, func_stack_begin: usize, inst_count: &mut usize) -> io::Result<()> {
+fn nasm_x86_64_handle_scope(f: &mut File, build: &BuildProgram, program: &CmdProgram, scope: TCScopeType, local_vars: &mut Vec<HashMap<String, LocalVariable>>, stack_sizes: &mut Vec<usize>, mut stack_size: usize, func_stack_begin: usize, inst_count: &mut usize) -> io::Result<()> {
     //println!("Gotten stack_size: {} ",stack_size);
+    let shadow_space: usize = if let ArcPassType::CUSTOM(argpassing) = &program.architecture.options.argumentPassing {
+        argpassing.shadow_space
+    } else { 0 };
     *inst_count += 1;
     let expect_loc_t = LinkedHashMap::new();
     let contract_loc_t = FunctionContract { Inputs: LinkedHashMap::new(), Outputs: Vec::new()};
@@ -5582,7 +5581,7 @@ fn nasm_x86_64_handle_scope(f: &mut File, build: &BuildProgram, program: &CmdPro
     if stack_size%8 > 0 {
         stack_size+=8-stack_size%8;
     }
-    
+    stack_size+=shadow_space;
     //println!("stack_size after: {}",stack_size);
     //println!("stack_size%8: {}",stack_size%8);
     let dif = stack_size-stack_size_org;
@@ -5632,7 +5631,7 @@ fn nasm_x86_64_handle_scope(f: &mut File, build: &BuildProgram, program: &CmdPro
                 }
             }
             Instruction::CALLRAW(Word, contract) => {
-                let (sp_taken, shadow_space) = nasm_x86_64_prep_args(program, build, f, contract, stack_size, &local_vars)?;
+                let sp_taken = nasm_x86_64_prep_args(program, build, f, contract, stack_size, &local_vars)?;
                 writeln!(f, "   xor rax, rax")?;
                 if let Some(external) = build.externals.get(Word) {
                     writeln!(f, "   call {}{}{}",external.typ.prefix(program),Word,external.typ.suffix())?;
@@ -5640,8 +5639,9 @@ fn nasm_x86_64_handle_scope(f: &mut File, build: &BuildProgram, program: &CmdPro
                 else {
                     writeln!(f, "   call {}",Word)?;
                 }
-                if sp_taken+shadow_space-stack_size > 0 {
-                    writeln!(f, "   add rsp, {}",sp_taken-stack_size+shadow_space)?;
+                
+                if sp_taken-stack_size > 0 {
+                    writeln!(f, "   add rsp, {}",sp_taken-stack_size)?;
                 }
             }
             Instruction::ADDSET(op1, op2) => {
@@ -5735,7 +5735,7 @@ fn nasm_x86_64_handle_scope(f: &mut File, build: &BuildProgram, program: &CmdPro
                 todo!("Divset is not yet implemented!");
             }
             Instruction::CALL(Word,args) => {
-                let (sp_taken, shadow_space) = nasm_x86_64_prep_args(program, build, f, args, stack_size, &local_vars)?;
+                let sp_taken = nasm_x86_64_prep_args(program, build, f, args, stack_size, &local_vars)?;
                 writeln!(f, "   xor rax, rax")?;
                 if let Some(external) = build.externals.get(Word) {
                     writeln!(f, "   call {}{}{}",external.typ.prefix(program),Word,external.typ.suffix())?;
@@ -5743,8 +5743,8 @@ fn nasm_x86_64_handle_scope(f: &mut File, build: &BuildProgram, program: &CmdPro
                 else {
                     writeln!(f, "   call {}",Word)?;
                 }
-                if sp_taken+shadow_space-stack_size > 0 {
-                    writeln!(f, "   add rsp, {}",sp_taken+shadow_space-stack_size)?;
+                if sp_taken-stack_size > 0 {
+                    writeln!(f, "   add rsp, {}",sp_taken-stack_size)?;
                 }
             }
             Instruction::FNBEGIN() => {
@@ -5770,7 +5770,22 @@ fn nasm_x86_64_handle_scope(f: &mut File, build: &BuildProgram, program: &CmdPro
             },
             Instruction::EXPAND_SCOPE(s) => {
                 local_vars.push(HashMap::new());
-                nasm_x86_64_handle_scope(f, build, program, TCScopeType::NORMAL(&s),local_vars,stack_size,func_stack_begin,inst_count)?
+                stack_sizes.push(stack_size);
+                writeln!(f, "   add rsp, {}",shadow_space)?;
+                stack_size-=shadow_space;
+                nasm_x86_64_handle_scope(f, build, program, TCScopeType::NORMAL(&s),local_vars,stack_sizes,stack_size,func_stack_begin,inst_count)?;
+                
+                stack_size+=shadow_space;
+                writeln!(f, "   sub rsp, {}",shadow_space)?;
+                /*
+                writeln!(f, "   add rsp, {}",shadow_space)?;
+                stack_size-=shadow_space;
+                stack_sizes.push(stack_size);
+
+                
+                stack_size+=shadow_space;
+                writeln!(f, "   sub rsp, {}",shadow_space)?;
+                 */
             }
             Instruction::EXPAND_IF_SCOPE(s)   => {
                 let binst = inst_count.clone();
@@ -5800,10 +5815,10 @@ fn nasm_x86_64_handle_scope(f: &mut File, build: &BuildProgram, program: &CmdPro
                             writeln!(f, "   cmp rax, 0")?;
                         },
                         OfP::RESULT(func,args) => {
-                            let (sp_taken, shadow_space) = nasm_x86_64_prep_args(program, build, f, args, stack_size, &local_vars)?;
+                            let sp_taken = nasm_x86_64_prep_args(program, build, f, args, stack_size, &local_vars)?;
                             writeln!(f, "   call {}{}",program.architecture.func_prefix,func)?;
-                            if sp_taken-stack_size+shadow_space > 0 {
-                                writeln!(f, "   add rsp, {}",sp_taken-stack_size+shadow_space)?
+                            if sp_taken-stack_size > 0 {
+                                writeln!(f, "   add rsp, {}",sp_taken-stack_size)?
                             }
                             writeln!(f, "   cmp {}, 0",Register::AL.to_string())?;
                         },
@@ -5872,7 +5887,13 @@ fn nasm_x86_64_handle_scope(f: &mut File, build: &BuildProgram, program: &CmdPro
                     match elses {
                         Instruction::EXPAND_ELSE_SCOPE(elses) => {
                             local_vars.push(HashMap::new());
-                            nasm_x86_64_handle_scope(f, build, program, TCScopeType::NORMAL(&elses), local_vars, stack_size,func_stack_begin,inst_count)?;
+                            writeln!(f, "   add rsp, {}",shadow_space)?;
+                            stack_size-=shadow_space;
+                            stack_sizes.push(stack_size);
+                            nasm_x86_64_handle_scope(f, build, program, TCScopeType::NORMAL(&elses), local_vars, stack_sizes,stack_size,func_stack_begin,inst_count)?;
+                            
+                            stack_size+=shadow_space;
+                            writeln!(f, "   sub rsp, {}",shadow_space)?;
                         }
                         _ => {}
                     }
@@ -5883,7 +5904,13 @@ fn nasm_x86_64_handle_scope(f: &mut File, build: &BuildProgram, program: &CmdPro
                 writeln!(f, "   .IF_SCOPE_{}:",binst)?;
                 *inst_count += 1;
                 local_vars.push(HashMap::new());
-                nasm_x86_64_handle_scope(f, build, program, TCScopeType::NORMAL(&s), local_vars, stack_size,func_stack_begin,inst_count)?;
+                writeln!(f, "   add rsp, {}",shadow_space)?;
+                stack_size-=shadow_space;
+                stack_sizes.push(stack_size);
+                nasm_x86_64_handle_scope(f, build, program, TCScopeType::NORMAL(&s), local_vars, stack_sizes,stack_size,func_stack_begin,inst_count)?;
+                
+                stack_size+=shadow_space;
+                writeln!(f, "   sub rsp, {}",shadow_space)?;
                 *inst_count -= 1;
 
                 writeln!(f, "   .IF_SCOPE_END_{}:",binst)?;
@@ -5918,10 +5945,10 @@ fn nasm_x86_64_handle_scope(f: &mut File, build: &BuildProgram, program: &CmdPro
                             writeln!(f, "   cmp rax, 0")?;
                         },
                         OfP::RESULT(func, args) => {
-                            let (sp_taken, shadow_space) = nasm_x86_64_prep_args(program, build, f, args, stack_size, &local_vars)?;
+                            let sp_taken = nasm_x86_64_prep_args(program, build, f, args, stack_size, &local_vars)?;
                             writeln!(f, "   call {}{}",program.architecture.func_prefix,func)?;
-                            if sp_taken-stack_size+shadow_space > 0 {
-                                writeln!(f, "   add rsp, {}",sp_taken-stack_size+shadow_space)?
+                            if sp_taken-stack_size > 0 {
+                                writeln!(f, "   add rsp, {}",sp_taken-stack_size)?
                             }
                             writeln!(f, "   cmp {}, 0",Register::AL.to_string())?;
                         },
@@ -5991,7 +6018,13 @@ fn nasm_x86_64_handle_scope(f: &mut File, build: &BuildProgram, program: &CmdPro
                 
                 let binst = inst_count.clone();
                 local_vars.push(HashMap::new());
-                nasm_x86_64_handle_scope(f, build, program, TCScopeType::NORMAL(&s), local_vars, stack_size,func_stack_begin,inst_count)?;
+                writeln!(f, "   add rsp, {}",shadow_space)?;
+                stack_size-=shadow_space;
+                stack_sizes.push(stack_size);
+                nasm_x86_64_handle_scope(f, build, program, TCScopeType::NORMAL(&s), local_vars, stack_sizes,stack_size,func_stack_begin,inst_count)?;
+                
+                stack_size+=shadow_space;
+                writeln!(f, "   sub rsp, {}",shadow_space)?;
                 writeln!(f, "   jmp .WHILE_SCOPE_{}" ,binst)?;
                 writeln!(f, "   .WHILE_SCOPE_END_{}:",binst)?;
 
@@ -6011,17 +6044,9 @@ fn nasm_x86_64_handle_scope(f: &mut File, build: &BuildProgram, program: &CmdPro
             }
             Instruction::GOTO(lname, s) => {
                 let mut total_drop: usize = 0;
-                for vars in &local_vars[s.to_owned()..] {
+                for s in &stack_sizes[s.to_owned()..] {
                     //println!("Passing by vars: {:?}",vars);
-                    for v in vars.values() {
-                        if total_drop%8+v.typ.get_size(program) > 8 {
-                            total_drop+=8-total_drop%8;
-                        }
-                        total_drop += v.typ.get_size(program);
-                    }
-                }
-                if total_drop%8 > 0 {
-                    total_drop += 8-total_drop%8;
+                    total_drop += s;
                 }
                 if total_drop > 0 {
                     writeln!(f, "   add rsp, {}",total_drop)?;
@@ -6052,6 +6077,7 @@ fn nasm_x86_64_handle_scope(f: &mut File, build: &BuildProgram, program: &CmdPro
         writeln!(f, "   ret")?;
     }
     local_vars.pop();
+    stack_sizes.pop();
     Ok(())
 }
 fn to_nasm_x86_64(build: &mut BuildProgram, program: &CmdProgram) -> io::Result<()>{
@@ -6170,8 +6196,12 @@ fn to_nasm_x86_64(build: &mut BuildProgram, program: &CmdProgram) -> io::Result<
             writeln!(&mut f, "{}{}:",program.architecture.func_prefix,function_name)?;
         }
         let mut inst_count = 0;
-        nasm_x86_64_handle_scope(&mut f, build, program, TCScopeType::FUNCTION(function_name.clone()),&mut vec![HashMap::new()],0,0,&mut inst_count)?;
+        let mut stack_sizes: Vec<usize> = Vec::new();
+        nasm_x86_64_handle_scope(&mut f, build, program, TCScopeType::FUNCTION(function_name.clone()),&mut vec![HashMap::new()],&mut stack_sizes,0,0,&mut inst_count)?;
         if function_name == "main" {
+            let shadow_space: usize = if let ArcPassType::CUSTOM(argpassing) = &program.architecture.options.argumentPassing {
+                argpassing.shadow_space
+            } else { 0 };
             let mut argsize: usize = 0;
             for (_,local) in function.locals.iter() {
                 if argsize%8+local.get_size(program) > 8 {
@@ -6185,6 +6215,7 @@ fn to_nasm_x86_64(build: &mut BuildProgram, program: &CmdProgram) -> io::Result<
             if argsize%8 > 0 {
                 argsize += 8-argsize%8;
             }
+            argsize+=shadow_space;
             if argsize > 0 {
                 writeln!(&mut f, "   add rsp, {}",argsize)?;
             }
@@ -6192,6 +6223,7 @@ fn to_nasm_x86_64(build: &mut BuildProgram, program: &CmdProgram) -> io::Result<
             writeln!(&mut f, "   ret")?;
         }
     }
+    
     Ok(())
 
 }
