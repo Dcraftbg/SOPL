@@ -21,7 +21,7 @@ func strset(dst: *char,  size: size_t, val: char) {
     }
 }
 const nullptr = cast<ptr>(0);
-func strchr(src: *char, c: char, size: size_t : *char) {
+func strchr(src: *char, size: size_t, c: char : *char) {
     let found_index: size_t = -1;
     let index: size_t = 0;
     while index < size {
@@ -39,7 +39,7 @@ func strchr(src: *char, c: char, size: size_t : *char) {
 }
 func striseq(src: *char, size: size_t, srca: *char, sizea: size_t : bool) {
     if size != sizea {
-        return 1;
+        return 0;
     }
     let index: size_t = 0;
     while index < size {

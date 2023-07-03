@@ -1,0 +1,7 @@
+include "../../libs/libc/stdio.spl"
+func main(){
+    let a: int = 5;
+    let b: int = 6;
+    a*=b;
+    printf("a: %d",a);
+}

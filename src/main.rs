@@ -553,7 +553,7 @@ enum SetOp {
     MULSET,
     DIVSET,
 }
-//TODO: Fix *=
+
 impl SetOp {
     fn from_str(s: &str) -> Option<Self> {
         match s {
@@ -670,6 +670,7 @@ enum Expression {
     expr(Box<ExprTree>)
 }
 impl Expression {
+    //fn jump(&self, label: String) -> 
     fn unwrap_val(&self) -> &OfP {
         if let Expression::val(v) = self {
             v
@@ -759,14 +760,14 @@ impl Expression {
             }
         }
     }
-    fn result_of(&self,program: &CmdProgram,build: &BuildProgram, local_vars: &Vec<Locals>, loc: &ProgramLocation) -> Option<VarType> {
+    fn result_of(&self,program: &CmdProgram, build: &BuildProgram, local_vars: &Vec<Locals>, buffers: &Vec<BuildBuf>, loc: &ProgramLocation) -> Option<VarType> {
         match self {
-            Self::val(v) => v.var_type_t(build, local_vars),
+            Self::val(v) => v.var_type_t(build, local_vars,buffers),
             Self::expr(s) => {
                 if let Some(v1) = &s.left {
-                    let res1 = v1.result_of(program, build, local_vars,loc);
+                    let res1 = v1.result_of(program, build, local_vars,buffers,loc);
                     if let Some(v2) = &s.right {
-                        let res2 = v2.result_of(program, build, local_vars,loc);
+                        let res2 = v2.result_of(program, build, local_vars,buffers,loc);
                         if res1.is_some() && res2.is_some() && res1.as_ref().unwrap().weak_eq(&res2.as_ref().unwrap()) {
                             res1
                         }
@@ -796,7 +797,7 @@ impl Expression {
                 }
                 else if let Some(v2) = &s.right {
                     if s.op == Op::STAR {
-                        let res = v2.result_of(program, build, local_vars,loc);
+                        let res = v2.result_of(program, build, local_vars,buffers,loc);
                         let res = res.unwrap();
                         typ_assert!(loc,res.is_some_ptr(),"Error: Cannot dereference void pointer!");
                         res.get_ptr_val()
@@ -821,7 +822,7 @@ impl Expression {
                         }
                     }
                     else{
-                        v2.result_of(program, build, local_vars,loc)
+                        v2.result_of(program, build, local_vars,buffers,loc)
                     }
                 }
                 else {
@@ -1131,27 +1132,12 @@ impl ExprTree {
                         o = vec![Register::RAX.to_byte_size(left_oregs[0].size())];
                     }
                 }
-                // {
-                //     let leftregs1 = left.LEIRnasm(regs.clone(), f, program, build, local_vars, buffers, stack_size, loc)?;
-                //     com_assert!(loc,leftregs1.len() == 1, "TODO: Handle multi-parameter loading for expressions!");
-                //     let rightregs1 = right.LEIRnasm(regs[1..].to_vec(), f, program, build, local_vars, buffers, stack_size, loc)?;
-                //     com_assert!(loc,rightregs1.len() == 1, "TODO: Handle multi-parameter loading for expressions!");
-                //     if leftregs1[0].to_byte_size(8) != Register::RAX {
-                //         writeln!(f, "   mov {}, {}",Register::RAX.to_byte_size(leftregs1[0].size()),leftregs1[0])?;
-                //     }
-
-                //     writeln!(f, "   cqo")?;
-                //     writeln!(f, "   idiv {}",rightregs1[0].to_string())?;
-                //     o = vec![Register::RAX.to_byte_size(leftregs1[0].size())];
-                // }
+                
                 
             },
             Op::REMAINDER => {
-                //TODO: Re-implement this
-                //com_assert!(loc,regs[0].to_byte_size(8) == Register::RDX,"Error: Cannot do division with output register different from RAX");
                 let left = com_expect!(loc,self.left.as_ref(),"Error: Cannot evaluate Op '{}' without left parameter",Op::DIV.to_string());
                 let right = com_expect!(loc,self.right.as_ref(),"Error: Cannot evaluate Op '{}' without left parameter",Op::DIV.to_string());
-                //if left.is_ofp() 
                 match right {
                     Expression::expr(right_expr) => {
                         let leftregs1 = left.LEIRnasm(regs.clone(), f, program, build, local_vars, buffers, stack_size, loc)?;
@@ -1202,7 +1188,6 @@ impl ExprTree {
                 if let Some(left) = self.left.as_ref() {
                     com_assert!(loc,regs[0].to_byte_size(8) == Register::RAX,"Error: Cannot do multiplication with output register different from RAX");
                     let right = com_expect!(loc,self.right.as_ref(),"Error: Cannot evaluate Op '{}' without left parameter",Op::DIV.to_string());
-                    //if left.is_ofp() 
                     match right {
                         Expression::expr(right_expr) => {
                             let leftregs1 = left.LEIRnasm(regs.clone(), f, program, build, local_vars, buffers, stack_size, loc)?;
@@ -2455,8 +2440,13 @@ impl Iterator for Lexer<'_> {
                     }
                     else if c == '*' && self.cchar_offset(1).is_some(){
                         let mut already_alphabetic = false;
-                        while self.is_not_empty() && (c == '*' && !already_alphabetic) || c.is_alphabetic() {
+                        while self.is_not_empty() && (c == '*'  && !already_alphabetic) || c.is_alphabetic(){
                             c = self.cchar_s()?;
+                            if c=='=' && outstr=="*" {
+                                outstr+="= ";
+                                self.cursor+=2;
+                                break;
+                            }
                             self.cursor += 1;
                             outstr.push(c);
                             if c.is_alphabetic() {
@@ -2469,6 +2459,9 @@ impl Iterator for Lexer<'_> {
                         if outstr == "*" {
                             return Some(Token { typ: TokenType::Operation(Op::STAR), location: self.currentLocation.clone() });
                         }
+                        else if outstr=="*=" {
+                            return Some(Token { typ: TokenType::SETOperation(SetOp::MULSET), location: self.currentLocation.clone() });
+                        }
                         else {
                             let osize = outstr.chars().take_while(|&c| c == '*').count();
                             let otyp = &outstr[osize..];
@@ -2478,8 +2471,6 @@ impl Iterator for Lexer<'_> {
                                 return Some(Token { typ: TokenType::Definition(VarType::PTR(Ptr{typ: PtrTyp::VOID, inner_ref: osize-1})), location: self.currentLocation.clone() });
                             }
                             else {
-                                //TODO: Maybe a*b could be an issue V Fix this
-                                //todo!("Handle situation of unknown pointer! Make it return a Mul and reset back the cursor!");
                                 self.cursor -= outstr.len()-1;
                                 self.currentLocation.character -= (outstr.len()-1) as i32;
                                 
@@ -3101,7 +3092,7 @@ impl CallArg {
     }
 }
 type CallArgs = Vec<OfP>;
-// TODO: Introduce this for ADD, SUB, MUL, DIV
+
 #[derive(Debug, Clone)]
 enum OfP {
     REGISTER (Register),
@@ -3117,7 +3108,7 @@ enum OfP {
 }
 
 impl OfP {
-    fn var_type_t(&self, build: &BuildProgram, local_vars: &Vec<Locals>) -> Option<VarType> {
+    fn var_type_t(&self, build: &BuildProgram, local_vars: &Vec<Locals>, buffers: &Vec<BuildBuf>) -> Option<VarType> {
         
         match self {
             Self::REGISTER(reg) => Some(reg.to_var_type()),
@@ -3126,7 +3117,10 @@ impl OfP {
             Self::RESULT(f, _) => {        
                 build.functions.get(f)?.contract.Outputs.get(0).cloned()
             }
-            Self::BUFFER(_) => todo!(),
+            Self::BUFFER(i) => {
+                Some(VarType::PTR(Ptr::ref_to(buffers[i.to_owned()].typ.clone())))
+
+            },
             Self::GLOBALVAR(_) => todo!()
         }
     }
@@ -4921,11 +4915,11 @@ fn parse_token_to_build_inst(token: Token,lexer: &mut Lexer, program: &mut CmdPr
                                                     let size = par_expect!(ntok, ntok.typ.unwrap_numeric(build), "Error: Expected numeric value after coma to indicate the size of the buffer but found {}",ntok.typ);
                                                     par_assert!(ntok, size > 0, "Error: Cannot have buffer of size lower than or equal to 0");
                                                     let res = build.buffers.len();
-                                                    //build.global_vars.insert(name.clone(), GlobalVar { typ: GlobalVarType::BUFFER(res), loc: typ.location });
+                                                    
                                                     currentLocals.last_mut().unwrap().insert(name.clone(), VarType::PTR(Ptr::ref_to(buftyp.clone()))); // TODO: Implement VarType::BUFFER instead of all of this bullshit
                                                     currentScope.body_unwrap_mut().unwrap().push((lexer.currentLocation.clone(),Instruction::MOV(Expression::val(OfP::LOCALVAR(name.clone())),Expression::val(OfP::BUFFER(res)))));
                                                     currentScope.typ.buffers_unwrap_mut().unwrap().push(BuildBuf::from_parse_buf(buftyp.to_owned(), size as usize));
-                                                    //build.buffers.push(BuildBuf::from_parse_buf(buftyp.to_owned(), size as usize));
+                                                    
                                                     let ntok = par_expect!(lexer,lexer.next(),"Error: Ran out of tokens for global buffer initialization");
                                                     par_assert!(ntok, ntok.typ == TokenType::IntrinsicType(IntrinsicType::CLOSESQUARE), "Error: Expected close square bracket but found {}",ntok.typ);
                                                 }
@@ -5684,19 +5678,31 @@ fn nasm_x86_64_handle_scope(f: &mut File, build: &BuildProgram, program: &CmdPro
                 match op1 {
                     OfP::REGISTER(reg1) => {
                         let reg2 = Register::RAX.to_byte_size(reg1.size());
-                        op2.LEIRnasm(vec![reg2], f, program,build, &local_vars, &bufs,stack_size, loc)?;
-                        writeln!(f, "   imul {}, {}",reg1.to_string(), reg2.to_string())?;
+                        let res = op2.LEIRnasm(vec![reg2], f, program,build, &local_vars, &bufs,stack_size, loc)?;
+                        if res[0].to_byte_size(8) != Register::RAX {
+                            writeln!(f, "   mov {}, {}",Register::RAX.to_byte_size(res[0].size()),res[0])?
+                        }
+                        writeln!(f, "   cqo")?;
+                        writeln!(f, "   imul {}",reg1.to_string())?;
                     }
                     OfP::LOCALVAR(var1) => {
                         let var1 = com_expect!(loc,get_local_build(&local_vars, var1),"Error: Unknown variable found during compilation {}",var1);
                         let reg1 = Register::RAX.to_byte_size(var1.typ.get_size(program));
-                        op2.LEIRnasm(vec![reg1], f, program,build, &local_vars, &bufs,stack_size, loc)?;
+                        let res = op2.LEIRnasm(vec![reg1], f, program,build, &local_vars, &bufs,stack_size, loc)?;
+                        if res[0].to_byte_size(8) != Register::RAX {
+                            writeln!(f, "   mov {}, {}",Register::RAX.to_byte_size(res[0].size()),res[0])?
+                        }
                         if stack_size-var1.operand == 0 {
-                            writeln!(f, "   imul {} [rsp], {}",size_to_nasm_type(var1.typ.get_size(program)),reg1.to_string())?;
+                            writeln!(f, "   cqo")?;
+                            writeln!(f, "   imul {} [rsp]",size_to_nasm_type(var1.typ.get_size(program)))?;
+                            writeln!(f, "   mov {} [rsp], {}",size_to_nasm_type(var1.typ.get_size(program)),Register::RAX.to_byte_size(var1.typ.get_size(program)))?;
                         }
                         else {
-                            writeln!(f, "   imul {} [rsp+{}], {}",size_to_nasm_type(var1.typ.get_size(program)),stack_size-var1.operand,reg1.to_string())?;
+                            writeln!(f, "   cqo")?;
+                            writeln!(f, "   imul {} [rsp+{}]",size_to_nasm_type(var1.typ.get_size(program)),stack_size-var1.operand)?;
+                            writeln!(f, "   mov {} [rsp+{}], {}",size_to_nasm_type(var1.typ.get_size(program)),stack_size-var1.operand,Register::RAX.to_byte_size(var1.typ.get_size(program)))?;
                         }
+                        
                     },
                     _ => todo!()
                 }
@@ -6004,7 +6010,6 @@ fn nasm_x86_64_handle_scope(f: &mut File, build: &BuildProgram, program: &CmdPro
                 }
                 writeln!(f)?;
             }
-            //TODO: Re-enble these
             _ => todo!("Re-enable these:")
             
         }
@@ -6131,7 +6136,6 @@ fn to_nasm_x86_64(build: &mut BuildProgram, program: &CmdProgram) -> io::Result<
     writeln!(&mut f, "section .text")?;
 
     for (function_name,function) in build.functions.iter() {
-        // TODO: implement build.architecture.entry
         if program.in_mode != OptimizationMode::DEBUG && program.remove_unused_functions && !optimization.usedFuncs.contains(function_name) && function_name != "main" {
             continue;
         }
@@ -6264,17 +6268,14 @@ fn type_check_scope(build: &BuildProgram, program: &CmdProgram, scope: TCScopeTy
     if let Some(locals) = scope.get_locals(build) {
         currentLocals.push(locals.clone());
     }
-    let mut hasFoundRet = false;
-    // TODO: Add current locals (&Vec<Locals>)
+    let mut hasFoundRet = false;    
 
     for (loc, instruction) in scope.get_body(build).iter() {
         match instruction {
             Instruction::DEFVAR(_)           => {},
-            Instruction::MOV(_, _)           => {},
+            
             Instruction::CALLRAW(name,contract)        => {
                 let mut externContract = build.get_contract_of_symbol(name).unwrap_or(AnyContract { InputPool: ContractInputPool::new(), Outputs: vec![] }).clone();//build.externals.get(name).unwrap().contract.as_ref().unwrap_or(&AnyContract { InputPool: vec![], Outputs: vec![] }).clone();
-                
-
                 externContract.InputPool.reverse();
                 typ_assert!(loc, externContract.InputPool.len() == contract.len() || externContract.InputPool.is_dynamic, "Error: Expected: {} amount of arguments but found {}",externContract.InputPool.len(), contract.len());
                 for arg in contract {
@@ -6334,27 +6335,33 @@ fn type_check_scope(build: &BuildProgram, program: &CmdProgram, scope: TCScopeTy
                     }
                 }
             },
+            Instruction::MOV(o, e)           => {
+                let ot = o.result_of(program,build, &currentLocals,scope.get_buffers(build),loc);
+                let et = e.result_of(program, build, &currentLocals,scope.get_buffers(build),loc);
+                typ_assert!(loc,ot.is_some() && et.is_some(), "Error: Expected result but found nothing!");
+                typ_assert!(loc,ot.as_ref().unwrap().weak_eq(&et.as_ref().unwrap()) || ot.as_ref().unwrap().is_ptr() && ot.as_ref().unwrap().is_numeric(), "Error: Types did not match Expected: {} but found {}",ot.unwrap().to_string(false),et.unwrap().to_string(false));
+            },
             Instruction::ADDSET(o, e)           => {
-                let ot = o.result_of(program,build, &currentLocals,loc);
-                let et = e.result_of(program, build, &currentLocals,loc);
+                let ot = o.result_of(program,build, &currentLocals,scope.get_buffers(build),loc);
+                let et = e.result_of(program, build, &currentLocals,scope.get_buffers(build),loc);
                 typ_assert!(loc,ot.is_some() && et.is_some(), "Error: Expected result but found nothing!");
                 typ_assert!(loc,ot.as_ref().unwrap().weak_eq(&et.as_ref().unwrap()) || ot.as_ref().unwrap().is_ptr() && ot.as_ref().unwrap().is_numeric(), "Error: Types did not match Expected: {} but found {}",ot.unwrap().to_string(false),et.unwrap().to_string(false));
             },
             Instruction::SUBSET(o, e)           => {
-                let ot = o.result_of(program,build, currentLocals,loc);
-                let et = e.result_of(program, build, currentLocals,loc);
+                let ot = o.result_of(program,build, currentLocals,scope.get_buffers(build),loc);
+                let et = e.result_of(program, build, currentLocals,scope.get_buffers(build),loc);
                 typ_assert!(loc,ot.is_some() && et.is_some(), "Error: Expected result but found nothing!");
                 typ_assert!(loc,ot.as_ref().unwrap().weak_eq(&et.as_ref().unwrap()), "Error: Types did not match Expected: {} but found {}",ot.unwrap().to_string(false),et.unwrap().to_string(false));
             },
             Instruction::MULSET(o, e)           => {
-                let ot = o.result_of(program,build, currentLocals,loc);
-                let et = e.result_of(program, build, currentLocals,loc);
+                let ot = o.result_of(program,build, currentLocals,scope.get_buffers(build),loc);
+                let et = e.result_of(program, build, currentLocals,scope.get_buffers(build),loc);
                 typ_assert!(loc,ot.is_some() && et.is_some(), "Error: Expected result but found nothing!");
                 typ_assert!(loc,ot.as_ref().unwrap().weak_eq(&et.as_ref().unwrap()), "Error: Types did not match Expected: {} but found {}",ot.unwrap().to_string(false),et.unwrap().to_string(false));
             },
             Instruction::DIVSET(o, e)           => {
-                let ot = o.result_of(program,build, currentLocals,loc);
-                let et = e.result_of(program, build, currentLocals,loc);
+                let ot = o.result_of(program,build, currentLocals,scope.get_buffers(build),loc);
+                let et = e.result_of(program, build, currentLocals,scope.get_buffers(build),loc);
                 typ_assert!(loc,ot.is_some() && et.is_some(), "Error: Expected result but found nothing!");
                 typ_assert!(loc,ot.as_ref().unwrap().weak_eq(&et.as_ref().unwrap()), "Error: Types did not match Expected: {} but found {}",ot.unwrap().to_string(false),et.unwrap().to_string(false));
             },
@@ -6398,13 +6405,13 @@ fn type_check_scope(build: &BuildProgram, program: &CmdProgram, scope: TCScopeTy
             Instruction::INTERRUPT(_)        => {},
             Instruction::EXPAND_SCOPE(s)       => if type_check_scope(build, program, TCScopeType::NORMAL(&s), currentLocals) { hasFoundRet = true},
             Instruction::EXPAND_IF_SCOPE(s)    => {
-                let res = s.typ.unwrap_expr().result_of(program, build, &currentLocals,loc);
+                let res = s.typ.unwrap_expr().result_of(program, build, &currentLocals,scope.get_buffers(build),loc);
                 typ_assert!(loc,res.is_some() && res.as_ref().unwrap().weak_eq(&VarType::BOOLEAN), "Error: Expected result of expression to be boolean but found: {}",if let Some(res) = res { res.to_string(false)} else { "None".to_owned()});
                 if type_check_scope(build, program, TCScopeType::NORMAL(&s), currentLocals) { hasFoundRet = true}
             }
             Instruction::EXPAND_ELSE_SCOPE(s)  => if type_check_scope(build, program, TCScopeType::NORMAL(&s), currentLocals) { hasFoundRet = true},
             Instruction::EXPAND_WHILE_SCOPE(s) => {
-                let res = s.typ.unwrap_expr().result_of(program, build, &currentLocals,loc);
+                let res = s.typ.unwrap_expr().result_of(program, build, &currentLocals,scope.get_buffers(build),loc);
                 typ_assert!(loc,res.is_some() && res.as_ref().unwrap().weak_eq(&VarType::BOOLEAN), "Error: Expected result of expression to be boolean but found: {}",if let Some(res) = res { res.to_string(false)} else { "None".to_owned()});
                 if type_check_scope(build, program, TCScopeType::NORMAL(&s), currentLocals) { hasFoundRet = true}
             }
@@ -6798,7 +6805,7 @@ fn main() {
 - [x] TODO: Update README.md flags
 - [x] TODO: Push to master
 
-- [ ] TODO: Fix something like this (which currently compiles but nasm or any other assembler doesn't allow it since its invalid assembly):
+- [x] TODO: Fix something like this (which currently compiles but nasm or any other assembler doesn't allow it since its invalid assembly):
 func a() {
     @goto("b");
 }
