@@ -3639,7 +3639,7 @@ impl RawConstValueType {
         match self {
             Self::INT(v) => format!("{}",v),
             Self::LONG(v) => format!("{}",v),
-            Self::STR(v) => format!("{}",build.stringdefs.get(v).unwrap().Data),
+            Self::STR(v) => format!("\"{}\"",build.stringdefs.get(v).unwrap().Data),
             Self::PTR(_, p) => format!("ptr {}",p)
         }
     }
@@ -3688,22 +3688,23 @@ impl RawConstValueType {
                 let sstr = build.stringdefs.get(id).unwrap();
                 match sstr.Typ {
                     ProgramStringType::STR  => {
+
                         
-                        
-                        let oreg2 = iregs[0].to_byte_size(8);
-                        let oreg = if program.architecture.bits == 32 {
+                        o = if program.architecture.bits == 32 {
                             let reg = iregs[0].to_byte_size(4);
+                            let reg2 = iregs[1].to_byte_size(4);
                             writeln!(f, "   mov {}, _STRING_{}_",reg.to_string(),id.to_string().replace("-", ""))?;
-                            reg
+                            writeln!(f, "   mov {}, {}",reg2,sstr.Data.len())?;
+                            vec![reg,reg2]
                         }
                         else {
                             let reg = iregs[0].to_byte_size(8);
+                            let reg2 = iregs[1].to_byte_size(8);
                             writeln!(f, "   lea {}, [rel _STRING_{}_]",reg.to_string(),id.to_string().replace("-", ""))?;
-                            reg
+                            writeln!(f, "   mov {}, {}",reg2,sstr.Data.len())?;
+                            vec![reg,reg2]
                         };
-                        //writeln!(f, "   lea {}, [rel _STRING_{}_]",oreg.to_string(),id.to_string().replace("-", ""))?;
-                        writeln!(f, "   mov {}, {}",oreg2.to_string(),sstr.Data.len())?;
-                        o = vec![oreg]
+                        
                     },
                     ProgramStringType::CSTR => {
                         let oreg = if program.architecture.bits == 32 {
@@ -5522,7 +5523,6 @@ fn nasm_x86_64_load_args(f: &mut File, scope: &TCScopeType, build: &BuildProgram
 
         }
         for (_, iarg) in scope.get_contract(build).unwrap().Inputs.iter().rev() {
-         
             if custom_build.nums_ptrs.is_some() && custom_build.nums_ptrs.as_ref().unwrap().len() > int_ptr_count-1 {
                 let osize = iarg.get_size(program);
                 let ireg = &custom_build.nums_ptrs.as_ref().unwrap()[int_ptr_count-1].to_byte_size(osize);
@@ -6391,34 +6391,19 @@ fn type_check_scope(build: &BuildProgram, program: &CmdProgram, scope: TCScopeTy
 
             Instruction::CALL(funcn, args)             => {
                 let function = typ_expect!(loc, build.functions.get(funcn), "Error: unknown function call to {}, Function may not exist!",funcn);
-                let mut functionIP = function.contract.Inputs.clone();
-                typ_assert!(loc, functionIP.len() == args.len(), "Error: NON-matching function arguments. Expected: \n{}\nBut found: \n{}",
-                {  
-                    let mut o: String = String::new();
-                    for (v,t) in functionIP.iter() {
-                        o += &format!("   {} ({})\n",t.to_string(false),v);
-                    }
-                    &o[..o.len()-1].to_owned()
-                },
-                {
-                    let mut o: String = String::new();
-                    for arg in args.iter() {
-                        o += &format!("   {} ({})\n",arg.var_type_t(build, currentLocals,scope.get_buffers(build)).unwrap().to_string(false),arg.to_string(build))
-                    }
-                    &o[..o.len()-1].to_owned()
-                });
-            
+                let mut functionIP: Vec<(&String, &VarType)> = function.contract.Inputs.iter().collect();
+                
                 //println!("functionIP: {:?}\nargs: {:?}",functionIP,args);
-                for arg in args.iter().rev() {
+                for arg in args.iter() {
                     match arg {
                         OfP::LOCALVAR(name) => {
-                            let (_,etyp) = typ_expect!(loc, functionIP.pop_back(), "Error: Additional arguments provided for external that doesn't take in any more arguments!");
+                            let (_,etyp) = typ_expect!(loc, if functionIP.len() > 0 { Some(functionIP.remove(0)) } else { None }, "Error: Additional arguments provided for external that doesn't take in any more arguments!");
                             let local = get_local(currentLocals, &name).unwrap();
                             //println!("arg: {:?}\netyp: {:?}",local,etyp);
                             typ_assert!(loc,etyp.weak_eq(&local),"Error: Incompatible types for contract\nExpected: {}\nFound: ({}) {}",etyp.to_string(false),name,local.to_string(false));
                         },
                         OfP::GLOBALVAR(name) => {
-                            let (_,etyp) = typ_expect!(loc, functionIP.pop_back(), "Error: Additional arguments provided for external that doesn't take in any more arguments!");
+                            let (_,etyp) = typ_expect!(loc, if functionIP.len() > 0 { Some(functionIP.remove(0)) } else { None }, "Error: Additional arguments provided for external that doesn't take in any more arguments!");
                             let var = match &build.global_vars.get(name).unwrap().typ {
                                 GlobalVarType::BUFFER(b) => {
                                     VarType::PTR(Ptr::ref_to(build.buffers[*b].typ.clone()))
@@ -6431,12 +6416,30 @@ fn type_check_scope(build: &BuildProgram, program: &CmdProgram, scope: TCScopeTy
                         OfP::CONST(Const) => {
                             let typs = Const.to_type(build);
                             for typ in typs {
-                                let (_,etyp) = typ_expect!(loc, functionIP.pop_back(), "Error: Additional arguments provided for external that doesn't take in any more arguments!\nExpected: Nothing\nFound: {}\n",typ.to_string(false));
+                                let (_,etyp) = typ_expect!(loc, if functionIP.len() > 0 { Some(functionIP.remove(0)) } else { None }, "Error: Additional arguments provided for external that doesn't take in any more arguments!\nExpected: Nothing\nFound: {}\n",typ.to_string(false));
                                 typ_assert!(loc,etyp.weak_eq(&typ),"Error: Incompatible types for contract\nExpected: {}\nFound: {}",etyp.to_string(false),typ.to_string(false));
                             }
                         },
                         _ => todo!()
                     }
+                }
+                if functionIP.len() > 0 {
+                    let functionIP = function.contract.Inputs.clone();
+                    typ_error!(loc, "Error: NON-matching function arguments (function defined here: {}). Expected: \n{}\nBut found: \n{}",function.loc_display(),
+                    {  
+                        let mut o: String = String::new();
+                        for (v,t) in functionIP.iter() {
+                            o += &format!("   {} ({})\n",t.to_string(false),v);
+                        }
+                        &o[..o.len()-1].to_owned()
+                    },
+                    {
+                        let mut o: String = String::new();
+                        for arg in args.iter() {
+                            o += &format!("   {} ({})\n",arg.var_type_t(build, currentLocals,scope.get_buffers(build)).unwrap().to_string(false),arg.to_string(build))
+                        }
+                        &o[..o.len()-1].to_owned()
+                    });
                 }
             },
             Instruction::FNBEGIN()           => {},

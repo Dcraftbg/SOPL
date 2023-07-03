@@ -1,7 +1,9 @@
 include "../../libs/libc/stdio.spl"
-func print_msg(msg: *char) {
+func print_msg3(msg: *char, msg2: *char, msg3: *char, size: size_t) {
     puts(msg);
+    puts(msg2);
+    puts(msg3);
 }
 func main(){
-    print_msg("Hello","World")
+    print_msg3("Hello","World", "bruh");
 }
