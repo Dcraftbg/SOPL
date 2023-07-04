@@ -9,7 +9,6 @@ use core::{num, panic};
 use std::{env, process::{exit, Command, Stdio}, path::{Path, PathBuf}, ffi::OsStr, str::{FromStr, Chars}, collections::{HashMap, HashSet}, hash::Hash, fs::{File, self}, io::{Read, Write, self}, fmt::{format, Display}, borrow::{BorrowMut, Borrow}, clone, time::{SystemTime, Instant}, rc::Rc, iter::Peekable, cell::{RefCell, Ref, RefMut}, ops::{Deref, DerefMut}, vec, sync::Arc, os, f32::consts::E, any::Any};
 use linked_hash_map::LinkedHashMap;
 use serde_json::Value;
-use uuid::Uuid;
 mod cfor;
 
 
@@ -3066,12 +3065,14 @@ impl CallArg {
                 None
             },
             TokenType::StringType(val) => {
-                let uuid = build.insert_unique_str(ProgramString { Typ: ProgramStringType::STR, Data: val.clone() });
-                Some(Self { typ: CallArgType::CONSTANT(RawConstValueType::STR(uuid)), loc: tok.location.clone()})
+                //let uuid = build.(ProgramString { Typ: ProgramStringType::STR, Data: val.clone() });
+                
+                let id = build.insert_new_str(ProgramString { Typ: ProgramStringType::STR, Data: val.clone() });
+                Some(Self { typ: CallArgType::CONSTANT(RawConstValueType::STR(id)), loc: tok.location.clone()})
             },
             TokenType::CStringType(val) => {
-                let uuid = build.insert_unique_str(ProgramString { Typ: ProgramStringType::CSTR, Data: val.clone() });
-                Some(Self { typ: CallArgType::CONSTANT(RawConstValueType::STR(uuid)), loc: tok.location.clone()})
+                let id = build.insert_new_str(ProgramString { Typ: ProgramStringType::CSTR, Data: val.clone() });
+                Some(Self { typ: CallArgType::CONSTANT(RawConstValueType::STR(id)), loc: tok.location.clone()})
             },
             TokenType::Number32(val) => {
                 Some(Self { typ: CallArgType::CONSTANT(RawConstValueType::INT(val.clone())), loc: tok.location.clone()})
@@ -3192,35 +3193,35 @@ impl OfP {
                         writeln!(f, "   mov {}, {}",reg.to_string(),val)?;
                         out.push(reg);
                     },
-                    RawConstValueType::STR(val) => {
-                        let str = build.stringdefs.get(val).unwrap();
+                    RawConstValueType::STR(index) => {
+                        let str = &build.stringdefs[index.to_owned()];
                         match str.Typ {
                             ProgramStringType::STR => {
                                 com_assert!(loc,regs.len() > 1, "Error: Cannot load Ofp into register!");
                                 let reg1 = regs[1];
                                 let reg = if program.architecture.bits == 32 {
                                     let reg = regs[0].to_byte_size(4);
-                                    writeln!(f, "   mov {}, _STRING_{}_",reg.to_string(),val.to_string().replace("-", ""))?;
+                                    writeln!(f, "   mov {}, _STRING_{}_",reg.to_string(),index)?;
                                     reg
                                 }
                                 else {
                                     let reg = regs[0].to_byte_size(8);
-                                    writeln!(f, "   lea {}, [rel _STRING_{}_]",reg.to_string(),val.to_string().replace("-", ""))?;
+                                    writeln!(f, "   lea {}, [rel _STRING_{}_]",reg.to_string(),index)?;
                                     reg
                                 };
-                                writeln!(f, "   mov {}, {}",reg1.to_string(),build.stringdefs.get(val).unwrap().Data.len())?;
+                                writeln!(f, "   mov {}, {}",reg1.to_string(),str.Data.len())?;
                                 out.push(reg);
                                 out.push(reg1);
                             },
                             ProgramStringType::CSTR => {
                                 let reg = if program.architecture.bits == 32 {
                                     let reg = regs[0].to_byte_size(4);
-                                    writeln!(f, "   mov {}, _STRING_{}_",reg.to_string(),val.to_string().replace("-", ""))?;
+                                    writeln!(f, "   mov {}, _STRING_{}_",reg.to_string(),index)?;
                                     reg
                                 }
                                 else {
                                     let reg = regs[0].to_byte_size(8);
-                                    writeln!(f, "   lea {}, [rel _STRING_{}_]",reg.to_string(),val.to_string().replace("-", ""))?;
+                                    writeln!(f, "   lea {}, [rel _STRING_{}_]",reg.to_string(),index)?;
                                     reg
                                 };
                                 out.push(reg);
@@ -3275,8 +3276,8 @@ impl OfP {
                 None
             },
             TokenType::Register(reg) => Some(Self::REGISTER(reg.clone())),
-            TokenType::StringType(val) => Some(Self::CONST(RawConstValueType::STR(build.insert_unique_str(ProgramString { Typ: ProgramStringType::STR, Data:  val.clone()})))),
-            TokenType::CStringType(val)=> Some(Self::CONST(RawConstValueType::STR(build.insert_unique_str(ProgramString { Typ: ProgramStringType::CSTR, Data: val.clone() })))),
+            TokenType::StringType(val) => Some(Self::CONST(RawConstValueType::STR(build.insert_new_str(ProgramString { Typ: ProgramStringType::STR, Data:  val.clone()})))),
+            TokenType::CStringType(val)=> Some(Self::CONST(RawConstValueType::STR(build.insert_new_str(ProgramString { Typ: ProgramStringType::CSTR, Data: val.clone() })))),
             TokenType::Number32(val)      => Some(Self::CONST(RawConstValueType::INT(val.clone()))),
             TokenType::Number64(val)      => Some(Self::CONST(RawConstValueType::LONG(val.clone()))),
             _ => None
@@ -3632,7 +3633,7 @@ impl ConstValueType {
 enum RawConstValueType{
     INT(i32),
     LONG(i64),
-    STR(Uuid),
+    STR(usize),
     PTR(Ptr, i64)
 }
 impl RawConstValueType {
@@ -3640,7 +3641,7 @@ impl RawConstValueType {
         match self {
             Self::INT(v) => format!("{}",v),
             Self::LONG(v) => format!("{}",v),
-            Self::STR(v) => format!("\"{}\"",build.stringdefs.get(v).unwrap().Data),
+            Self::STR(v) => format!("\"{}\"",build.stringdefs[v.to_owned()].Data),
             Self::PTR(_, p) => format!("ptr {}",p)
         }
     }
@@ -3652,8 +3653,8 @@ impl RawConstValueType {
             RawConstValueType::LONG(_) => {
                 vec![VarType::LONG]
             },
-            RawConstValueType::STR(UUID) => {
-                let val = build.stringdefs.get(UUID).unwrap();
+            RawConstValueType::STR(index) => {
+                let val = &build.stringdefs[index.to_owned()];
                 match val.Typ {
                     ProgramStringType::STR =>  vec![VarType::PTR(Ptr { typ: PtrTyp::TYP(Box::new(VarType::CHAR)), inner_ref: 0}), VarType::LONG],
                     ProgramStringType::CSTR => vec![VarType::PTR(Ptr { typ: PtrTyp::TYP(Box::new(VarType::CHAR)), inner_ref: 0})],
@@ -3685,23 +3686,21 @@ impl RawConstValueType {
                 writeln!(f, "   mov {}, {}",oreg.to_string(),val)?;
                 o = vec![oreg]
             },
-            RawConstValueType::STR(id) => {
-                let sstr = build.stringdefs.get(id).unwrap();
+            RawConstValueType::STR(index) => {
+                let sstr = &build.stringdefs[index.to_owned()];
                 match sstr.Typ {
                     ProgramStringType::STR  => {
-
-                        
                         o = if program.architecture.bits == 32 {
                             let reg = iregs[0].to_byte_size(4);
                             let reg2 = iregs[1].to_byte_size(4);
-                            writeln!(f, "   mov {}, _STRING_{}_",reg.to_string(),id.to_string().replace("-", ""))?;
+                            writeln!(f, "   mov {}, _STRING_{}_",reg.to_string(),index)?;
                             writeln!(f, "   mov {}, {}",reg2,sstr.Data.len())?;
                             vec![reg,reg2]
                         }
                         else {
                             let reg = iregs[0].to_byte_size(8);
                             let reg2 = iregs[1].to_byte_size(8);
-                            writeln!(f, "   lea {}, [rel _STRING_{}_]",reg.to_string(),id.to_string().replace("-", ""))?;
+                            writeln!(f, "   lea {}, [rel _STRING_{}_]",reg.to_string(),index)?;
                             writeln!(f, "   mov {}, {}",reg2,sstr.Data.len())?;
                             vec![reg,reg2]
                         };
@@ -3710,12 +3709,12 @@ impl RawConstValueType {
                     ProgramStringType::CSTR => {
                         let oreg = if program.architecture.bits == 32 {
                             let reg = iregs[0].to_byte_size(4);
-                            writeln!(f, "   mov {}, _STRING_{}_",reg.to_string(),id.to_string().replace("-", ""))?;
+                            writeln!(f, "   mov {}, _STRING_{}_",reg.to_string(),index)?;
                             reg
                         }
                         else {
                             let reg = iregs[0].to_byte_size(8);
-                            writeln!(f, "   lea {}, [rel _STRING_{}_]",reg.to_string(),id.to_string().replace("-", ""))?;
+                            writeln!(f, "   lea {}, [rel _STRING_{}_]",reg.to_string(),index)?;
                             reg
                         };
                         o = vec![oreg]
@@ -3774,21 +3773,19 @@ struct GlobalVar {
 struct BuildProgram {
     externals:    HashMap<String,External>,
     functions:    HashMap<String, Function>,
-    stringdefs:   HashMap<Uuid,ProgramString>,
+    stringdefs:   Vec<ProgramString>,
     constdefs:    HashMap<String, RawConstValue>,
     dll_imports:  HashMap<String, DLL_import>,
     dll_exports:  HashMap<String, DLL_export>,
     global_vars:  HashMap<String, GlobalVar>,
-    buffers:      Vec<BuildBuf>
+    buffers:      Vec<BuildBuf>,
+    stringoffset: usize,
 }
 impl BuildProgram {
-    fn insert_unique_str(&mut self, str: ProgramString) -> Uuid {
-        let mut UUID: Uuid = Uuid::new_v4();
-        while self.stringdefs.contains_key(&UUID) {
-            UUID = Uuid::new_v4();
-        }
-        self.stringdefs.insert(UUID.clone(), str);
-        UUID
+    fn insert_new_str(&mut self, str: ProgramString) -> usize {
+        let id = self.stringdefs.len()+self.stringoffset;
+        self.stringdefs.push(str);
+        id
     }
     fn contains_symbol(&self, str: &String) -> bool {
         self.constdefs.contains_key(str) || self.dll_imports.contains_key(str) || self.externals.contains_key(str) || self.functions.contains_key(str) || self.global_vars.contains_key(str)
@@ -3821,9 +3818,10 @@ impl BuildProgram {
         None
     }
     fn new() -> Self {
-        Self { externals: HashMap::new(), functions: HashMap::new(),stringdefs: HashMap::new(), constdefs: HashMap::new(), dll_imports: HashMap::new(), dll_exports: HashMap::new(),
+        Self { externals: HashMap::new(), functions: HashMap::new(),stringdefs: Vec::new(), constdefs: HashMap::new(), dll_imports: HashMap::new(), dll_exports: HashMap::new(),
             global_vars: HashMap::new(), 
-            buffers: Vec::new()
+            buffers: Vec::new(),
+            stringoffset: 0
         }
     }
 }
@@ -3836,7 +3834,7 @@ enum VarType {
     INT,
     LONG,
     PTR(Ptr),
-    CUSTOM(Uuid),
+    CUSTOM(usize),
 }
 impl VarType {
     fn is_numeric(&self) -> bool {
@@ -4206,8 +4204,8 @@ fn eval_const_def(lexer: &mut Lexer, build: &mut BuildProgram, until: TokenType)
                     RawConstValueType::LONG(val) => {
                         varStack.push(ConstValueType::LONG(val));
                     }
-                    RawConstValueType::STR(ref UUID)       => {
-                        let d = build.stringdefs.get(UUID).unwrap();
+                    RawConstValueType::STR(index)       => {
+                        let d = &build.stringdefs[index];
                         varStack.push(ConstValueType::STR(d.Data.clone(),d.Typ.clone()));
                     }
                     RawConstValueType::PTR(ref ptr, val) => {
@@ -4723,30 +4721,31 @@ fn parse_token_to_build_inst(token: Token,lexer: &mut Lexer, program: &mut CmdPr
                             lf.currentLocation.file = Rc::new(String::from(p.join(&include_p).to_str().unwrap().replace("\\", "/")));
                             let mut nprogram = program.clone();
                             nprogram.path = String::from(p.join(&include_p).to_str().unwrap().replace("\\", "/"));
-                            let mut build2 = parse_tokens_to_build(&mut lf, &mut nprogram,include_folders);
+                            let build2 = parse_tokens_to_build(&mut lf, &mut nprogram,include_folders,build.stringoffset+build.stringdefs.len());
                             build.externals.extend(build2.externals);
-                            for (strdefId,_strdef) in build2.stringdefs.iter() {
-                                let orgstrdefId  = strdefId.clone();
-                                let mut strdefId = strdefId.clone();
-                                let isContaining = build.stringdefs.contains_key(&strdefId);
-                                while build.stringdefs.contains_key(&strdefId) || build2.stringdefs.contains_key(&strdefId) {
-                                    strdefId = Uuid::new_v4();
-                                }
-                                if isContaining {
-                                    for (_, cn_cn) in build2.constdefs.iter_mut() {
-                                        match cn_cn.typ {
-                                            _ => {}
-                                            _ => {}
-                                            RawConstValueType::STR(ref mut val) => {
-                                                if &orgstrdefId == val {
-                                                    *val = strdefId
-                                                }
-                                            },
-                                        }
-                                    }
-                                }
-                            }
                             build.stringdefs.extend(build2.stringdefs);
+                            // for (strdefId,_strdef) in build2.stringdefs.iter() {
+                            //     let orgstrdefId  = strdefId.clone();
+                            //     let mut strdefId = strdefId.clone();
+                            //     let isContaining = build.stringdefs.contains_key(&strdefId);
+                            //     while build.stringdefs.contains_key(&strdefId) || build2.stringdefs.contains_key(&strdefId) {
+                            //         strdefId = Uuid::new_v4();
+                            //     }
+                            //     if isContaining {
+                            //         for (_, cn_cn) in build2.constdefs.iter_mut() {
+                            //             match cn_cn.typ {
+                            //                 _ => {}
+                            //                 _ => {}
+                            //                 RawConstValueType::STR(ref mut val) => {
+                            //                     if &orgstrdefId == val {
+                            //                         *val = strdefId
+                            //                     }
+                            //                 },
+                            //             }
+                            //         }
+                            //     }
+                            // }
+                            //build.stringdefs.extend(build2.stringdefs);
                             for (fn_name,fn_fn) in build2.functions {
                                 let _loc = fn_fn.location.clone();
                                 match build.functions.insert(fn_name.clone(), fn_fn) {
@@ -4833,12 +4832,7 @@ fn parse_token_to_build_inst(token: Token,lexer: &mut Lexer, program: &mut CmdPr
                             RawConstValue {typ: RawConstValueType::LONG(rval), loc: val.loc}
                         }
                         ConstValueType::STR(rval, typ) => {
-                            let mut UUID = Uuid::new_v4();
-                            while build.stringdefs.contains_key(&UUID) {
-                                UUID = Uuid::new_v4();
-                            }
-                            build.stringdefs.insert(UUID,ProgramString {Data: rval, Typ: typ});
-                            RawConstValue {typ: RawConstValueType::STR(UUID), loc: val.loc}
+                            RawConstValue {typ: RawConstValueType::STR(build.insert_new_str(ProgramString {Data: rval, Typ: typ})), loc: val.loc}
                         }
                         ConstValueType::PTR(typ,v) => {
                             RawConstValue {typ: RawConstValueType::PTR(typ, v), loc: val.loc}
@@ -5252,8 +5246,9 @@ fn parse_token_to_build_inst(token: Token,lexer: &mut Lexer, program: &mut CmdPr
     }
 
 }
-fn parse_tokens_to_build(lexer: &mut Lexer, program: &mut CmdProgram, include_folders: &HashSet<PathBuf>) -> BuildProgram {
+fn parse_tokens_to_build(lexer: &mut Lexer, program: &mut CmdProgram, include_folders: &HashSet<PathBuf>, string_offset: usize) -> BuildProgram {
     let mut build: BuildProgram = BuildProgram::new();
+    build.stringoffset = string_offset;
     let mut scopeStack: ScopeStack = vec![];
     let mut currentLocals: Vec<Locals> = Vec::new();
     let mut currentLabels: HashSet<String> = HashSet::new();
@@ -5266,7 +5261,7 @@ fn parse_tokens_to_build(lexer: &mut Lexer, program: &mut CmdProgram, include_fo
 }
 
 struct optim_ops {
-    usedStrings: HashMap<Uuid, String>,
+    usedStrings: HashMap<usize, String>,
     usedExterns: HashSet<String>,
     usedFuncs: HashSet<String>,
 }
@@ -5283,8 +5278,8 @@ fn optimization_ops_scope(build: &BuildProgram, program: &CmdProgram, scope: TCS
                     match arg {
                         OfP::CONST(val) => {
                             match val {
-                                RawConstValueType::STR(uuid) => {
-                                    out.usedStrings.insert(uuid.clone(), fn_name.clone());
+                                RawConstValueType::STR(id) => {
+                                    out.usedStrings.insert(id.clone(), fn_name.clone());
                                 },
                                 _ => {}
                             }
@@ -6093,9 +6088,9 @@ fn to_nasm_x86_64(build: &mut BuildProgram, program: &CmdProgram) -> io::Result<
     writeln!(&mut f, "section .data")?;
 
 
-    for (UUID,stridef) in build.stringdefs.iter(){
-        if program.in_mode == OptimizationMode::DEBUG || (optimization.usedStrings.contains_key(UUID) && (optimization.usedFuncs.contains(optimization.usedStrings.get(UUID).unwrap()) || !program.remove_unused_functions || optimization.usedStrings.get(UUID).expect(&format!("Could not find: {}",UUID)) == "main")) {
-            write!(&mut f, "   _STRING_{}_: db ",UUID.to_string().replace("-", ""))?;
+    for (id,stridef) in build.stringdefs.iter().enumerate(){
+        if program.in_mode == OptimizationMode::DEBUG || (optimization.usedStrings.contains_key(&id) && (optimization.usedFuncs.contains(optimization.usedStrings.get(&id).unwrap()) || !program.remove_unused_functions || optimization.usedStrings.get(&id).expect(&format!("Could not find: {}",&id)) == "main")) {
+            write!(&mut f, "   _STRING_{}_: db ",id)?;
             for chr in stridef.Data.chars() {
                 write!(&mut f, "{}, ",(chr as u8))?;
             }
@@ -6111,11 +6106,11 @@ fn to_nasm_x86_64(build: &mut BuildProgram, program: &CmdProgram) -> io::Result<
             }
         }
         else if program.print_unused_warns || program.print_unused_strings {
-            println!("[NOTE] Unused string:   <{}> \"{}\" - This is probably due to a constant definition that was never used or a function that may have used that strings, that got cut off from the final build",UUID, stridef.Data.escape_default());
+            println!("[NOTE] Unused string:   <{}> \"{}\" - This is probably due to a constant definition that was never used or a function that may have used that strings, that got cut off from the final build",id, stridef.Data.escape_default());
             for (cd_name, cd) in build.constdefs.iter() {
                 match cd.typ {
-                    RawConstValueType::STR(ref id) => {
-                        if id == UUID {
+                    RawConstValueType::STR(id2) => {
+                        if id == id2 {
                             println!("       ^ Found matching constant definition: \"{}\" at {}",cd_name,cd.loc.loc_display());
                         }
                     }
@@ -6517,18 +6512,21 @@ fn type_check_build(build: &mut BuildProgram, program: &CmdProgram) {
 fn usage(program: &String) {
     println!("--------------------------------------------");
     println!("{} [flags]",program);
+    println!("     Currently supported targets: ");
     list_targets(9);
     println!("     flags: ");
-    println!("         -t (target)                         -> compiles to the given target (default is nasm_x86_64)");
-    println!("         -o (output path)                    -> outputs to that file (example: hello.asm in nasm_x86_64 mode). If the output path is not specified it defaults to the modes default (for nasm_x86_64 thats a.asm)");
-    println!("         -r                                  -> runs the program for you if the option is available for that language mode (for example in nasm_x86_64 it calls nasm with gcc to link it to an executeable)");
-    println!("         -b                                  -> builds the program for you if the option is available for that language mode");
-    println!("         -release                            -> builds the program in release mode");
-    println!("         -ntc                                -> (NoTypeChecking) Disable type checking");
-    println!("         -warn (all, funcs, externs, strings)-> Enable unused warns for parameter");
-    println!("         -ruf                                -> Remove unused functions");
-    println!("         -arc (builtin arc)                  -> builds for a builtin architecture");
-    println!("         -arc - (path to custom arc)         -> builds for a custom architecture following the syntax described in ./examples/arcs");
+    println!("         -t (target)                                     -> compiles to the given target (default is nasm_x86_64)");
+    println!("         -o (output path)                                -> outputs to that file (example: hello.asm in nasm_x86_64 mode). If the output path is not specified it defaults to the modes default (for nasm_x86_64 thats a.asm)");
+    println!("         (NOT RECOMMENDED - use lighthouse instead) -r   -> runs the program for you if the option is available for that language mode (for example in nasm_x86_64 it calls nasm with gcc to link it to an executeable)");
+    println!("         (NOT RECOMMENDED - use lighthouse instead) -b   -> builds the program for you if the option is available for that language mode");
+    println!("         -i (path to directory to shortcut)              -> Adds a shortcut when including (if it finds the file it automatically expands the path) so you could do -i libs/libc and then just do include \"stdio.spl\" instead of the whole ordeal you had before");
+    println!("         -release                                        -> builds the program in release mode");
+    println!("         -ntc                                            -> (NoTypeChecking) Disable type checking");
+    println!("         -warn (all, funcs, externs, strings)            -> Enable unused warns for parameter");
+    println!("         -ruf                                            -> Remove unused functions");
+    println!("         -arc (builtin arc)                              -> builds for a builtin architecture");
+    println!("         -arc - (path to custom arc)                     -> builds for a custom architecture following the syntax described in ./examples/arcs");
+    println!("         -usage                                          -> Show this page");
     println!("--------------------------------------------");
 }
 fn dump_tokens(lexer: &mut Lexer) {
@@ -6790,7 +6788,7 @@ fn main() {
     let oinfo = info.unwrap();
     let mut lexer = Lexer::new(&oinfo, & Intrinsics, &Definitions, HashSet::new());
     lexer.currentLocation.file = Rc::new(program.path.clone());
-    let mut build = parse_tokens_to_build(&mut lexer, &mut program, &include_folders);
+    let mut build = parse_tokens_to_build(&mut lexer, &mut program, &include_folders,0);
     if program.use_type_checking {
         type_check_build(&mut build, &program);
     }

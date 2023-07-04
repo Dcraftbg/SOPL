@@ -95,22 +95,25 @@ It also gives you a timeline of the most recent changes (newest -> oldest).
 
 Flags are really important and if not updated here, you can always check out what flag support there is by just running the compiler without anything (This will display information such as the usage, the currently supported builds and any flags you might want to use).
 
-As of [0.12.2A](version.md#0122a) flags consist of:
+As of [0.16A](version.md#0122a) flags consist of:
 ```
 --------------------------------------------
 sopl [flags]
+     Currently supported targets:
          - nasm_x86_64
      flags:
-         -t (target)                         -> compiles to the given target (default is nasm_x86_64)
-         -o (output path)                    -> outputs to that file (example: hello.asm in nasm_x86_64 mode). If the output path is not specified it defaults to the modes default (for nasm_x86_64 thats a.asm)
-         -r                                  -> runs the program for you if the option is available for that language mode (for example in nasm_x86_64 it calls nasm with gcc to link it to an executeable)
-         -b                                  -> builds the program for you if the option is available for that language mode
-         -release                            -> builds the program in release mode
-         -ntc                                -> (NoTypeChecking) Disable type checking
-         -warn (all, funcs, externs, strings)-> Enable unused warns for parameter
-         -ruf                                -> Remove unused functions
-         -arc (builtin arc)                  -> builds for a builtin architecture
-         -arc - (path to custom arc)         -> builds for a custom architecture following the syntax described in ./examples/arcs
+         -t (target)                                     -> compiles to the given target (default is nasm_x86_64)
+         -o (output path)                                -> outputs to that file (example: hello.asm in nasm_x86_64 mode). If the output path is not specified it defaults to the modes default (for nasm_x86_64 thats a.asm)
+         (NOT RECOMMENDED - use lighthouse instead) -r   -> runs the program for you if the option is available for that language mode (for example in nasm_x86_64 it calls nasm with gcc to link it to an executeable)
+         (NOT RECOMMENDED - use lighthouse instead) -b   -> builds the program for you if the option is available for that language mode
+         -i (path to directory to shortcut)              -> Adds a shortcut when including (if it finds the file it automatically expands the path) so you could do -i libs/libc and then just do include "stdio.spl" instead of the whole ordeal you had before
+         -release                                        -> builds the program in release mode
+         -ntc                                            -> (NoTypeChecking) Disable type checking
+         -warn (all, funcs, externs, strings)            -> Enable unused warns for parameter
+         -ruf                                            -> Remove unused functions
+         -arc (builtin arc)                              -> builds for a builtin architecture
+         -arc - (path to custom arc)                     -> builds for a custom architecture following the syntax described in ./examples/arcs
+         -usage                                          -> Show this page
 --------------------------------------------
 ```
 

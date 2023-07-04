@@ -2,6 +2,7 @@
 
 Newest Version: [0.15.1A](#0151a)
 # Manual:
+  - [0.16A](#016a)
   - [0.15.1A](#0151a)  
     - [0.15A](#015a)  
   - [0.14A](#014a)
@@ -48,6 +49,11 @@ Newest Version: [0.15.1A](#0151a)
   - [0.2A](#02a)
   - [0.1A](#01a)
 # Change Log
+ ## 0.16A
+   - Removed UUID dependency cuz why the fuck did I have it in the first place?
+   - Sped up compile time by a TON (no need to generate stupid UUIDs)
+   - Added -i flag for quicker including
+   
  ## 0.15.2A
    - Added cfg support with lighthouse for the examples architectures
  ## 0.15.1A
