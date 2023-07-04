@@ -6199,6 +6199,7 @@ fn to_nasm_x86_64(build: &mut BuildProgram, program: &CmdProgram) -> io::Result<
         let mut stack_sizes: Vec<usize> = Vec::new();
         nasm_x86_64_handle_scope(&mut f, build, program, TCScopeType::FUNCTION(function_name.clone()),&mut vec![HashMap::new()],&mut stack_sizes,0,0,&mut inst_count)?;
         if function_name == "main" {
+
             let shadow_space: usize = if let ArcPassType::CUSTOM(argpassing) = &program.architecture.options.argumentPassing {
                 argpassing.shadow_space
             } else { 0 };
