@@ -3201,12 +3201,12 @@ impl OfP {
                                 let reg1 = regs[1];
                                 let reg = if program.architecture.bits == 32 {
                                     let reg = regs[0].to_byte_size(4);
-                                    writeln!(f, "   mov {}, @@STRING_{}_",reg.to_string(),index)?;
+                                    writeln!(f, "   mov {}, $STRING_{}_",reg.to_string(),index)?;
                                     reg
                                 }
                                 else {
                                     let reg = regs[0].to_byte_size(8);
-                                    writeln!(f, "   lea {}, [rel @@STRING_{}_]",reg.to_string(),index)?;
+                                    writeln!(f, "   lea {}, [rel $STRING_{}_]",reg.to_string(),index)?;
                                     reg
                                 };
                                 writeln!(f, "   mov {}, {}",reg1.to_string(),str.Data.len())?;
@@ -3216,12 +3216,12 @@ impl OfP {
                             ProgramStringType::CSTR => {
                                 let reg = if program.architecture.bits == 32 {
                                     let reg = regs[0].to_byte_size(4);
-                                    writeln!(f, "   mov {}, @@STRING_{}_",reg.to_string(),index)?;
+                                    writeln!(f, "   mov {}, $STRING_{}_",reg.to_string(),index)?;
                                     reg
                                 }
                                 else {
                                     let reg = regs[0].to_byte_size(8);
-                                    writeln!(f, "   lea {}, [rel @@STRING_{}_]",reg.to_string(),index)?;
+                                    writeln!(f, "   lea {}, [rel $STRING_{}_]",reg.to_string(),index)?;
                                     reg
                                 };
                                 out.push(reg);
@@ -3693,14 +3693,14 @@ impl RawConstValueType {
                         o = if program.architecture.bits == 32 {
                             let reg = iregs[0].to_byte_size(4);
                             let reg2 = iregs[1].to_byte_size(4);
-                            writeln!(f, "   mov {}, @@STRING_{}_",reg.to_string(),index)?;
+                            writeln!(f, "   mov {}, $STRING_{}_",reg.to_string(),index)?;
                             writeln!(f, "   mov {}, {}",reg2,sstr.Data.len())?;
                             vec![reg,reg2]
                         }
                         else {
                             let reg = iregs[0].to_byte_size(8);
                             let reg2 = iregs[1].to_byte_size(8);
-                            writeln!(f, "   lea {}, [rel @@STRING_{}_]",reg.to_string(),index)?;
+                            writeln!(f, "   lea {}, [rel $STRING_{}_]",reg.to_string(),index)?;
                             writeln!(f, "   mov {}, {}",reg2,sstr.Data.len())?;
                             vec![reg,reg2]
                         };
@@ -3709,12 +3709,12 @@ impl RawConstValueType {
                     ProgramStringType::CSTR => {
                         let oreg = if program.architecture.bits == 32 {
                             let reg = iregs[0].to_byte_size(4);
-                            writeln!(f, "   mov {}, @@STRING_{}_",reg.to_string(),index)?;
+                            writeln!(f, "   mov {}, $STRING_{}_",reg.to_string(),index)?;
                             reg
                         }
                         else {
                             let reg = iregs[0].to_byte_size(8);
-                            writeln!(f, "   lea {}, [rel @@STRING_{}_]",reg.to_string(),index)?;
+                            writeln!(f, "   lea {}, [rel $STRING_{}_]",reg.to_string(),index)?;
                             reg
                         };
                         o = vec![oreg]
@@ -6090,7 +6090,7 @@ fn to_nasm_x86_64(build: &mut BuildProgram, program: &CmdProgram) -> io::Result<
 
     for (id,stridef) in build.stringdefs.iter().enumerate(){
         if program.in_mode == OptimizationMode::DEBUG || (optimization.usedStrings.contains_key(&id) && (optimization.usedFuncs.contains(optimization.usedStrings.get(&id).unwrap()) || !program.remove_unused_functions || optimization.usedStrings.get(&id).expect(&format!("Could not find: {}",&id)) == "main")) {
-            write!(&mut f, "   @@STRING_{}_: db ",id)?;
+            write!(&mut f, "   $STRING_{}_: db ",id)?;
             for chr in stridef.Data.chars() {
                 write!(&mut f, "{}, ",(chr as u8))?;
             }
@@ -6127,7 +6127,7 @@ fn to_nasm_x86_64(build: &mut BuildProgram, program: &CmdProgram) -> io::Result<
                 match val {
                     RawConstValueType::INT(v) => writeln!(&mut f, "dd {}",v)?,
                     RawConstValueType::LONG(v) => writeln!(&mut f, "dq {}",v)?,
-                    RawConstValueType::STR(UUID) => writeln!(&mut f, "@@STRING_{}",UUID.to_string().replace("-", ""))?,
+                    RawConstValueType::STR(UUID) => writeln!(&mut f, "$STRING_{}",UUID.to_string().replace("-", ""))?,
                     RawConstValueType::PTR(_, t) => {
                         if program.architecture.bits == 32 {
                             writeln!(&mut f, "dd {}",t)?;
