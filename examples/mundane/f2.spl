@@ -1,0 +1,5 @@
+extern "C" puts(*char);
+func print_hello(msg: *char) {
+    puts("Hello");
+    puts(msg);
+}

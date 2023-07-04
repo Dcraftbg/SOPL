@@ -1,0 +1,4 @@
+include "./f2.spl"
+func main(){
+    print_hello("World");
+}
