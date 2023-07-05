@@ -348,6 +348,14 @@ struct CmdProgram {
     architecture: Architecture,
 }
 impl CmdProgram {
+    fn stack_ptr(&self) -> Register {
+        if self.architecture.bits == 64 {
+            Register::RSP
+        }
+        else {
+            Register::ESP
+        }
+    }
     fn new() -> Self {
         Self { path: String::new(), opath: String::new(), should_build: false, should_run: false, target: "nasm_x86_64".to_string(), in_mode: OptimizationMode::DEBUG, use_type_checking: true, print_unused_warns: false,  remove_unused_functions: false, print_unused_funcs: false, print_unused_externs: false, print_unused_strings: false, architecture: Architecture::new() }
     }
@@ -675,7 +683,7 @@ impl Expression {
             v
         }
         else {
-            panic!("ERROR: Cannot unwrap on non val type!");
+            panic!("ERROR: Cannot unwrap on non val type! {:?}",self);
         }
     }
     fn unwrap_expr(&self) -> &Box<ExprTree> {
@@ -1115,10 +1123,10 @@ impl ExprTree {
                                 let ov = get_local_build(local_vars,v).unwrap();
                                 writeln!(f,"   cqo")?;
                                 if stack_size-ov.operand > 0 {
-                                    writeln!(f,"   idiv {} [rsp+{}]",size_to_nasm_type(ov.typ.get_size(program)),stack_size-ov.operand)?;
+                                    writeln!(f,"   idiv {} [{}+{}]",size_to_nasm_type(ov.typ.get_size(program)),program.stack_ptr(),stack_size-ov.operand)?;
                                 }
                                 else {
-                                    writeln!(f,"   idiv {} [rsp]",size_to_nasm_type(ov.typ.get_size(program)))?;
+                                    writeln!(f,"   idiv {} [{}]",size_to_nasm_type(ov.typ.get_size(program)),program.stack_ptr())?;
                                 }
                                 
                             }
@@ -1165,10 +1173,10 @@ impl ExprTree {
                                 let ov = get_local_build(local_vars,v).unwrap();
                                 writeln!(f,"   cqo")?;
                                 if stack_size-ov.operand > 0 {
-                                    writeln!(f,"   idiv {} [rsp+{}]",size_to_nasm_type(ov.typ.get_size(program)),stack_size-ov.operand)?;
+                                    writeln!(f,"   idiv {} [{}+{}]",size_to_nasm_type(ov.typ.get_size(program)),program.stack_ptr(),stack_size-ov.operand)?;
                                 }
                                 else {
-                                    writeln!(f,"   idiv {} [rsp]",size_to_nasm_type(ov.typ.get_size(program)))?;
+                                    writeln!(f,"   idiv {} [{}]",size_to_nasm_type(ov.typ.get_size(program)),program.stack_ptr())?;
                                 }
                                 
                             }
@@ -1215,10 +1223,10 @@ impl ExprTree {
                                     let ov = get_local_build(local_vars,v).unwrap();
                                     writeln!(f,"   cqo")?;
                                     if stack_size-ov.operand > 0 {
-                                        writeln!(f,"   imul {} [rsp+{}]",size_to_nasm_type(ov.typ.get_size(program)),stack_size-ov.operand)?;
+                                        writeln!(f,"   imul {} [{}+{}]",size_to_nasm_type(ov.typ.get_size(program)),program.stack_ptr(),stack_size-ov.operand)?;
                                     }
                                     else {
-                                        writeln!(f,"   imul {} [rsp]",size_to_nasm_type(ov.typ.get_size(program)))?;
+                                        writeln!(f,"   imul {} [{}]",size_to_nasm_type(ov.typ.get_size(program)),program.stack_ptr())?;
                                     }
                                     
                                 }
@@ -1330,7 +1338,7 @@ impl ExprTree {
                     match rightofp {
                         OfP::LOCALVAR(v) => {
                             let v = get_local_build(local_vars, v).unwrap();
-                            writeln!(f, "   mov {}, rsp",regs[0].to_string())?;
+                            writeln!(f, "   mov {}, {}",regs[0].to_string(),program.stack_ptr())?;
                             writeln!(f, "   add {}, {}",regs[0].to_string(),stack_size-v.operand)?;
                             o = vec![regs[0].clone()]
                         }
@@ -3142,7 +3150,7 @@ impl OfP {
             Self::LOCALVAR(v) => Some(get_local_build(local_vars, v).unwrap().typ.clone()),
             Self::RESULT(f, _) => build.functions.get(f).unwrap().contract.Outputs.get(0).cloned(),
             Self::BUFFER(_) => todo!(),
-            Self::GLOBALVAR(_) => todo!(),
+            Self::GLOBALVAR(v) => Some(build.global_vars.get(v).unwrap().typ.var_type(build)),
         }
     }
     fn LOIRGNasm(&self, regs: Vec<Register>, f: &mut File, program: &CmdProgram,build: &BuildProgram, local_vars: &Vec<HashMap<String, LocalVariable>>, buffers: &Vec<BuildBuf>, stack_size: usize, loc: &ProgramLocation) -> std::io::Result<Vec<Register>>{
@@ -3174,10 +3182,10 @@ impl OfP {
                 let osize = lvar.typ.get_size(program);
                 let reg = regs[0].to_byte_size(osize);
                 if stack_size-lvar.operand == 0 {
-                    writeln!(f, "   mov {}, {} [rsp]",reg.to_string(),size_to_nasm_type(osize))?;
+                    writeln!(f, "   mov {}, {} [{}]",reg.to_string(),size_to_nasm_type(osize),program.stack_ptr())?;
                 }
                 else {
-                    writeln!(f, "   mov {}, {} [rsp+{}]",reg.to_string(),size_to_nasm_type(osize),stack_size-lvar.operand)?;
+                    writeln!(f, "   mov {}, {} [{}+{}]",reg.to_string(),size_to_nasm_type(osize),program.stack_ptr(),stack_size-lvar.operand)?;
                 }
                 out.push(reg);
             },
@@ -3240,7 +3248,7 @@ impl OfP {
                 
                 writeln!(f, "   call {}{}",program.architecture.func_prefix,func)?;
                 if sp_taken-stack_size > 0 {
-                    writeln!(f, "   add rsp, {}",sp_taken-stack_size)?
+                    writeln!(f, "   add {}, {}",program.stack_ptr(),sp_taken-stack_size)?
                 }
                 let reg = regs[0].to_byte_size(build.get_contract_of_symbol(func).unwrap().Outputs.get(0).unwrap_or(&VarType::LONG).get_size(program));
                 if reg.to_byte_size(8) != Register::RAX {
@@ -3252,7 +3260,7 @@ impl OfP {
             OfP::BUFFER(s) => {
                 let buf: &BuildBuf = &buffers[*s];
                 let reg = regs[0].to_byte_size(8);
-                writeln!(f, "   mov {}, rsp",reg)?;
+                writeln!(f, "   mov {}, {}",reg,program.stack_ptr())?;
                 if stack_size-buf.offset > 0 {
                     writeln!(f, "   add {}, {}",reg,stack_size-buf.offset)?;
                 }
@@ -3763,6 +3771,18 @@ impl BuildBuf {
 enum GlobalVarType {
     BUFFER(usize),
     CONSTANT(RawConstValueType)
+}
+impl GlobalVarType {
+    fn var_type(&self, build: &BuildProgram) -> VarType {
+        match self {
+            Self::BUFFER(b) => {
+                VarType::PTR(Ptr::ref_to(build.buffers[b.to_owned()].typ.clone()))
+            }
+            Self::CONSTANT(c) => {
+                c.to_type(build)[0].clone()
+            }
+        }
+    }
 }
 #[derive(Debug)]
 struct GlobalVar {
@@ -5291,16 +5311,18 @@ fn optimization_ops_scope(build: &BuildProgram, program: &CmdProgram, scope: TCS
                 out.usedExterns.insert(r.clone());
             }
             Instruction::MOV(_, v2) => {
-                match v2.unwrap_val() {
-                    OfP::CONST(val) => {
-                        match val {
-                            RawConstValueType::STR(uuid) => {
-                                out.usedStrings.insert(uuid.clone(), fn_name.clone());
+                if v2.is_ofp() {
+                    match v2.unwrap_val() {
+                        OfP::CONST(val) => {
+                            match val {
+                                RawConstValueType::STR(uuid) => {
+                                    out.usedStrings.insert(uuid.clone(), fn_name.clone());
+                                }
+                                _ => {}
                             }
-                            _ => {}
                         }
+                        _ => {}
                     }
-                    _ => {}
                 }
             }
             Instruction::CALLRAW(r, args) => {
@@ -5364,8 +5386,16 @@ fn nasm_x86_64_prep_args(program: &CmdProgram, build: &BuildProgram, f: &mut Fil
     let org_stack_size = stack_size;
 
     let mut int_passed_count: usize = 0;
-    for arg in contract {
-    
+    //let offset: usize=0;
+    for iargs in contract.iter().rev() {
+        //offset+=iarg.get_size(program);
+        
+        match iargs.var_type(build, local_vars).unwrap()  {
+            VarType::CHAR    | VarType::SHORT   | VarType::BOOLEAN | VarType::INT     | VarType::LONG    | VarType::PTR(_)  => int_passed_count+=1,
+            VarType::CUSTOM(_) => {},
+        }
+    }
+    for arg in contract.iter().rev() {
         match arg {
             OfP::GLOBALVAR(v) => {
                 let var1 = build.global_vars.get(v).expect("Unknown local variable parameter");
@@ -5384,23 +5414,23 @@ fn nasm_x86_64_prep_args(program: &CmdProgram, build: &BuildProgram, f: &mut Fil
                 
                 if program.architecture.options.argumentPassing == ArcPassType::PUSHALL{
                     stack_size += oreg.size();
-                    writeln!(f, "   mov {} [rsp-{}], {}",size_to_nasm_type(oreg.size()), stack_size-org_stack_size, oreg.to_string())?
+                    writeln!(f, "   mov {} [{}-{}], {}",size_to_nasm_type(oreg.size()), program.stack_ptr(),stack_size-org_stack_size, oreg.to_string())?
                 }
                 else {
                     let custompassing = program.architecture.options.argumentPassing.custom_unwrap();
                     if let Some(nptrs) = custompassing.nums_ptrs.as_ref() {
-                        if let Some(oreg2) = nptrs.get(int_passed_count) {
+                        if let Some(oreg2) = nptrs.get(int_passed_count-1) {
                             writeln!(f, "   mov {}, {}",oreg2.to_byte_size(oreg.size()).to_string(), oreg.to_string())?;
                         }
                         else {
                             stack_size += oreg.size();
-                            writeln!(f, "   mov {} [rsp-{}], {}",size_to_nasm_type(oreg.size()), stack_size-org_stack_size, oreg.to_string())?
+                            writeln!(f, "   mov {} [{}-{}], {}",size_to_nasm_type(oreg.size()), program.stack_ptr(),stack_size-org_stack_size, oreg.to_string())?
                         }
-                        int_passed_count+=1;
+                        int_passed_count-=1;
                     }
                     else {
                         stack_size += oreg.size();
-                        writeln!(f, "   mov {} [rsp-{}], {}",size_to_nasm_type(oreg.size()), stack_size-org_stack_size, oreg.to_string())?
+                        writeln!(f, "   mov {} [{}-{}], {}",size_to_nasm_type(oreg.size()), program.stack_ptr(), stack_size-org_stack_size, oreg.to_string())?
                     }
                 }
             }
@@ -5408,30 +5438,30 @@ fn nasm_x86_64_prep_args(program: &CmdProgram, build: &BuildProgram, f: &mut Fil
                 let var1 = get_local_build(local_vars, v).expect("Unknown local variable parameter");
                 let oreg = Register::RAX.to_byte_size(var1.typ.get_size(program));
                 if stack_size-var1.operand == 0 {
-                    writeln!(f, "   mov {}, {} [rsp]",oreg.to_string(),size_to_nasm_type(oreg.size()))?;
+                    writeln!(f, "   mov {}, {} [{}]",oreg.to_string(),size_to_nasm_type(oreg.size()),program.stack_ptr())?;
                 }
                 else {
-                    writeln!(f, "   mov {}, {} [rsp+{}]",oreg.to_string(),size_to_nasm_type(oreg.size()),stack_size-var1.operand)?;
+                    writeln!(f, "   mov {}, {} [{}+{}]",oreg.to_string(),size_to_nasm_type(oreg.size()),program.stack_ptr(),stack_size-var1.operand)?;
                 }
                 if program.architecture.options.argumentPassing == ArcPassType::PUSHALL{
                     stack_size += oreg.size();
-                    writeln!(f, "   mov {} [rsp-{}], {}",size_to_nasm_type(oreg.size()), stack_size-org_stack_size, oreg.to_string())?
+                    writeln!(f, "   mov {} [{}-{}], {}",size_to_nasm_type(oreg.size()), program.stack_ptr(),stack_size-org_stack_size, oreg.to_string())?
                 }
                 else {
                     let custompassing = program.architecture.options.argumentPassing.custom_unwrap();
                     if let Some(nptrs) = custompassing.nums_ptrs.as_ref() {
-                        if let Some(oreg2) = nptrs.get(int_passed_count) {
+                        if let Some(oreg2) = nptrs.get(int_passed_count-1) {
                             writeln!(f, "   mov {}, {}",oreg2.to_byte_size(oreg.size()).to_string(), oreg.to_string())?;
                         }
                         else {
                             stack_size += oreg.size();
-                            writeln!(f, "   mov {} [rsp-{}], {}",size_to_nasm_type(oreg.size()), stack_size-org_stack_size, oreg.to_string())?
+                            writeln!(f, "   mov {} [{}-{}], {}",size_to_nasm_type(oreg.size()), program.stack_ptr(), stack_size-org_stack_size, oreg.to_string())?
                         }
-                        int_passed_count+=1;
+                        int_passed_count-=1;
                     }
                     else {
                         stack_size += oreg.size();
-                        writeln!(f, "   mov {} [rsp-{}], {}",size_to_nasm_type(oreg.size()), stack_size-org_stack_size, oreg.to_string())?
+                        writeln!(f, "   mov {} [{}-{}], {}",size_to_nasm_type(oreg.size()), program.stack_ptr(),stack_size-org_stack_size, oreg.to_string())?
                     }
                 }
             }
@@ -5442,21 +5472,21 @@ fn nasm_x86_64_prep_args(program: &CmdProgram, build: &BuildProgram, f: &mut Fil
                 if program.architecture.options.argumentPassing == ArcPassType::PUSHALL ||  program.architecture.options.argumentPassing.custom_get().is_none() ||  program.architecture.options.argumentPassing.custom_unwrap().nums_ptrs.is_none(){
                     for oreg in oregs {
                         stack_size += oreg.size();
-                        writeln!(f, "   mov {} [rsp-{}], {}",size_to_nasm_type(oreg.size()), stack_size-org_stack_size, oreg.to_string())?
+                        writeln!(f, "   mov {} [{}-{}], {}",size_to_nasm_type(oreg.size()), program.stack_ptr(), stack_size-org_stack_size, oreg.to_string())?
                     }
                 }
                 else {
                     let custompassing = program.architecture.options.argumentPassing.custom_unwrap();
                     if let Some(nptrs) = custompassing.nums_ptrs.as_ref() {
                         for oreg in oregs {
-                            if let Some(oreg2) = nptrs.get(int_passed_count) {
+                            if let Some(oreg2) = nptrs.get(int_passed_count-1) {
                                 writeln!(f, "   mov {}, {}",oreg2.to_byte_size(oreg.size()).to_string(), oreg.to_string())?;
                             }
                             else {
                                 stack_size += oreg.size();
-                                writeln!(f, "   mov {} [rsp-{}], {}",size_to_nasm_type(oreg.size()), stack_size-org_stack_size, oreg.to_string())?
+                                writeln!(f, "   mov {} [{}-{}], {}",size_to_nasm_type(oreg.size()), program.stack_ptr(), stack_size-org_stack_size, oreg.to_string())?
                             }
-                            int_passed_count+=1;
+                            int_passed_count-=1;
                         }
                     }
                     else {
@@ -5475,7 +5505,7 @@ fn nasm_x86_64_prep_args(program: &CmdProgram, build: &BuildProgram, f: &mut Fil
     }
     //println!("Final stack_size={}",stack_size);
     if stack_size-org_stack_size > 0 {
-        writeln!(f, "   sub rsp, {}",stack_size-org_stack_size)?; //TODO: Setup stackframe only at the start of the scope
+        writeln!(f, "   sub {}, {}",program.stack_ptr(),stack_size-org_stack_size)?; //TODO: Setup stackframe only at the start of the scope
     }
     Ok(stack_size)
 }
@@ -5487,15 +5517,18 @@ fn nasm_x86_64_load_args(f: &mut File, scope: &TCScopeType, build: &BuildProgram
         }
     }
     let mut offset: usize = 0;
-    if program.architecture.options.argumentPassing == ArcPassType::PUSHALL {
+    if program.architecture.options.argumentPassing == ArcPassType::PUSHALL {        
+        for (_, iarg) in scope.get_contract(build).unwrap().Inputs.iter().rev() {
+            offset+=iarg.get_size(program);
+        }
         for (_, iarg) in scope.get_contract(build).unwrap().Inputs.iter().rev() {
             let osize = iarg.get_size(program);
             let reg = Register::RAX.to_byte_size(osize);
             if offset+shadow_space > 0 {
-                writeln!(f, "   mov {}, {} [rsp+{}]",reg.to_string(), size_to_nasm_type(osize),offset+shadow_space)?;
+                writeln!(f, "   mov {}, {} [{}+{}]",reg.to_string(), size_to_nasm_type(osize),program.stack_ptr(),offset+shadow_space)?;
             }
-            writeln!(f, "   mov {} [rsp-{}], {}",size_to_nasm_type(osize),offset+osize,reg.to_string())?;
-            offset+=osize
+            writeln!(f, "   mov {} [{}-{}], {}",size_to_nasm_type(osize),program.stack_ptr(),offset,reg.to_string())?;
+            offset-=osize
         };
     }
     else {
@@ -5511,21 +5544,20 @@ fn nasm_x86_64_load_args(f: &mut File, scope: &TCScopeType, build: &BuildProgram
                 VarType::CHAR    | VarType::SHORT   | VarType::BOOLEAN | VarType::INT     | VarType::LONG    | VarType::PTR(_)  => int_ptr_count+=1,
                 VarType::CUSTOM(_) => {},
             }
-
         }
         for (_, iarg) in scope.get_contract(build).unwrap().Inputs.iter().rev() {
             if custom_build.nums_ptrs.is_some() && custom_build.nums_ptrs.as_ref().unwrap().len() > int_ptr_count-1 {
                 let osize = iarg.get_size(program);
                 let ireg = &custom_build.nums_ptrs.as_ref().unwrap()[int_ptr_count-1].to_byte_size(osize);
-                writeln!(f, "   mov {} [rsp-{}], {}",size_to_nasm_type(osize), offset, ireg.to_string())?;
+                writeln!(f, "   mov {} [{}-{}], {}",size_to_nasm_type(osize), program.stack_ptr(), offset, ireg.to_string())?;
                 offset-=osize;
                 int_ptr_count-=1
             }
             else {
                 let osize = iarg.get_size(program);
                 let reg = Register::RAX.to_byte_size(osize);
-                writeln!(f, "   mov {}, {} [rsp+{}]",reg.to_string(), size_to_nasm_type(osize),offset_of_ins+shadow_space+osize+4)?;
-                writeln!(f, "   mov {} [rsp-{}], {}",size_to_nasm_type(osize),offset,reg.to_string())?;
+                writeln!(f, "   mov {}, {} [{}+{}]",reg.to_string(), size_to_nasm_type(osize),program.stack_ptr(),offset_of_ins+shadow_space+osize+4)?;
+                writeln!(f, "   mov {} [{}-{}], {}",size_to_nasm_type(osize),program.stack_ptr(),offset,reg.to_string())?;
                 offset_of_ins+=osize;
                 offset-=osize;
                 int_ptr_count-=1
@@ -5582,7 +5614,7 @@ fn nasm_x86_64_handle_scope(f: &mut File, build: &BuildProgram, program: &CmdPro
     let dif = stack_size-stack_size_org;
     
     if dif > 0 {
-        writeln!(f, "   sub rsp, {}",dif)?;
+        writeln!(f, "   sub {}, {}",program.stack_ptr(),dif)?;
     }
     for (i,(loc,inst)) in scope.get_body(build).iter().enumerate() {
         match inst {
@@ -5601,10 +5633,10 @@ fn nasm_x86_64_handle_scope(f: &mut File, build: &BuildProgram, program: &CmdPro
                             let oreg2 = Register::RBX.to_byte_size(var.typ.get_size(program));
                             let oregs = Op2.LEIRnasm(vec![oreg,oreg2,Register::RCX.to_byte_size(var.typ.get_size(program))], f, program,build, &local_vars, &bufs,stack_size, loc)?;
                             if stack_size-var.operand == 0 {
-                                writeln!(f, "   mov {} [rsp], {}",size_to_nasm_type(var.typ.get_size(program)), oregs[0].to_byte_size(var.typ.get_size(program)).to_string())?;
+                                writeln!(f, "   mov {} [{}], {}",size_to_nasm_type(var.typ.get_size(program)),program.stack_ptr(), oregs[0].to_byte_size(var.typ.get_size(program)).to_string())?;
                             }
                             else {
-                                writeln!(f, "   mov {} [rsp+{}], {}",size_to_nasm_type(var.typ.get_size(program)),stack_size-var.operand, oregs[0].to_byte_size(var.typ.get_size(program)).to_string())?;
+                                writeln!(f, "   mov {} [{}+{}], {}",size_to_nasm_type(var.typ.get_size(program)),program.stack_ptr(),stack_size-var.operand, oregs[0].to_byte_size(var.typ.get_size(program)).to_string())?;
                             }
                         }
                         _ => {
@@ -5627,7 +5659,8 @@ fn nasm_x86_64_handle_scope(f: &mut File, build: &BuildProgram, program: &CmdPro
             }
             Instruction::CALLRAW(Word, contract) => {
                 let sp_taken = nasm_x86_64_prep_args(program, build, f, contract, stack_size, &local_vars)?;
-                writeln!(f, "   xor rax, rax")?;
+                let rax = Register::RAX.to_byte_size((program.architecture.bits/8) as usize);
+                writeln!(f, "   xor {}, {}",rax,rax)?;
                 if let Some(external) = build.externals.get(Word) {
                     writeln!(f, "   call {}{}{}",external.typ.prefix(program),Word,external.typ.suffix())?;
                 }
@@ -5636,7 +5669,7 @@ fn nasm_x86_64_handle_scope(f: &mut File, build: &BuildProgram, program: &CmdPro
                 }
                 
                 if sp_taken-stack_size > 0 {
-                    writeln!(f, "   add rsp, {}",sp_taken-stack_size)?;
+                    writeln!(f, "   add {}, {}",program.stack_ptr(),sp_taken-stack_size)?;
                 }
             }
             Instruction::ADDSET(op1, op2) => {
@@ -5654,10 +5687,10 @@ fn nasm_x86_64_handle_scope(f: &mut File, build: &BuildProgram, program: &CmdPro
                         let reg2 = Register::RBX.to_byte_size(reg1.size());
                         op2.LEIRnasm(vec![reg1,reg2], f, program,build, &local_vars, &bufs,stack_size, loc)?;
                         if stack_size-var1.operand == 0 {
-                            writeln!(f, "   add {} [rsp], {}",size_to_nasm_type(var1.typ.get_size(program)),reg1.to_string())?;
+                            writeln!(f, "   add {} [{}], {}",size_to_nasm_type(var1.typ.get_size(program)),program.stack_ptr(),reg1.to_string())?;
                         }
                         else {
-                            writeln!(f, "   add {} [rsp+{}], {}",size_to_nasm_type(var1.typ.get_size(program)),stack_size-var1.operand,reg1.to_string())?;
+                            writeln!(f, "   add {} [{}+{}], {}",size_to_nasm_type(var1.typ.get_size(program)),program.stack_ptr(),stack_size-var1.operand,reg1.to_string())?;
                         }
                     },
                     OfP::CONST(_) => todo!(),
@@ -5680,10 +5713,10 @@ fn nasm_x86_64_handle_scope(f: &mut File, build: &BuildProgram, program: &CmdPro
                         let reg2 = Register::RBX.to_byte_size(reg1.size());
                         op2.LEIRnasm(vec![reg1,reg2], f, program,build, &local_vars, &bufs,stack_size, loc)?;
                         if stack_size-var1.operand == 0 {
-                            writeln!(f, "   sub {} [rsp], {}",size_to_nasm_type(var1.typ.get_size(program)),reg1.to_string())?;
+                            writeln!(f, "   sub {} [{}], {}",size_to_nasm_type(var1.typ.get_size(program)),program.stack_ptr(),reg1.to_string())?;
                         }
                         else {
-                            writeln!(f, "   sub {} [rsp+{}], {}",size_to_nasm_type(var1.typ.get_size(program)),stack_size-var1.operand,reg1.to_string())?;
+                            writeln!(f, "   sub {} [{}+{}], {}",size_to_nasm_type(var1.typ.get_size(program)),program.stack_ptr(),stack_size-var1.operand,reg1.to_string())?;
                         }
                     },
                     OfP::CONST(_) => todo!(),
@@ -5712,13 +5745,13 @@ fn nasm_x86_64_handle_scope(f: &mut File, build: &BuildProgram, program: &CmdPro
                         }
                         if stack_size-var1.operand == 0 {
                             writeln!(f, "   cqo")?;
-                            writeln!(f, "   imul {} [rsp]",size_to_nasm_type(var1.typ.get_size(program)))?;
-                            writeln!(f, "   mov {} [rsp], {}",size_to_nasm_type(var1.typ.get_size(program)),Register::RAX.to_byte_size(var1.typ.get_size(program)))?;
+                            writeln!(f, "   imul {} [{}]",size_to_nasm_type(var1.typ.get_size(program)),program.stack_ptr())?;
+                            writeln!(f, "   mov {} [{}], {}",size_to_nasm_type(var1.typ.get_size(program)),program.stack_ptr(),Register::RAX.to_byte_size(var1.typ.get_size(program)))?;
                         }
                         else {
                             writeln!(f, "   cqo")?;
-                            writeln!(f, "   imul {} [rsp+{}]",size_to_nasm_type(var1.typ.get_size(program)),stack_size-var1.operand)?;
-                            writeln!(f, "   mov {} [rsp+{}], {}",size_to_nasm_type(var1.typ.get_size(program)),stack_size-var1.operand,Register::RAX.to_byte_size(var1.typ.get_size(program)))?;
+                            writeln!(f, "   imul {} [{}+{}]",size_to_nasm_type(var1.typ.get_size(program)),program.stack_ptr(),stack_size-var1.operand)?;
+                            writeln!(f, "   mov {} [{}+{}], {}",size_to_nasm_type(var1.typ.get_size(program)),program.stack_ptr(),stack_size-var1.operand,Register::RAX.to_byte_size(var1.typ.get_size(program)))?;
                         }
                         
                     },
@@ -5731,7 +5764,8 @@ fn nasm_x86_64_handle_scope(f: &mut File, build: &BuildProgram, program: &CmdPro
             }
             Instruction::CALL(Word,args) => {
                 let sp_taken = nasm_x86_64_prep_args(program, build, f, args, stack_size, &local_vars)?;
-                writeln!(f, "   xor rax, rax")?;
+                let rax = Register::RAX.to_byte_size((program.architecture.bits/8) as usize);
+                writeln!(f, "   xor {}, {}",rax,rax)?;
                 if let Some(external) = build.externals.get(Word) {
                     writeln!(f, "   call {}{}{}",external.typ.prefix(program),Word,external.typ.suffix())?;
                 }
@@ -5739,7 +5773,7 @@ fn nasm_x86_64_handle_scope(f: &mut File, build: &BuildProgram, program: &CmdPro
                     writeln!(f, "   call {}",Word)?;
                 }
                 if sp_taken-stack_size > 0 {
-                    writeln!(f, "   add rsp, {}",sp_taken-stack_size)?;
+                    writeln!(f, "   add {}, {}",program.stack_ptr(),sp_taken-stack_size)?;
                 }
             }
             Instruction::FNBEGIN() => {
@@ -5754,7 +5788,7 @@ fn nasm_x86_64_handle_scope(f: &mut File, build: &BuildProgram, program: &CmdPro
                     writeln!(f, "   mov {}, {}",oreg.to_string(),_regs[0].to_string())?;
                 }
                 if dif > 0 {
-                    writeln!(f, "   add rsp, {}",dif)?;
+                    writeln!(f, "   add {}, {}",program.stack_ptr(),dif)?;
                 }
                 
                 writeln!(f, "   ret")?;
@@ -5766,21 +5800,13 @@ fn nasm_x86_64_handle_scope(f: &mut File, build: &BuildProgram, program: &CmdPro
             Instruction::EXPAND_SCOPE(s) => {
                 local_vars.push(HashMap::new());
                 stack_sizes.push(stack_size);
-                writeln!(f, "   add rsp, {}",shadow_space)?;
+                writeln!(f, "   add {}, {}",program.stack_ptr(),shadow_space)?;
                 stack_size-=shadow_space;
                 nasm_x86_64_handle_scope(f, build, program, TCScopeType::NORMAL(&s),local_vars,stack_sizes,stack_size,func_stack_begin,inst_count)?;
                 
                 stack_size+=shadow_space;
-                writeln!(f, "   sub rsp, {}",shadow_space)?;
-                /*
-                writeln!(f, "   add rsp, {}",shadow_space)?;
-                stack_size-=shadow_space;
-                stack_sizes.push(stack_size);
-
+                writeln!(f, "   sub {}, {}",program.stack_ptr(),shadow_space)?;
                 
-                stack_size+=shadow_space;
-                writeln!(f, "   sub rsp, {}",shadow_space)?;
-                 */
             }
             Instruction::EXPAND_IF_SCOPE(s)   => {
                 let binst = inst_count.clone();
@@ -5799,10 +5825,10 @@ fn nasm_x86_64_handle_scope(f: &mut File, build: &BuildProgram, program: &CmdPro
                             let var = get_local_build(&local_vars,v).unwrap();
                             com_assert!(loc,var.typ.weak_eq(&VarType::BOOLEAN),"Error: Expected boolean but found {}",var.typ.to_string(false));
                             if stack_size-var.operand == 0 {
-                                writeln!(f, "   cmp {} [rsp], 0",size_to_nasm_type(var.typ.get_size(program)),)?;
+                                writeln!(f, "   cmp {} [{}], 0",size_to_nasm_type(var.typ.get_size(program)),program.stack_ptr())?;
                             }
                             else {
-                                writeln!(f, "   cmp {} [rsp+{}], 0",size_to_nasm_type(var.typ.get_size(program)),stack_size-var.operand)?;
+                                writeln!(f, "   cmp {} [{}+{}], 0",size_to_nasm_type(var.typ.get_size(program)),program.stack_ptr(),stack_size-var.operand)?;
                             }
                         },
                         OfP::CONST(val) => {
@@ -5813,7 +5839,7 @@ fn nasm_x86_64_handle_scope(f: &mut File, build: &BuildProgram, program: &CmdPro
                             let sp_taken = nasm_x86_64_prep_args(program, build, f, args, stack_size, &local_vars)?;
                             writeln!(f, "   call {}{}",program.architecture.func_prefix,func)?;
                             if sp_taken-stack_size > 0 {
-                                writeln!(f, "   add rsp, {}",sp_taken-stack_size)?
+                                writeln!(f, "   add {}, {}",program.stack_ptr(),sp_taken-stack_size)?
                             }
                             writeln!(f, "   cmp {}, 0",Register::AL.to_string())?;
                         },
@@ -5882,13 +5908,13 @@ fn nasm_x86_64_handle_scope(f: &mut File, build: &BuildProgram, program: &CmdPro
                     match elses {
                         Instruction::EXPAND_ELSE_SCOPE(elses) => {
                             local_vars.push(HashMap::new());
-                            writeln!(f, "   add rsp, {}",shadow_space)?;
+                            writeln!(f, "   add {}, {}",program.stack_ptr(),shadow_space)?;
                             stack_size-=shadow_space;
                             stack_sizes.push(stack_size);
                             nasm_x86_64_handle_scope(f, build, program, TCScopeType::NORMAL(&elses), local_vars, stack_sizes,stack_size,func_stack_begin,inst_count)?;
                             
                             stack_size+=shadow_space;
-                            writeln!(f, "   sub rsp, {}",shadow_space)?;
+                            writeln!(f, "   sub {}, {}",program.stack_ptr(),shadow_space)?;
                         }
                         _ => {}
                     }
@@ -5899,13 +5925,13 @@ fn nasm_x86_64_handle_scope(f: &mut File, build: &BuildProgram, program: &CmdPro
                 writeln!(f, "   .IF_SCOPE_{}:",binst)?;
                 *inst_count += 1;
                 local_vars.push(HashMap::new());
-                writeln!(f, "   add rsp, {}",shadow_space)?;
+                writeln!(f, "   add {}, {}",program.stack_ptr(),shadow_space)?;
                 stack_size-=shadow_space;
                 stack_sizes.push(stack_size);
                 nasm_x86_64_handle_scope(f, build, program, TCScopeType::NORMAL(&s), local_vars, stack_sizes,stack_size,func_stack_begin,inst_count)?;
                 
                 stack_size+=shadow_space;
-                writeln!(f, "   sub rsp, {}",shadow_space)?;
+                writeln!(f, "   sub {}, {}",program.stack_ptr(),shadow_space)?;
                 *inst_count -= 1;
 
                 writeln!(f, "   .IF_SCOPE_END_{}:",binst)?;
@@ -5929,10 +5955,10 @@ fn nasm_x86_64_handle_scope(f: &mut File, build: &BuildProgram, program: &CmdPro
                             let var = get_local_build(&local_vars, v).unwrap();
                             com_assert!(loc,var.typ.weak_eq(&VarType::BOOLEAN),"Error: Expected boolean but found {}",var.typ.to_string(false));
                             if stack_size-var.operand == 0 {
-                                writeln!(f, "   cmp {} [rsp], 0",size_to_nasm_type(var.typ.get_size(program)),)?;
+                                writeln!(f, "   cmp {} [{}], 0",size_to_nasm_type(var.typ.get_size(program)),program.stack_ptr())?;
                             }
                             else {
-                                writeln!(f, "   cmp {} [rsp+{}], 0",size_to_nasm_type(var.typ.get_size(program)),stack_size-var.operand)?;
+                                writeln!(f, "   cmp {} [{}+{}], 0",size_to_nasm_type(var.typ.get_size(program)),program.stack_ptr(),stack_size-var.operand)?;
                             }
                         },
                         OfP::CONST(val) => {
@@ -5943,7 +5969,7 @@ fn nasm_x86_64_handle_scope(f: &mut File, build: &BuildProgram, program: &CmdPro
                             let sp_taken = nasm_x86_64_prep_args(program, build, f, args, stack_size, &local_vars)?;
                             writeln!(f, "   call {}{}",program.architecture.func_prefix,func)?;
                             if sp_taken-stack_size > 0 {
-                                writeln!(f, "   add rsp, {}",sp_taken-stack_size)?
+                                writeln!(f, "   add {}, {}",program.stack_ptr(),sp_taken-stack_size)?
                             }
                             writeln!(f, "   cmp {}, 0",Register::AL.to_string())?;
                         },
@@ -6013,13 +6039,13 @@ fn nasm_x86_64_handle_scope(f: &mut File, build: &BuildProgram, program: &CmdPro
                 
                 let binst = inst_count.clone();
                 local_vars.push(HashMap::new());
-                writeln!(f, "   add rsp, {}",shadow_space)?;
+                writeln!(f, "   add {}, {}",program.stack_ptr(),shadow_space)?;
                 stack_size-=shadow_space;
                 stack_sizes.push(stack_size);
                 nasm_x86_64_handle_scope(f, build, program, TCScopeType::NORMAL(&s), local_vars, stack_sizes,stack_size,func_stack_begin,inst_count)?;
                 
                 stack_size+=shadow_space;
-                writeln!(f, "   sub rsp, {}",shadow_space)?;
+                writeln!(f, "   sub {}, {}",program.stack_ptr(),shadow_space)?;
                 writeln!(f, "   jmp .WHILE_SCOPE_{}" ,binst)?;
                 writeln!(f, "   .WHILE_SCOPE_END_{}:",binst)?;
 
@@ -6044,7 +6070,7 @@ fn nasm_x86_64_handle_scope(f: &mut File, build: &BuildProgram, program: &CmdPro
                     total_drop += s;
                 }
                 if total_drop > 0 {
-                    writeln!(f, "   add rsp, {}",total_drop)?;
+                    writeln!(f, "   add {}, {}",program.stack_ptr(),total_drop)?;
                 }
                 
                 write!(f, "   jmp .LABEL_")?;
@@ -6061,13 +6087,13 @@ fn nasm_x86_64_handle_scope(f: &mut File, build: &BuildProgram, program: &CmdPro
     if !scope.is_func() {
         let dif = stack_size-stack_size_org;
         if dif != 0 {
-            writeln!(f, "   add rsp, {}",dif)?;
+            writeln!(f, "   add {}, {}",program.stack_ptr(),dif)?;
         }
     }
     else if scope.unwrap_func() != "main" {
         let dif = stack_size-stack_size_org;
         if dif != 0 {
-            writeln!(f, "   add rsp, {}",dif)?;
+            writeln!(f, "   add {}, {}",program.stack_ptr(),dif)?;
         }
         writeln!(f, "   ret")?;
     }
@@ -6078,8 +6104,10 @@ fn nasm_x86_64_handle_scope(f: &mut File, build: &BuildProgram, program: &CmdPro
 fn to_nasm_x86_64(build: &mut BuildProgram, program: &CmdProgram) -> io::Result<()>{
     let optimization = optimization_ops(build, program);
     let mut f = File::create(&program.opath).expect(&format!("Error: could not open output file {}",program.opath.as_str()));
-    writeln!(&mut f,"BITS 64")?;
-    writeln!(&mut f,"default rel")?;
+    if program.architecture.bits == 64 {
+        writeln!(&mut f,"BITS 64")?;
+        writeln!(&mut f,"default rel")?;
+    }
     writeln!(&mut f, "section .bss")?;
     for (i,buf) in build.buffers.iter().enumerate() {
         writeln!(&mut f, "   _GLOBL_{}: resb {}",i,buf.size*buf.typ.get_size(program))?;
@@ -6213,9 +6241,10 @@ fn to_nasm_x86_64(build: &mut BuildProgram, program: &CmdProgram) -> io::Result<
             }
             argsize+=shadow_space;
             if argsize > 0 {
-                writeln!(&mut f, "   add rsp, {}",argsize)?;
+                writeln!(&mut f, "   add {}, {}",program.stack_ptr(),argsize)?;
             }
-            writeln!(&mut f, "   xor rax,rax")?;
+            let rax = Register::RAX.to_byte_size((program.architecture.bits/8) as usize);
+            writeln!(f, "   xor {}, {}",rax,rax)?;
             writeln!(&mut f, "   ret")?;
         }
     }

@@ -1,0 +1,10 @@
+include "../../libs/libc/stdio.spl"
+func add(a: int, b: int : int) {
+    printf("a: %d\n",a);
+    printf("b: %d\n",b);
+    return a+b;
+}
+func main() {
+    let res: int = add(2,3);
+    printf("res: %d\n",res);
+}
