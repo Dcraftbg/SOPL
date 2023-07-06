@@ -6837,7 +6837,7 @@ fn main() {
     Definitions.insert("bool".to_string(), VarType::BOOLEAN);
     Definitions.insert("ptr".to_string(), VarType::PTR(Ptr{ typ: PtrTyp::VOID, inner_ref: 0}));
     Definitions.insert("short".to_string(), VarType::SHORT);
-    Definitions.insert("size_t".to_string(), if program.architecture.bits == 64 { VarType::LONG } else { VarType::SHORT});
+    Definitions.insert("size_t".to_string(), if program.architecture.bits == 64 { VarType::LONG } else { VarType::INT});
     
     if program.path.is_empty() {
         println!("Error: Unspecified input file!");
