@@ -1,8 +1,9 @@
 **(Latest patch versions in github history and at the top of Change Log)**
 
-Newest Version: [0.15.1A](#0151a)
+Newest Version: [0.16.1A](#0161a)
 # Manual:
-  - [0.16A](#016a)
+  - [0.16.1A](#0161a)
+    - [0.16A](#016a)
   - [0.15.1A](#0151a)  
     - [0.15A](#015a)  
   - [0.14A](#014a)
@@ -49,6 +50,10 @@ Newest Version: [0.15.1A](#0151a)
   - [0.2A](#02a)
   - [0.1A](#01a)
 # Change Log
+ ## 0.16.1A
+   - Fixed multiple arguments for 32 bit (causing issue with 64 bit multiple arguments)
+   - Fixed multiple arguments for 64 bit
+   - Fixed a large portion of 32 bit generation - arguments not being correctly accepted, etc.
  ## 0.16A
    - Removed UUID dependency cuz why the fuck did I have it in the first place?
    - Sped up compile time by a TON (no need to generate stupid UUIDs)
