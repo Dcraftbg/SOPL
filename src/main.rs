@@ -1967,6 +1967,8 @@ enum TokenType {
     StringType    (String),
     CStringType   (String),
     CharType      (char),
+    Number8       (i8),
+    Number16      (i16),
     Number32      (i32),
     Number64      (i64),
     Operation     (Op),
@@ -1981,6 +1983,8 @@ impl Display for TokenType {
 impl TokenType {
     fn unwrap_numeric(&self, build: &BuildProgram) -> Option<i64> {
         match self {
+            TokenType::Number8(data)   => Some(data.clone() as i64),
+            TokenType::Number16(data) => Some(data.clone() as i64),
             TokenType::Number32(data) => Some(data.clone() as i64),
             TokenType::Number64(data) => Some(data.clone() as i64),
             TokenType::WordType(data) => {
@@ -2019,6 +2023,12 @@ impl TokenType {
             }
             TokenType::CharType(chr) => {
                 if isplural {"Chars".to_string()} else {format!("Char {}",chr).to_string()}
+            }
+            TokenType::Number8(num) => {
+                if isplural {"Numbers(8)".to_string()} else {format!("Number(8) {}",num).to_string()}
+            }
+            TokenType::Number16(num) => {
+                if isplural {"Numbers(16)".to_string()} else {format!("Number(16) {}",num).to_string()}
             }
             TokenType::Number32(num) => {
                 if isplural {"Numbers(32)".to_string()} else {format!("Number(32) {}",num).to_string()}
@@ -2358,24 +2368,58 @@ impl Iterator for Lexer<'_> {
                             self.cursor -= 1;
                             self.currentLocation.character += outstr.len() as i32;
                             if let Some(nc) = self.cchar_s() {
-                                if nc == 'l' {
-                                    self.cursor += 1;
-                                    self.currentLocation.character += 1;
-                                    if let Ok(val) =  i64::from_str_radix(&outstr, 16) {
-                                        return Some(Token {location: self.currentLocation.clone(), typ: TokenType::Number64(val)});
+                                match nc {
+                                    'l' =>  {
+                                        self.cursor += 1;
+                                        self.currentLocation.character += 1;
+                                        if let Ok(val) =  i64::from_str_radix(&outstr, 16) {
+                                            return Some(Token {location: self.currentLocation.clone(), typ: TokenType::Number64(val)});
+                                        }
+                                        else {
+                                            todo!("Error message for this")
+                                        }
                                     }
-                                    else {
-                                        todo!("Error message for this")
+                                    'i' => {
+                                        self.cursor += 1;
+                                        self.currentLocation.character += 1;
+                                        if let Ok(val) =  i32::from_str_radix(&outstr, 16) {
+                                            return Some(Token {location: self.currentLocation.clone(), typ: TokenType::Number32(val)});
+                                        }
+                                        else {
+                                            todo!("Error message for this")
+                                        }
+                                    }
+                                    's' => {
+                                        self.cursor += 1;
+                                        self.currentLocation.character += 1;
+                                        if let Ok(val) =  i16::from_str_radix(&outstr, 16) {
+                                            return Some(Token {location: self.currentLocation.clone(), typ: TokenType::Number16(val)});
+                                        }
+                                        else {
+                                            todo!("Error message for this")
+                                        }
+                                    }
+                                    'c' => {
+                                        self.cursor += 1;
+                                        self.currentLocation.character += 1;
+                                        if let Ok(val) =  i8::from_str_radix(&outstr, 16) {
+                                            return Some(Token {location: self.currentLocation.clone(), typ: TokenType::Number8(val)});
+                                        }
+                                        else {
+                                            todo!("Error message for this")
+                                        }
+                                    }
+                                    _ => {
+                                        if let Ok(val) = i32::from_str_radix(&outstr, 16) {
+                                            return Some(Token {location: self.currentLocation.clone(), typ: TokenType::Number32(val)});
+                                        }
+                                        else {
+                                            todo!("Error message for this: {}: \"{}\"",self.currentLocation.loc_display(),outstr);
+                                        }
                                     }
                                 }
-                                else {
-                                    if let Ok(val) = i32::from_str_radix(&outstr, 16) {
-                                        return Some(Token {location: self.currentLocation.clone(), typ: TokenType::Number32(val)});
-                                    }
-                                    else {
-                                        todo!("Error message for this: {}: \"{}\"",self.currentLocation.loc_display(),outstr);
-                                    }
-                                }
+                                
+                                
                             }
                             else {
                                 if let Ok(val) =i32::from_str_radix(&outstr, 16) {
@@ -2409,22 +2453,54 @@ impl Iterator for Lexer<'_> {
                         self.cursor -= 1;
                         self.currentLocation.character += outstr.len() as i32;
                         if let Some(nc) = self.cchar_s() {
-                            if nc == 'l' {
-                                self.cursor += 1;
-                                self.currentLocation.character += 1;
-                                if let Ok(val) = outstr.parse::<i64>() {
-                                    return Some(Token {location: self.currentLocation.clone(), typ: TokenType::Number64(val)});
+                            match nc {
+                                'l' => {
+                                    self.cursor += 1;
+                                    self.currentLocation.character += 1;
+                                    if let Ok(val) = outstr.parse::<i64>() {
+                                        return Some(Token {location: self.currentLocation.clone(), typ: TokenType::Number64(val)});
+                                    }
+                                    else {
+                                        todo!("Error message for this")
+                                    }
                                 }
-                                else {
-                                    todo!("Error message for this")
+                                'i' => {
+                                    self.cursor += 1;
+                                    self.currentLocation.character += 1;
+                                    if let Ok(val) = outstr.parse::<i32>() {
+                                        return Some(Token {location: self.currentLocation.clone(), typ: TokenType::Number32(val)});
+                                    }
+                                    else {
+                                        todo!("Error message for this")
+                                    }
                                 }
-                            }
-                            else {
-                                if let Ok(val) = outstr.parse::<i32>() {
-                                    return Some(Token {location: self.currentLocation.clone(), typ: TokenType::Number32(val)});
+                                's' => {
+                                    self.cursor += 1;
+                                    self.currentLocation.character += 1;
+                                    if let Ok(val) = outstr.parse::<i16>() {
+                                        return Some(Token {location: self.currentLocation.clone(), typ: TokenType::Number16(val)});
+                                    }
+                                    else {
+                                        todo!("Error message for this")
+                                    }
                                 }
-                                else {
-                                    todo!("Error message for this: {}: \"{}\"",self.currentLocation.loc_display(),outstr);
+                                'c' => {
+                                    self.cursor += 1;
+                                    self.currentLocation.character += 1;
+                                    if let Ok(val) = outstr.parse::<i8>() {
+                                        return Some(Token {location: self.currentLocation.clone(), typ: TokenType::Number8(val)});
+                                    }
+                                    else {
+                                        todo!("Error message for this")
+                                    }
+                                }
+                                _ => {
+                                    if let Ok(val) = outstr.parse::<i32>() {
+                                        return Some(Token {location: self.currentLocation.clone(), typ: TokenType::Number32(val)});
+                                    }
+                                    else {
+                                        todo!("Error message for this: {}: \"{}\"",self.currentLocation.loc_display(),outstr);
+                                    }
                                 }
                             }
                         }
@@ -3191,6 +3267,16 @@ impl OfP {
             },
             OfP::CONST(val) => {
                 match val {
+                    RawConstValueType::CHAR(val) => {
+                        let reg = regs[0].to_byte_size(1);
+                        writeln!(f, "   mov {}, {}",reg.to_string(),val)?;
+                        out.push(reg);
+                    },
+                    RawConstValueType::SHORT(val) => {
+                        let reg = regs[0].to_byte_size(2);
+                        writeln!(f, "   mov {}, {}",reg.to_string(),val)?;
+                        out.push(reg);
+                    },
                     RawConstValueType::INT(val) => {
                         let reg = regs[0].to_byte_size(4);
                         writeln!(f, "   mov {}, {}",reg.to_string(),val)?;
@@ -3454,8 +3540,8 @@ impl ConstValueType {
             ConstValueType::STR(_, typ) => if *typ == ProgramStringType::CSTR { vartyp.weak_eq(&VarType::PTR(Ptr {typ: PtrTyp::TYP(Box::new(VarType::CHAR)), inner_ref: 0})) } else {false},
             ConstValueType::PTR(typ, _) => vartyp.weak_eq(&VarType::PTR(typ.clone())),
             ConstValueType::BOOLEAN(_)        => vartyp.weak_eq(&VarType::BOOLEAN),
-            ConstValueType::CHAR(_)           => todo!(),
-            ConstValueType::SHORT(_)          => todo!(),
+            ConstValueType::CHAR(_)           => vartyp.weak_eq(&VarType::CHAR),
+            ConstValueType::SHORT(_)          => vartyp.weak_eq(&VarType::SHORT),
         }
     }
     fn mul(&self, Other: &ConstValueType) -> Result<ConstValueType,String> {
@@ -3638,6 +3724,8 @@ impl ConstValueType {
 
 #[derive(Debug, Clone,PartialEq)]
 enum RawConstValueType{
+    CHAR(i8),
+    SHORT(i16),
     INT(i32),
     LONG(i64),
     STR(usize),
@@ -3646,14 +3734,22 @@ enum RawConstValueType{
 impl RawConstValueType {
     fn to_string(&self, build: &BuildProgram) -> String {
         match self {
-            Self::INT(v) => format!("{}",v),
-            Self::LONG(v) => format!("{}",v),
-            Self::STR(v) => format!("\"{}\"",build.stringdefs[v.to_owned()].Data),
+            Self::SHORT(v)  => format!("{}",v),
+            Self::CHAR(v)    => format!("{}",v),
+            Self::INT(v)    => format!("{}",v),
+            Self::LONG(v)   => format!("{}",v),
+            Self::STR(v)  => format!("\"{}\"",build.stringdefs[v.to_owned()].Data),
             Self::PTR(_, p) => format!("ptr {}",p)
         }
     }
     fn to_type(&self, build: &BuildProgram) -> Vec<VarType> {
         match self {
+            RawConstValueType::CHAR(_) => {
+                vec![VarType::CHAR]
+            }
+            RawConstValueType::SHORT(_) => {
+                vec![VarType::SHORT]
+            }
             RawConstValueType::INT(_) => {
                 vec![VarType::INT]
             },
@@ -3674,8 +3770,10 @@ impl RawConstValueType {
     }
     fn get_num_data(&self) -> i64 {
         match self {
-            RawConstValueType::INT(val) => val.clone() as i64,
             RawConstValueType::LONG(val) => val.clone(),
+            RawConstValueType::INT(val) => val.clone() as i64,
+            RawConstValueType::SHORT(val) => val.clone() as i64,
+            RawConstValueType::CHAR(val) => val.clone() as i64,
             RawConstValueType::STR(_) => todo!(),
             RawConstValueType::PTR(_,val) => val.clone(),
         }
@@ -3683,6 +3781,16 @@ impl RawConstValueType {
     fn LRNasm(&self, f: &mut File, build: &BuildProgram, program: &CmdProgram, iregs: &Vec<Register>) -> std::io::Result<Vec<Register>> {
         let o: Vec<Register>;
         match self {
+            RawConstValueType::SHORT(val) => {
+                let oreg = iregs[0].to_byte_size(2);
+                writeln!(f, "   mov {}, {}",oreg.to_string(),val)?;
+                o = vec![oreg]
+            }
+            RawConstValueType::CHAR(val) => {
+                let oreg = iregs[0].to_byte_size(1);
+                writeln!(f, "   mov {}, {}",oreg.to_string(),val)?;
+                o = vec![oreg]
+            }
             RawConstValueType::INT(val) => {
                 let oreg = iregs[0].to_byte_size(4);
                 writeln!(f, "   mov {}, {}",oreg.to_string(),val)?;
@@ -4217,6 +4325,12 @@ fn eval_const_def(lexer: &mut Lexer, build: &mut BuildProgram, until: TokenType)
             TokenType::WordType(word) => {
                 let def = par_expect!(token.location, build.constdefs.get(&word), "Could not find constant definition {}. You can only have constants inside other constant definitions!",word);
                 match def.typ {
+                    RawConstValueType::CHAR(val) => {
+                        varStack.push(ConstValueType::CHAR(val));
+                    }
+                    RawConstValueType::SHORT(val) => {
+                        varStack.push(ConstValueType::SHORT(val));
+                    }
                     RawConstValueType::INT(val)  => {
                         varStack.push(ConstValueType::INT(val));
                     }
@@ -4240,6 +4354,12 @@ fn eval_const_def(lexer: &mut Lexer, build: &mut BuildProgram, until: TokenType)
             }
             TokenType::Number64(num) => {
                 varStack.push(ConstValueType::LONG(num));
+            }
+            TokenType::Number16(num) => {
+                varStack.push(ConstValueType::SHORT(num));
+            }
+            TokenType::Number8(num) => {
+                varStack.push(ConstValueType::CHAR(num));
             }
             TokenType::CStringType(word) => {
                 varStack.push(ConstValueType::STR(word, ProgramStringType::CSTR))
@@ -4857,8 +4977,8 @@ fn parse_token_to_build_inst(token: Token,lexer: &mut Lexer, program: &mut CmdPr
                             RawConstValue {typ: RawConstValueType::PTR(typ, v), loc: val.loc}
                         }
                         ConstValueType::BOOLEAN(_) => todo!(),
-                        ConstValueType::CHAR(_) => todo!(),
-                        ConstValueType::SHORT(_) => todo!(),
+                        ConstValueType::CHAR(rval)     => RawConstValue {typ: RawConstValueType::CHAR(rval), loc: val.loc},
+                        ConstValueType::SHORT(rval)   => RawConstValue {typ: RawConstValueType::SHORT(rval), loc: val.loc},
 
                     };
                     if let Some(constdef) = build.constdefs.get(&name) {
@@ -5258,10 +5378,10 @@ fn parse_token_to_build_inst(token: Token,lexer: &mut Lexer, program: &mut CmdPr
                     currentScope.body_unwrap_mut().unwrap().push((token.location.clone(),Instruction::DIVSET(expr_2, expr)))
                 },
             }
-
-
         },
         TokenType::SETOperation(_) => todo!(),
+        TokenType::Number8(_) => todo!(),
+        TokenType::Number16(_) => todo!(),
     }
 
 }
@@ -6189,6 +6309,8 @@ fn to_nasm_x86_64(build: &mut BuildProgram, program: &CmdProgram) -> io::Result<
             //GlobalVarType::BUFFER(i) => writeln!(&mut f, "_GLOBLBUF_{}",i)?,
             GlobalVarType::CONSTANT(val) => {
                 match val {
+                    RawConstValueType::CHAR(v) => writeln!(&mut f, "db {}",v)?,
+                    RawConstValueType::SHORT(v) => writeln!(&mut f, "dw {}",v)?,
                     RawConstValueType::INT(v) => writeln!(&mut f, "dd {}",v)?,
                     RawConstValueType::LONG(v) => writeln!(&mut f, "dq {}",v)?,
                     RawConstValueType::STR(UUID) => writeln!(&mut f, "$STRING_{}",UUID.to_string().replace("-", ""))?,

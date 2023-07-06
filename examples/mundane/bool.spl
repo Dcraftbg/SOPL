@@ -1,0 +1,2 @@
+const true: char = 1c;
+const false: char = 0c;

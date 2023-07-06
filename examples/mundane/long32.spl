@@ -1,0 +1,5 @@
+func main(){
+    let a: size_t = 5;
+    let b: size_t = 6;
+    let c: size_t = a+b;
+}
