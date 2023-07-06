@@ -393,9 +393,7 @@ enum IntrinsicType {
     INCLUDE,
     IF,
     ELSE,
-    WHILE,
-
-    TOP,
+    WHILE,   
     CAST,
     THREEDOTS,
     // BOOLEAN OPERATIONS
@@ -515,9 +513,7 @@ impl IntrinsicType {
             IntrinsicType::INTERRUPT => {
                 if isplural {"Interrupts".to_string()} else {"Interrupt".to_string()}
             },
-            IntrinsicType::TOP => {
-                if isplural {"Tops".to_string()} else {"Top".to_string()}
-            },
+           
             IntrinsicType::CAST => {
                 if isplural {"Casts".to_string()} else {"Cast".to_string()}
             },
@@ -4390,11 +4386,8 @@ fn parse_argument_contract_from_body(body: &[Token], build: &mut BuildProgram,pr
                         expectNextSY = false;
                     }
                     IntrinsicType::CLOSEPAREN => {
-                        return out},
-                    IntrinsicType::TOP => {
-                        expectNextSY = true;
-                        out.push(par_expect!(token, OfP::from_token(&token,build,program, currentLocals),"Unexpected Token Type in argument Contract. Expected Definition but found: {}",token.typ.to_string(false)));
-                    }
+                        return out
+                    },
                     other => par_error!(token, "Unexpected intrinsic in argument contract! {}",other.to_string(false))
                 }
             }
@@ -4419,11 +4412,8 @@ fn parse_argument_contract(lexer: &mut Lexer, build: &mut BuildProgram, program:
                         expectNextSY = false;
                     }
                     IntrinsicType::CLOSEPAREN => {
-                        return out},
-                    IntrinsicType::TOP => {
-                        expectNextSY = true;
-                        out.push(par_expect!(token, OfP::from_token(&token,build,program, currentLocals),"Unexpected Token Type in argument Contract. Expected Definition but found: {}",token.typ.to_string(false)));
-                    }
+                        return out
+                    },
                     other => par_error!(token, "Unexpected intrinsic in argument contract! {}",other.to_string(false))
                 }
             }
@@ -4718,10 +4708,10 @@ fn parse_token_to_build_inst(token: Token,lexer: &mut Lexer, program: &mut CmdPr
                     }
 
                 }
-                IntrinsicType::OPENPAREN => todo!("loc: {}",token.location.loc_display()),
-                IntrinsicType::CLOSEPAREN => todo!(),
-                IntrinsicType::DOUBLE_COLIN => todo!("Context {:#?}",build),
-                IntrinsicType::COMA => todo!(),
+                IntrinsicType::OPENPAREN    => par_error!(token, "Error: Unexpected intrinsic type openparen!"),
+                IntrinsicType::CLOSEPAREN   => par_error!(token, "Error: Unexpected intrinsic type closeparen!"),
+                IntrinsicType::DOUBLE_COLIN => par_error!(token, "Error: Unexpected intrinsic double colin!"),
+                IntrinsicType::COMA         => par_error!(token, "Error: Unexpected intrinsic type coma!"),
                 IntrinsicType::OPENCURLY => {
                     let ln = scopeStack.len();
                     if ln != 0 {
@@ -5141,7 +5131,6 @@ fn parse_token_to_build_inst(token: Token,lexer: &mut Lexer, program: &mut CmdPr
                         }
                     }
                 },
-                IntrinsicType::TOP => todo!(),
                 IntrinsicType::CAST => todo!(),
                 IntrinsicType::DLL_IMPORT => {
                     let ntok = par_expect!(lexer.currentLocation, lexer.next(), "Error: Abruptly ran out of tokens for DLL_IMPORT");
