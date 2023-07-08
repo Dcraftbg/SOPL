@@ -7,7 +7,7 @@ extern "C" atol	;
 extern "C" bsearch	;
 extern "C" calloc	;
 extern "C" div	    ;
-extern "C" exit	;
+extern "C" exit(int)	;
 extern "C" free	;
 extern "C" getenv	;
 extern "C" labs	;

@@ -4,6 +4,7 @@
 #![allow(unused_macros)]
 #![allow(unused_imports)]
 #![allow(unreachable_patterns)]
+#![allow(unreachable_code)]
 
 use core::{num, panic};
 use std::{env, process::{exit, Command, Stdio}, path::{Path, PathBuf}, ffi::OsStr, str::{FromStr, Chars}, collections::{HashMap, HashSet}, hash::Hash, fs::{File, self}, io::{Read, Write, self}, fmt::{format, Display}, borrow::{BorrowMut, Borrow}, clone, time::{SystemTime, Instant}, rc::Rc, iter::Peekable, cell::{RefCell, Ref, RefMut}, ops::{Deref, DerefMut}, vec, sync::Arc, os, f32::consts::E, any::Any};
@@ -5661,7 +5662,10 @@ fn nasm_x86_64_load_args(f: &mut File, scope: &TCScopeType, build: &BuildProgram
     }
     let mut offset: usize = 0;
     if program.architecture.options.argumentPassing == ArcPassType::PUSHALL {        
+        todo!("Im sure there is a bug to do here with x86 assembly and passing parameters and offsets having to be 8 aligned");
+        
         for (_, iarg) in scope.get_contract(build).unwrap().Inputs.iter().rev() {
+            
             offset+=iarg.get_size(program);
         }
         for (_, iarg) in scope.get_contract(build).unwrap().Inputs.iter().rev() {
@@ -5681,8 +5685,14 @@ fn nasm_x86_64_load_args(f: &mut File, scope: &TCScopeType, build: &BuildProgram
         let mut int_ptr_count: usize = 0;
 
         for (_, iarg) in scope.get_contract(build).unwrap().Inputs.iter().rev() {
+            if offset%8+iarg.get_size(program) > 8 {
+                offset+=8-offset%8;
+            }
             offset+=iarg.get_size(program);
             if program.architecture.options.argumentPassing.custom_unwrap().nums_ptrs.is_some() && int_ptr_count >= program.architecture.options.argumentPassing.custom_unwrap().nums_ptrs.as_ref().unwrap().len() {
+                if offset_of_ins%8+iarg.get_size(program) > 8 {
+                    offset_of_ins+=8-offset_of_ins%8;
+                }
                 offset_of_ins += iarg.get_size(program);
             }
             match iarg {
@@ -5690,11 +5700,21 @@ fn nasm_x86_64_load_args(f: &mut File, scope: &TCScopeType, build: &BuildProgram
                 VarType::CUSTOM(_) => {},
             }
         }
-        for (_, iarg) in scope.get_contract(build).unwrap().Inputs.iter().rev() {
+        if offset%8 > 0 {
+            offset+=offset%8;
+        }
+        if offset_of_ins%8 > 0 {
+            offset_of_ins+=offset_of_ins%8;
+        }
+        for (
+            _, iarg) in scope.get_contract(build).unwrap().Inputs.iter().rev() {
             if custom_build.nums_ptrs.is_some() && custom_build.nums_ptrs.as_ref().unwrap().len() > int_ptr_count-1 {
                 let osize = iarg.get_size(program);
                 let ireg = &custom_build.nums_ptrs.as_ref().unwrap()[int_ptr_count-1].to_byte_size(osize);
                 writeln!(f, "   mov {} [{}-{}], {}",size_to_nasm_type(osize), program.stack_ptr(), offset, ireg.to_string())?;
+                if (offset_of_ins-osize)%8+osize > 8 {
+                    offset_of_ins-=8-(offset_of_ins-osize)%8;
+                }
                 offset-=osize;
                 int_ptr_count-=1
             }
@@ -5703,7 +5723,13 @@ fn nasm_x86_64_load_args(f: &mut File, scope: &TCScopeType, build: &BuildProgram
                 let reg = Register::RAX.to_byte_size(osize);
                 writeln!(f, "   mov {}, {} [{}+{}]",reg.to_string(), size_to_nasm_type(osize),program.stack_ptr(),offset_of_ins+shadow_space+osize)?;
                 writeln!(f, "   mov {} [{}-{}], {}",size_to_nasm_type(osize),program.stack_ptr(),offset,reg.to_string())?;
+                if (offset_of_ins-osize)%8+osize > 8 {
+                    offset_of_ins-=8-(offset_of_ins-osize)%8;
+                }
                 offset_of_ins-=osize;
+                if offset%8-osize > 8 {
+                    offset-=8-offset%8;
+                }
                 offset-=osize;
                 int_ptr_count-=1
             }
