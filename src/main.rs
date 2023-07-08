@@ -5711,25 +5711,25 @@ fn nasm_x86_64_load_args(f: &mut File, scope: &TCScopeType, build: &BuildProgram
             if custom_build.nums_ptrs.is_some() && custom_build.nums_ptrs.as_ref().unwrap().len() > int_ptr_count-1 {
                 let osize = iarg.get_size(program);
                 let ireg = &custom_build.nums_ptrs.as_ref().unwrap()[int_ptr_count-1].to_byte_size(osize);
-                writeln!(f, "   mov {} [{}-{}], {}",size_to_nasm_type(osize), program.stack_ptr(), offset, ireg.to_string())?;
-                if (offset_of_ins-osize)%8+osize > 8 {
-                    offset_of_ins-=8-(offset_of_ins-osize)%8;
+                if (offset-osize)%8 > 0 {
+                    offset-=8-(offset-osize)%8;
                 }
+                writeln!(f, "   mov {} [{}-{}], {}",size_to_nasm_type(osize), program.stack_ptr(), offset, ireg.to_string())?;
                 offset-=osize;
                 int_ptr_count-=1
             }
             else {
                 let osize = iarg.get_size(program);
                 let reg = Register::RAX.to_byte_size(osize);
+                if (offset-osize)%8 > 0 {
+                    offset-=8-(offset-osize)%8;
+                }
                 writeln!(f, "   mov {}, {} [{}+{}]",reg.to_string(), size_to_nasm_type(osize),program.stack_ptr(),offset_of_ins+shadow_space+osize)?;
                 writeln!(f, "   mov {} [{}-{}], {}",size_to_nasm_type(osize),program.stack_ptr(),offset,reg.to_string())?;
-                if (offset_of_ins-osize)%8+osize > 8 {
+                if (offset_of_ins-osize)%8 > 0 {
                     offset_of_ins-=8-(offset_of_ins-osize)%8;
                 }
                 offset_of_ins-=osize;
-                if offset%8-osize > 8 {
-                    offset-=8-offset%8;
-                }
                 offset-=osize;
                 int_ptr_count-=1
             }
