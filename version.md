@@ -1,8 +1,9 @@
 **(Latest patch versions in github history and at the top of Change Log)**
 
-Newest Version: [0.16.1A](#0161a)
+Newest Version: [0.16.2A](#0162a)
 # Manual:
-  - [0.16.1A](#0161a)
+  - [0.16.2A](#0162a)
+    - [0.16.1A](#0161a)
     - [0.16A](#016a)
   - [0.15.1A](#0151a)  
     - [0.15A](#015a)  
@@ -50,6 +51,10 @@ Newest Version: [0.16.1A](#0161a)
   - [0.2A](#02a)
   - [0.1A](#01a)
 # Change Log
+ ## 0.16.2A
+   - Fixed argument alignment 
+   - Temporarily disabled argument alignment for 32 bit
+   - Fixed issues to do with argument alignment
  ## 0.16.1A
    - Fixed multiple arguments for 32 bit (causing issue with 64 bit multiple arguments)
    - Fixed multiple arguments for 64 bit
