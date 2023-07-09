@@ -4698,7 +4698,7 @@ fn parse_token_to_build_inst(token: Token,lexer: &mut Lexer, program: &mut CmdPr
                             let contract = parse_function_contract(lexer);
                             lexer.CurrentFuncs.insert(Word.clone());
                             let mut locals: Locals = LinkedHashMap::with_capacity(contract.Inputs.len());
-                            for (inn,inp) in contract.Inputs.iter() {
+                            for (inn,inp) in contract.Inputs.iter().rev() {
                                 locals.insert(inn.clone(), inp.clone());
                             }
                             scopeStack.push(Scope { typ: ScopeType::FUNCTION(Function { contract, body:  vec![(token.location.clone(),Instruction::FNBEGIN())], location: token.location.clone(), locals: Locals::new(), buffers: Vec::new() }, Word), hasBeenOpened: false });
@@ -5660,35 +5660,30 @@ fn nasm_x86_64_load_args(f: &mut File, scope: &TCScopeType, build: &BuildProgram
             shadow_space = ops.shadow_space;
         }
     }
-    let mut offset: usize = 0;
+    //let mut offset: usize = 0;
     if program.architecture.options.argumentPassing == ArcPassType::PUSHALL {        
         todo!("Im sure there is a bug to do here with x86 assembly and passing parameters and offsets having to be 8 aligned");
         
-        for (_, iarg) in scope.get_contract(build).unwrap().Inputs.iter().rev() {
-            
-            offset+=iarg.get_size(program);
-        }
-        for (_, iarg) in scope.get_contract(build).unwrap().Inputs.iter().rev() {
-            let osize = iarg.get_size(program);
-            let reg = Register::RAX.to_byte_size(osize);
-            if offset+shadow_space > 0 {
-                writeln!(f, "   mov {}, {} [{}+{}]",reg.to_string(), size_to_nasm_type(osize),program.stack_ptr(),offset+shadow_space)?;
-            }
-            writeln!(f, "   mov {} [{}-{}], {}",size_to_nasm_type(osize),program.stack_ptr(),offset,reg.to_string())?;
-            offset-=osize
-        };
+        //for (_, iarg) in scope.get_contract(build).unwrap().Inputs.iter().rev() {      
+        //    offset+=iarg.get_size(program);
+        //}
+        //for (_, iarg) in scope.get_contract(build).unwrap().Inputs.iter().rev() {
+            //let osize = iarg.get_size(program);
+            //let reg = Register::RAX.to_byte_size(osize);
+            //if offset+shadow_space > 0 {
+            //    writeln!(f, "   mov {}, {} [{}+{}]",reg.to_string(), size_to_nasm_type(osize),program.stack_ptr(),offset+shadow_space)?;
+            //}
+            //writeln!(f, "   mov {} [{}-{}], {}",size_to_nasm_type(osize),program.stack_ptr(),offset,reg.to_string())?;
+            //offset-=osize
+        //};
     }
     else {
         let custom_build = program.architecture.options.argumentPassing.custom_unwrap();
 
         let mut offset_of_ins: usize = 0;
         let mut int_ptr_count: usize = 0;
-
+        
         for (_, iarg) in scope.get_contract(build).unwrap().Inputs.iter().rev() {
-            if offset%8+iarg.get_size(program) > 8 {
-                offset+=8-offset%8;
-            }
-            offset+=iarg.get_size(program);
             if program.architecture.options.argumentPassing.custom_unwrap().nums_ptrs.is_some() && int_ptr_count >= program.architecture.options.argumentPassing.custom_unwrap().nums_ptrs.as_ref().unwrap().len() {
                 if offset_of_ins%8+iarg.get_size(program) > 8 {
                     offset_of_ins+=8-offset_of_ins%8;
@@ -5700,42 +5695,45 @@ fn nasm_x86_64_load_args(f: &mut File, scope: &TCScopeType, build: &BuildProgram
                 VarType::CUSTOM(_) => {},
             }
         }
-        if offset%8 > 0 {
-            offset+=offset%8;
-        }
+        
         if offset_of_ins%8 > 0 {
             offset_of_ins+=offset_of_ins%8;
         }
-        for (
-            _, iarg) in scope.get_contract(build).unwrap().Inputs.iter().rev() {
+        let mut offset: usize = 0;
+        for (_, iarg) in scope.get_contract(build).unwrap().Inputs.iter().rev() {
             if custom_build.nums_ptrs.is_some() && custom_build.nums_ptrs.as_ref().unwrap().len() > int_ptr_count-1 {
                 let osize = iarg.get_size(program);
                 let ireg = &custom_build.nums_ptrs.as_ref().unwrap()[int_ptr_count-1].to_byte_size(osize);
-                writeln!(f, "   mov {} [{}-{}], {}",size_to_nasm_type(osize), program.stack_ptr(), offset, ireg.to_string())?;
-                if (offset-osize)%8 > 0 {
-                    offset-=8-(offset-osize)%8;
+                if offset%8+osize > 8 {
+                    offset+=8-offset%8;
                 }
-                offset-=osize;
+                offset+=osize;
+                writeln!(f, "   mov {} [{}-{}], {}",size_to_nasm_type(osize), program.stack_ptr(), offset, ireg.to_string())?;
+                // if (offset-osize)%8 > 0 {
+                //     offset-=8-(offset-osize)%8;
+                // }
+                // offset-=osize;
                 int_ptr_count-=1
             }
             else {
                 let osize = iarg.get_size(program);
                 let reg = Register::RAX.to_byte_size(osize);
                 writeln!(f, "   mov {}, {} [{}+{}]",reg.to_string(), size_to_nasm_type(osize),program.stack_ptr(),offset_of_ins+shadow_space+osize)?;
+                if offset%8+osize > 8 {
+                    offset+=8-offset%8;
+                }
+                offset+=osize;
                 writeln!(f, "   mov {} [{}-{}], {}",size_to_nasm_type(osize),program.stack_ptr(),offset,reg.to_string())?;
                 if (offset_of_ins-osize)%8 > 0 {
                     offset_of_ins-=8-(offset_of_ins-osize)%8;
                 }
-                if (offset-osize)%8 > 0 {
-                    offset-=8-(offset-osize)%8;
-                }
+                
                 offset_of_ins-=osize;
-                offset-=osize;
                 int_ptr_count-=1
             }
         };
     }
-    Ok(offset)
+    Ok(0)
 }
 fn get_local_build<'a>(currentLocals: &'a Vec<HashMap<String, LocalVariable>>, name: &String) -> Option<&'a LocalVariable> {
     for e in currentLocals {
