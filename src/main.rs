@@ -5685,9 +5685,9 @@ fn nasm_x86_64_load_args(f: &mut File, scope: &TCScopeType, build: &BuildProgram
         
         for (_, iarg) in scope.get_contract(build).unwrap().Inputs.iter().rev() {
             if program.architecture.options.argumentPassing.custom_unwrap().nums_ptrs.is_some() && int_ptr_count >= program.architecture.options.argumentPassing.custom_unwrap().nums_ptrs.as_ref().unwrap().len() {
-                if offset_of_ins%8+iarg.get_size(program) > 8 {
-                    offset_of_ins+=8-offset_of_ins%8;
-                }
+                // if offset_of_ins%8+iarg.get_size(program) > 8 {
+                //     offset_of_ins+=8-offset_of_ins%8;
+                // }
                 offset_of_ins += iarg.get_size(program);
             }
             match iarg {
@@ -5718,15 +5718,15 @@ fn nasm_x86_64_load_args(f: &mut File, scope: &TCScopeType, build: &BuildProgram
             else {
                 let osize = iarg.get_size(program);
                 let reg = Register::RAX.to_byte_size(osize);
-                writeln!(f, "   mov {}, {} [{}+{}]",reg.to_string(), size_to_nasm_type(osize),program.stack_ptr(),offset_of_ins+shadow_space+osize)?;
+                writeln!(f, "   mov {}, {} [{}+{}]",reg.to_string(), size_to_nasm_type(osize),program.stack_ptr(),offset_of_ins+shadow_space)?;
                 if offset%8+osize > 8 {
                     offset+=8-offset%8;
                 }
                 offset+=osize;
                 writeln!(f, "   mov {} [{}-{}], {}",size_to_nasm_type(osize),program.stack_ptr(),offset,reg.to_string())?;
-                if (offset_of_ins-osize)%8 > 0 {
-                    offset_of_ins-=8-(offset_of_ins-osize)%8;
-                }
+                //if (offset_of_ins-osize)%8 > 0 {
+                //    offset_of_ins-=8-(offset_of_ins-osize)%8;
+                //}
                 
                 offset_of_ins-=osize;
                 int_ptr_count-=1
