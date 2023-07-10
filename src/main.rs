@@ -13,7 +13,11 @@ use serde_json::Value;
 mod cfor;
 
 
-
+macro_rules! USE {
+    ($arg:expr) => {
+        drop($arg);
+    }
+}
 macro_rules! time_func {
     ($func:expr $(, $arg:expr)*) => {{
         let start = Instant::now();
@@ -674,6 +678,157 @@ enum Expression {
     expr(Box<ExprTree>)
 }
 impl Expression {
+    fn jumpif_nasm_x86_64(&self, label: String, f: &mut File, program: &CmdProgram, build: &BuildProgram, loc: &ProgramLocation, stack_size: usize, local_vars: &mut Vec<HashMap<String, LocalVariable>>,buffers: &Vec<BuildBuf>) -> io::Result<()>{
+        match self {
+            Self::val(v) => {
+                match v {
+                    OfP::BUFFER(_) => com_error!(loc,"Cannot have buffers in conditions"),
+                    OfP::CONST(cv) => {
+                        match cv {
+                            RawConstValueType::CHAR(c) => {
+                                if *c != 0{
+                                    writeln!(f,"   jmp {}",label)?;
+                                }
+                            }
+                            RawConstValueType::SHORT(c) => {
+                                if *c != 0 {
+                                    writeln!(f,"   jmp {}",label)?
+                                }
+                            }
+                            RawConstValueType::INT(c) => {
+                                if *c != 0{
+                                    writeln!(f,"   jmp {}",label)?;
+                                }
+                            }
+                            RawConstValueType::LONG(c) => {
+                                if *c != 0 {
+                                    writeln!(f,"   jmp {}",label)?;
+                                }
+                            }
+                            RawConstValueType::PTR(_, c) => {
+                                if *c != 0 {
+                                    writeln!(f,"   jmp {}",label)?
+                                }
+                            }
+                            RawConstValueType::STR(_) => {
+                                com_error!(loc, "Error: Cannot have Strings inside conditions")
+                            }
+                        }
+                    }
+                    OfP::RESULT(func, args) => {
+                        let sp_taken = nasm_x86_64_prep_args(program, build, f, args, stack_size, local_vars)?;
+                        writeln!(f, "   call {}",func)?;
+                        if sp_taken-stack_size > 0 {
+                            writeln!(f, "   add {}, {}",program.stack_ptr(),sp_taken-stack_size)?
+                        }
+                        let reg = Register::RAX.to_byte_size(build.get_contract_of_symbol(func).unwrap().Outputs.get(0).unwrap_or(&VarType::LONG).get_size(program));
+                        writeln!(f, "   cmp {}, 0", reg)?;
+                        writeln!(f, "   jnz")?;
+                        /*
+                        let sp_taken = nasm_x86_64_prep_args(program, build, f, args, stack_size, local_vars)?;
+                        writeln!(f, "   call {}{}",program.architecture.func_prefix,func)?;
+                        if sp_taken-stack_size > 0 {
+                            writeln!(f, "   add {}, {}",program.stack_ptr(),sp_taken-stack_size)?
+                        }
+                        let reg = regs[0].to_byte_size(build.get_contract_of_symbol(func).unwrap().Outputs.get(0).unwrap_or(&VarType::LONG).get_size(program));
+                        if reg.to_byte_size(8) != Register::RAX {
+                            let oreg = Register::RAX.to_byte_size(reg.size());
+                            writeln!(f, "   mov {}, {}",reg.to_string(),oreg.to_string())?;
+                        }
+                        out.push(reg);
+                         */
+                    }
+                    OfP::GLOBALVAR(_) => {
+                        todo!("Cannot have global variables in contract")
+                    }
+                    OfP::LOCALVAR(v) => {
+                        let var = get_local_build(local_vars, v).unwrap();
+                        let reg = Register::RAX.to_byte_size(var.typ.get_size(program));
+                        if stack_size-var.operand > 0 {
+                            writeln!(f, "   mov {}, {} [{}-{}]",reg,size_to_nasm_type(var.typ.get_size(program)),program.stack_ptr(),stack_size-var.operand)?
+                        }
+                        else {
+                            writeln!(f, "   mov {}, {} [{}]",reg,size_to_nasm_type(var.typ.get_size(program)),program.stack_ptr())?
+                        }
+                        writeln!(f, "   cmp {}, 0",reg)?;
+                        writeln!(f, "   jnz {}",label)?;
+                    }
+                    OfP::REGISTER(v) => {
+                        writeln!(f, "   cmp {}, 0",v)?;
+                        writeln!(f, "   jnz {}",label)?
+                    },
+                }
+            }
+            Self::expr(con) => {
+                com_assert!(loc,con.op.is_boolean(), "Error: Expected boolean operation but found something else");
+                use Register::*;
+                match con.op {
+                    Op::EQ => {
+                        let eval_regs = vec![RAX,RBX,RCX,RDX];
+                        let left_regs = con.left.as_ref().unwrap().LEIRnasm(eval_regs.clone(), f, program, build, local_vars, buffers, stack_size, loc)?;
+                        let reg = RSP.to_byte_size(left_regs[0].size());
+                        writeln!(f, "   mov {}, {}",reg,left_regs[0])?;
+                        let right_regs = con.left.as_ref().unwrap().LEIRnasm(eval_regs.clone(), f, program, build, local_vars, buffers, stack_size, loc)?;
+                        writeln!(f, "   cmp {}, {}",reg,right_regs[0])?;
+                        writeln!(f, "   jz {}",label)?;
+                    }
+                    Op::NEQ => {
+                        let eval_regs = vec![RAX,RBX,RCX,RDX];
+                        let left_regs = con.left.as_ref().unwrap().LEIRnasm(eval_regs.clone(), f, program, build, local_vars, buffers, stack_size, loc)?;
+                        let reg = RSP.to_byte_size(left_regs[0].size());
+                        writeln!(f, "   mov {}, {}",reg,left_regs[0])?;
+                        let right_regs = con.left.as_ref().unwrap().LEIRnasm(eval_regs.clone(), f, program, build, local_vars, buffers, stack_size, loc)?;
+                        writeln!(f, "   cmp {}, {}",reg,right_regs[0])?;
+                        writeln!(f, "   jnz {}",label)?;
+                    }
+                    Op::GT => {
+                        let eval_regs = vec![RAX,RBX,RCX,RDX];
+                        let left_regs = con.left.as_ref().unwrap().LEIRnasm(eval_regs.clone(), f, program, build, local_vars, buffers, stack_size, loc)?;
+                        let reg = RSP.to_byte_size(left_regs[0].size());
+                        writeln!(f, "   mov {}, {}",reg,left_regs[0])?;
+                        let right_regs = con.left.as_ref().unwrap().LEIRnasm(eval_regs.clone(), f, program, build, local_vars, buffers, stack_size, loc)?;
+                        writeln!(f, "   cmp {}, {}",reg,right_regs[0])?;
+                        writeln!(f, "   jg {}",label)?;
+                    }
+                    Op::LT => {
+                        let eval_regs = vec![RAX,RBX,RCX,RDX];
+                        let left_regs = con.left.as_ref().unwrap().LEIRnasm(eval_regs.clone(), f, program, build, local_vars, buffers, stack_size, loc)?;
+                        let reg = RSP.to_byte_size(left_regs[0].size());
+                        writeln!(f, "   mov {}, {}",reg,left_regs[0])?;
+                        let right_regs = con.left.as_ref().unwrap().LEIRnasm(eval_regs.clone(), f, program, build, local_vars, buffers, stack_size, loc)?;
+                        writeln!(f, "   cmp {}, {}",reg,right_regs[0])?;
+                        writeln!(f, "   jl {}",label)?;
+                    }
+                    Op::GTEQ => {
+                        let eval_regs = vec![RAX,RBX,RCX,RDX];
+                        let left_regs = con.left.as_ref().unwrap().LEIRnasm(eval_regs.clone(), f, program, build, local_vars, buffers, stack_size, loc)?;
+                        let reg = RSP.to_byte_size(left_regs[0].size());
+                        writeln!(f, "   mov {}, {}",reg,left_regs[0])?;
+                        let right_regs = con.left.as_ref().unwrap().LEIRnasm(eval_regs.clone(), f, program, build, local_vars, buffers, stack_size, loc)?;
+                        writeln!(f, "   cmp {}, {}",reg,right_regs[0])?;
+                        writeln!(f, "   jge {}",label)?;
+                    }
+                    Op::LTEQ => {
+                        let eval_regs = vec![RAX,RBX,RCX,RDX];
+                        let left_regs = con.left.as_ref().unwrap().LEIRnasm(eval_regs.clone(), f, program, build, local_vars, buffers, stack_size, loc)?;
+                        let reg = RSP.to_byte_size(left_regs[0].size());
+                        writeln!(f, "   mov {}, {}",reg,left_regs[0])?;
+                        let right_regs = con.left.as_ref().unwrap().LEIRnasm(eval_regs.clone(), f, program, build, local_vars, buffers, stack_size, loc)?;
+                        writeln!(f, "   cmp {}, {}",reg,right_regs[0])?;
+                        writeln!(f, "   jle {}",label)?;
+                    }
+                    _ => todo!("Unhandled")
+                }
+            },
+        }
+        Ok(())
+        //USE!(label);
+        //todo!()
+    }
+    fn jumpifn_nasm_x86_64(&self, label: String){
+        USE!(label);
+        todo!()
+    }
     //fn jump(&self, label: String) -> 
     fn unwrap_val(&self) -> &OfP {
         if let Expression::val(v) = self {
@@ -889,23 +1044,33 @@ impl ExprTree {
                 let left = com_expect!(loc,self.left.as_ref(),"Error: Cannot evaluate Op '{}' without left parameter",Op::PLUS.to_string());
                 let right       = com_expect!(loc,self.right.as_ref(),"Error: Cannot evaluate Op '{}' without left parameter",Op::PLUS.to_string());
                 
-                let res_right = right.result_of_c(program, build, local_vars, loc).unwrap();
-                let res_left = left.result_of_c(program, build, local_vars, loc).unwrap();
+                //let res_right = right.result_of_c(program, build, local_vars, loc).unwrap();
+                //let res_left = left.result_of_c(program, build, local_vars, loc).unwrap();
 
-                if res_right.get_size(program) > res_left.get_size(program) {
-                    writeln!(f, "   xor {}, {}",regs[1],regs[1])?;
-                }
-                else if res_right.get_size(program) < res_left.get_size(program) {
-                    writeln!(f, "   xor {}, {}",regs[0],regs[0])?;
-                }
+                //if res_right.get_size(program) > res_left.get_size(program) {
+                //    writeln!(f, "   xor {}, {}",regs[1],regs[1])?;
+                //}
+                //else if res_right.get_size(program) < res_left.get_size(program) {
+                //    writeln!(f, "   xor {}, {}",regs[0],regs[0])?;
+                //}
 
                 match left {
                     Expression::expr(left_expr) => {
                         match right {
                             Expression::expr(right_expr) => {
+                                let res_right = right.result_of_c(program, build, local_vars, loc).unwrap();
+                                let res_left = left.result_of_c(program, build, local_vars, loc).unwrap();
+                                if res_left.get_size(program) > res_right.get_size(program) {
+                                    writeln!(f,"   xor {}, {}",regs[1],regs[1])?
+                                }
+                                else if res_right.get_size(program) > res_left.get_size(program) {
+                                    writeln!(f,"   xor {}, {}",regs[0],regs[0])?
+                                }
                                 let mut left_oregs = left_expr.eval_nasm(regs.clone(), f, program, build, local_vars, buffers, stack_size, loc)?;
                                 let mut right_oregs = right_expr.eval_nasm(regs[1..].to_vec(), f, program, build, local_vars, buffers, stack_size, loc)?;
+
                                 if left_oregs[0].size() > right_oregs[0].size() {
+                                    
                                     right_oregs[0] = right_oregs[0].to_byte_size(left_oregs[0].size());
                                 }
                                 else if left_oregs[0].size() < right_oregs[0].size() {
@@ -922,6 +1087,14 @@ impl ExprTree {
                                         o = left_oregs;
                                     }
                                     _ => {
+                                        let res_right = right.result_of_c(program, build, local_vars, loc).unwrap();
+                                        let res_left = left.result_of_c(program, build, local_vars, loc).unwrap();
+                                        if res_left.get_size(program) > res_right.get_size(program) {
+                                            writeln!(f,"   xor {}, {}",regs[1],regs[1])?
+                                        }
+                                        else if res_right.get_size(program) > res_left.get_size(program) {
+                                            writeln!(f,"   xor {}, {}",regs[0],regs[0])?
+                                        }
                                         let mut left_oregs = left_expr.eval_nasm(regs.to_vec(), f, program, build, local_vars, buffers, stack_size, loc)?;
                                         let mut right = right_val.LOIRGNasm(vec![regs[1]], f, program, build, local_vars, buffers, stack_size, loc)?;
                                         if right[0].size() > left_oregs[0].size() {
@@ -948,6 +1121,14 @@ impl ExprTree {
                                     }
 
                                     _ => {
+                                        let res_right = right.result_of_c(program, build, local_vars, loc).unwrap();
+                                        let res_left = left.result_of_c(program, build, local_vars, loc).unwrap();
+                                        if res_left.get_size(program) > res_right.get_size(program) {
+                                            writeln!(f,"   xor {}, {}",regs[0],regs[0])?
+                                        }
+                                        else if res_right.get_size(program) > res_left.get_size(program) {
+                                            writeln!(f,"   xor {}, {}",regs[1],regs[1])?
+                                        }
                                         let mut right_oregs = right_expr.eval_nasm(regs.to_vec(), f, program, build, local_vars, buffers, stack_size, loc)?;
                                         let mut left = left_val.LOIRGNasm(vec![regs[1].clone()], f, program, build, local_vars, buffers, stack_size, loc)?;
                                         if left[0].size() > right_oregs[0].size() {
@@ -969,6 +1150,14 @@ impl ExprTree {
                                         o = left_oregs;
                                     }
                                     _ => {
+                                        let res_right = right.result_of_c(program, build, local_vars, loc).unwrap();
+                                        let res_left = left.result_of_c(program, build, local_vars, loc).unwrap();
+                                        if res_left.get_size(program) > res_right.get_size(program) {
+                                            writeln!(f,"   xor {}, {}",regs[1],regs[1])?
+                                        }
+                                        else if res_right.get_size(program) > res_left.get_size(program) {
+                                            writeln!(f,"   xor {}, {}",regs[0],regs[0])?
+                                        }
                                         let mut left_oregs = left_val.LOIRGNasm(regs.clone(), f, program, build, local_vars, buffers, stack_size, loc)?;
                                         let mut right = right_val.LOIRGNasm(vec![regs[1].clone()], f, program, build, local_vars, buffers, stack_size, loc)?;
                                         if right[0].size() > left_oregs[0].size() {
@@ -3368,6 +3557,8 @@ impl OfP {
             TokenType::Register(reg) => Some(Self::REGISTER(reg.clone())),
             TokenType::StringType(val) => Some(Self::CONST(RawConstValueType::STR(build.insert_new_str(ProgramString { Typ: ProgramStringType::STR, Data:  val.clone()})))),
             TokenType::CStringType(val)=> Some(Self::CONST(RawConstValueType::STR(build.insert_new_str(ProgramString { Typ: ProgramStringType::CSTR, Data: val.clone() })))),
+            TokenType::Number8(val)      => Some(Self::CONST(RawConstValueType::CHAR(val.clone()))),
+            TokenType::Number16(val)      => Some(Self::CONST(RawConstValueType::SHORT(val.clone()))),
             TokenType::Number32(val)      => Some(Self::CONST(RawConstValueType::INT(val.clone()))),
             TokenType::Number64(val)      => Some(Self::CONST(RawConstValueType::LONG(val.clone()))),
             _ => None
@@ -3729,6 +3920,17 @@ enum RawConstValueType{
     PTR(Ptr, i64)
 }
 impl RawConstValueType {
+    fn size(&self, program: &CmdProgram) -> usize {
+        match self {
+            Self::CHAR(_) => 1,
+            Self::SHORT(_)   => 2,
+            Self::INT(_)  => 4,
+            Self::LONG(_) => 8,
+            Self::STR(_) => todo!("This"),
+            Self::PTR(_, _) => (program.architecture.bits/8) as usize,
+            _ => panic!("This should be unreachable")
+        }
+    }
     fn to_string(&self, build: &BuildProgram) -> String {
         match self {
             Self::SHORT(v)  => format!("{}",v),
@@ -4850,7 +5052,7 @@ fn parse_token_to_build_inst(token: Token,lexer: &mut Lexer, program: &mut CmdPr
                             let mut lf = Lexer::new(&info,lexer.Intrinsics,lexer.Definitions,HashSet::new());
                             lf.currentLocation.file = Rc::new(String::from(p.join(&include_p).to_str().unwrap().replace("\\", "/")));
                             let mut nprogram = program.clone();
-                            nprogram.path = String::from(p.join(&include_p).to_str().unwrap().replace("\\", "/"));
+                            nprogram.path = opath;
                             let build2 = parse_tokens_to_build(&mut lf, &mut nprogram,include_folders,build.stringoffset+build.stringdefs.len());
                             build.externals.extend(build2.externals);
                             build.stringdefs.extend(build2.stringdefs);
@@ -5800,6 +6002,10 @@ fn nasm_x86_64_handle_scope(f: &mut File, build: &BuildProgram, program: &CmdPro
                             let var = com_expect!(loc,get_local_build(&local_vars,varOrg),"Error: Unknown variable found during compilation {}",varOrg);
                             let oreg  = Register::RAX.to_byte_size(var.typ.get_size(program));
                             let oreg2 = Register::RBX.to_byte_size(var.typ.get_size(program));
+                            let result = Op2.result_of_c(program, build, local_vars, loc).unwrap();
+                            if result.get_size(program) < var.typ.get_size(program) {
+                                writeln!(f, "   xor {}, {}",Register::RAX.to_byte_size(var.typ.get_size(program)),Register::RAX.to_byte_size(var.typ.get_size(program)))?
+                            }
                             let oregs = Op2.LEIRnasm(vec![oreg,oreg2,Register::RCX.to_byte_size(var.typ.get_size(program))], f, program,build, &local_vars, &bufs,stack_size, loc)?;
                             if stack_size-var.operand == 0 {
                                 writeln!(f, "   mov {} [{}], {}",size_to_nasm_type(var.typ.get_size(program)),program.stack_ptr(), oregs[0].to_byte_size(var.typ.get_size(program)).to_string())?;

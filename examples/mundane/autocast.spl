@@ -1,6 +1,6 @@
 include "../../libs/libc/stdio.spl"
 func main(){
-    let c: char = 49;
-    let d: int = c;
+    //let c2: char = 6;
+    //let d: int = c2;
     printf("d: %d\n",d);
 }
