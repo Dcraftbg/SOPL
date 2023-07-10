@@ -10,21 +10,14 @@
 //    EAX pop
 //}
 
-extern "C" printf(*char : int);
-extern "C" malloc(long : ptr);
-extern "C" free(ptr);
-extern "C" memset(ptr, int, long);
-extern "C" gets(ptr);
-const NAMELEN = 50l;
+include "../libs/libc/stdio.spl"
+include "../libs/libc/stdlib.spl"
+include "../libs/strlib/strlib.spl"
+const NAMELEN = 50;
 func main() {
-    let name: *char;
-    malloc(NAMELEN)
-    name = RAX
-    memset(name, 0, NAMELEN);
+    let name: [char, NAMELEN];
+    strset(name, NAMELEN,0);
     printf("What is your name? ");
     gets(name);
-    printf("Hello ");
-    printf(name);
-    printf("!\n");
-    free(name)
+    printf("Hello %s!\n",name);    
 }

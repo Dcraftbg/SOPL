@@ -12,7 +12,7 @@ extern "C" free	;
 extern "C" getenv	;
 extern "C" labs	;
 extern "C" ldiv	;
-extern "C" malloc	;
+extern "C" malloc(size_t : ptr)	;
 extern "C" qsort	;
 extern "C" rand	;
 extern "C" realloc	;

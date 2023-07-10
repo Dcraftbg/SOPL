@@ -3723,7 +3723,7 @@ impl OfP {
             Self::REGISTER(reg) => Some(reg.to_var_type()),
             Self::CONST(v) => Some(v.to_type(build)[0].clone()),
             Self::LOCALVAR(v) => Some(get_local_build(local_vars, v).unwrap().typ.clone()),
-            Self::RESULT(f, _) => build.functions.get(f).unwrap().contract.Outputs.get(0).cloned(),
+            Self::RESULT(f, _) => if let Some(f) = build.functions.get(f) { f.contract.Outputs.get(0).cloned() } else if let Some(f) = build.externals.get(f) { f.contract.as_ref().unwrap().Outputs.get(0).cloned()}else {None},
             Self::BUFFER(i) => {
                 Some(VarType::PTR(Ptr::ref_to(buffers[i.to_owned()].typ.clone())))
             },

@@ -36,6 +36,7 @@ Made for easy navigation around the README.md
   - [Strings](#strings)
   - [Managing-c-functions](#managing-c-functions-and-their-return-values)
   - [Externals](#extern)
+  - [Buffers](#buffers)
   - [Interrupts](#interrupts)
   - [Registers](#registers)
   - [Dlls](#dlls)
@@ -435,7 +436,35 @@ func main(){
 }
 ```
 
-
+### Buffers
+Buffers can be declared both on the stack and as global variable. To declare a global buffer you can use the following syntax:
+**Syntax:**
+```
+let name: [(type),(size)];
+```
+**Example(s)**:
+Taken from [buffers.spl](examples/buffers.spl)
+```sopl
+include "strlib/strlib.spl"
+include "libc/stdio.spl"
+let name: [char, 500];
+func main(){
+  strset(name, 500, 0);
+  scanf("%s",name);
+  printf("Hello: %s\n",name);
+}
+```
+Re-written with local buffers [name.spl](examples/name.spl):
+```sopl
+include "strlib/strlib.spl"
+include "libc/stdio.spl"
+func main(){
+  let name: [char, 500];
+  strset(name, 500, 0);
+  scanf("%s",name);
+  printf("Hello: %s\n",name);
+}
+```
 ### Interrupts
 [0.4A](version.md#04a) Added interrupts
   
