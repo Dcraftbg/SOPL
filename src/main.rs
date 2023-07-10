@@ -822,12 +822,138 @@ impl Expression {
             },
         }
         Ok(())
-        //USE!(label);
-        //todo!()
     }
-    fn jumpifn_nasm_x86_64(&self, label: String){
-        USE!(label);
-        todo!()
+    fn jumpifn_nasm_x86_64(&self, label: String, f: &mut File, program: &CmdProgram, build: &BuildProgram, loc: &ProgramLocation, stack_size: usize, local_vars: &mut Vec<HashMap<String, LocalVariable>>,buffers: &Vec<BuildBuf>) -> io::Result<()>{
+        match self {
+            Self::val(v) => {
+                match v {
+                    OfP::BUFFER(_) => com_error!(loc,"Cannot have buffers in conditions"),
+                    OfP::CONST(cv) => {
+                        match cv {
+                            RawConstValueType::CHAR(c) => {
+                                if *c == 0{
+                                    writeln!(f,"   jmp {}",label)?;
+                                }
+                            }
+                            RawConstValueType::SHORT(c) => {
+                                if *c == 0 {
+                                    writeln!(f,"   jmp {}",label)?
+                                }
+                            }
+                            RawConstValueType::INT(c) => {
+                                if *c == 0{
+                                    writeln!(f,"   jmp {}",label)?;
+                                }
+                            }
+                            RawConstValueType::LONG(c) => {
+                                if *c == 0 {
+                                    writeln!(f,"   jmp {}",label)?;
+                                }
+                            }
+                            RawConstValueType::PTR(_, c) => {
+                                if *c == 0 {
+                                    writeln!(f,"   jmp {}",label)?
+                                }
+                            }
+                            RawConstValueType::STR(_) => {
+                                com_error!(loc, "Error: Cannot have Strings inside conditions")
+                            }
+                        }
+                    }
+                    OfP::RESULT(func, args) => {
+                        let sp_taken = nasm_x86_64_prep_args(program, build, f, args, stack_size, local_vars)?;
+                        writeln!(f, "   call {}",func)?;
+                        if sp_taken-stack_size > 0 {
+                            writeln!(f, "   add {}, {}",program.stack_ptr(),sp_taken-stack_size)?
+                        }
+                        let reg = Register::RAX.to_byte_size(build.get_contract_of_symbol(func).unwrap().Outputs.get(0).unwrap_or(&VarType::LONG).get_size(program));
+                        writeln!(f, "   cmp {}, 0", reg)?;
+                        writeln!(f, "   jz")?;
+                    }
+                    OfP::GLOBALVAR(_) => {
+                        todo!("Cannot have global variables in contract")
+                    }
+                    OfP::LOCALVAR(v) => {
+                        let var = get_local_build(local_vars, v).unwrap();
+                        let reg = Register::RAX.to_byte_size(var.typ.get_size(program));
+                        if stack_size-var.operand > 0 {
+                            writeln!(f, "   mov {}, {} [{}-{}]",reg,size_to_nasm_type(var.typ.get_size(program)),program.stack_ptr(),stack_size-var.operand)?
+                        }
+                        else {
+                            writeln!(f, "   mov {}, {} [{}]",reg,size_to_nasm_type(var.typ.get_size(program)),program.stack_ptr())?
+                        }
+                        writeln!(f, "   cmp {}, 0",reg)?;
+                        writeln!(f, "   jz {}",label)?;
+                    }
+                    OfP::REGISTER(v) => {
+                        writeln!(f, "   cmp {}, 0",v)?;
+                        writeln!(f, "   jz {}",label)?
+                    },
+                }
+            }
+            Self::expr(con) => {
+                com_assert!(loc,con.op.is_boolean(), "Error: Expected boolean operation but found something else");
+                use Register::*;
+                match con.op {
+                    Op::EQ => {
+                        let eval_regs = vec![RAX,RBX,RCX,RDX];
+                        let left_regs = con.left.as_ref().unwrap().LEIRnasm(eval_regs.clone(), f, program, build, local_vars, buffers, stack_size, loc)?;
+                        let reg = RSP.to_byte_size(left_regs[0].size());
+                        writeln!(f, "   mov {}, {}",reg,left_regs[0])?;
+                        let right_regs = con.left.as_ref().unwrap().LEIRnasm(eval_regs.clone(), f, program, build, local_vars, buffers, stack_size, loc)?;
+                        writeln!(f, "   cmp {}, {}",reg,right_regs[0])?;
+                        writeln!(f, "   jnz {}",label)?;
+                    }
+                    Op::NEQ => {
+                        let eval_regs = vec![RAX,RBX,RCX,RDX];
+                        let left_regs = con.left.as_ref().unwrap().LEIRnasm(eval_regs.clone(), f, program, build, local_vars, buffers, stack_size, loc)?;
+                        let reg = RSP.to_byte_size(left_regs[0].size());
+                        writeln!(f, "   mov {}, {}",reg,left_regs[0])?;
+                        let right_regs = con.left.as_ref().unwrap().LEIRnasm(eval_regs.clone(), f, program, build, local_vars, buffers, stack_size, loc)?;
+                        writeln!(f, "   cmp {}, {}",reg,right_regs[0])?;
+                        writeln!(f, "   jz {}",label)?;
+                    }
+                    Op::GT => {
+                        let eval_regs = vec![RAX,RBX,RCX,RDX];
+                        let left_regs = con.left.as_ref().unwrap().LEIRnasm(eval_regs.clone(), f, program, build, local_vars, buffers, stack_size, loc)?;
+                        let reg = RSP.to_byte_size(left_regs[0].size());
+                        writeln!(f, "   mov {}, {}",reg,left_regs[0])?;
+                        let right_regs = con.left.as_ref().unwrap().LEIRnasm(eval_regs.clone(), f, program, build, local_vars, buffers, stack_size, loc)?;
+                        writeln!(f, "   cmp {}, {}",reg,right_regs[0])?;
+                        writeln!(f, "   jle {}",label)?;
+                    }
+                    Op::LT => {
+                        let eval_regs = vec![RAX,RBX,RCX,RDX];
+                        let left_regs = con.left.as_ref().unwrap().LEIRnasm(eval_regs.clone(), f, program, build, local_vars, buffers, stack_size, loc)?;
+                        let reg = RSP.to_byte_size(left_regs[0].size());
+                        writeln!(f, "   mov {}, {}",reg,left_regs[0])?;
+                        let right_regs = con.left.as_ref().unwrap().LEIRnasm(eval_regs.clone(), f, program, build, local_vars, buffers, stack_size, loc)?;
+                        writeln!(f, "   cmp {}, {}",reg,right_regs[0])?;
+                        writeln!(f, "   jge {}",label)?;
+                    }
+                    Op::GTEQ => {
+                        let eval_regs = vec![RAX,RBX,RCX,RDX];
+                        let left_regs = con.left.as_ref().unwrap().LEIRnasm(eval_regs.clone(), f, program, build, local_vars, buffers, stack_size, loc)?;
+                        let reg = RSP.to_byte_size(left_regs[0].size());
+                        writeln!(f, "   mov {}, {}",reg,left_regs[0])?;
+                        let right_regs = con.left.as_ref().unwrap().LEIRnasm(eval_regs.clone(), f, program, build, local_vars, buffers, stack_size, loc)?;
+                        writeln!(f, "   cmp {}, {}",reg,right_regs[0])?;
+                        writeln!(f, "   jl {}",label)?;
+                    }
+                    Op::LTEQ => {
+                        let eval_regs = vec![RAX,RBX,RCX,RDX];
+                        let left_regs = con.left.as_ref().unwrap().LEIRnasm(eval_regs.clone(), f, program, build, local_vars, buffers, stack_size, loc)?;
+                        let reg = RSP.to_byte_size(left_regs[0].size());
+                        writeln!(f, "   mov {}, {}",reg,left_regs[0])?;
+                        let right_regs = con.left.as_ref().unwrap().LEIRnasm(eval_regs.clone(), f, program, build, local_vars, buffers, stack_size, loc)?;
+                        writeln!(f, "   cmp {}, {}",reg,right_regs[0])?;
+                        writeln!(f, "   jg {}",label)?;
+                    }
+                    _ => todo!("Unhandled")
+                }
+            },
+        }
+        Ok(())
     }
     //fn jump(&self, label: String) -> 
     fn unwrap_val(&self) -> &OfP {
