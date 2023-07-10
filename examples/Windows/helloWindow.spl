@@ -5,8 +5,7 @@ const NULL: long = 0;
 const nullptr: ptr = cast<ptr>(NULL);
 const MB_YESNO: int = 0x00000004;
 func main(){
-    let result: int;
-    result = MessageBoxA(nullptr, "Hello World!", "Hello!", MB_YESNO);
+    let result: int = MessageBoxA(nullptr, "Hello World!", "Hello!", MB_YESNO);
     if result == 6 {
         puts("Hello World!");
     }
