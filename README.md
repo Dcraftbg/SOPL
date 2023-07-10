@@ -10,7 +10,7 @@ With Rust like syntax with the same amount of low level programming as C
 Sopl is a lightweight, easily extendable, programming language.
 It is currently in it's very early stages and is syntacically bound to change over time. I'll try to not change it semantically too much but be warned if you are using it to build projects yourself as things may break over versions.
 For more info on current versions checkout [version.md](version.md)
-
+For more info on what im currently working on checkout the recently started trello page: https://trello.com/b/OjR79UQt/sopl
 **Manual:**
 Made for easy navigation around the README.md
 - [Quickstart](#quickstart)
