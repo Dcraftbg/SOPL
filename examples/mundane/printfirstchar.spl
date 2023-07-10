@@ -17,6 +17,4 @@ func main(){
     mputc(c);
     c = *(p+3);
     mputc(c);
-    
-
 }

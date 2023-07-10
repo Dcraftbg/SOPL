@@ -1,7 +1,6 @@
 include "../../libs/libc/stdio.spl"
 func main(){
-	let f: ptr;
-	f = fopen("examples/int/hello.txt"c, "w"c);
-	fwrite("Hello"c,5,1,f)
+	let f: ptr = fopen("examples/int/hello.txt", "w");
+	fwrite("Hello",5,1,f)
 	fclose(f)
 }
