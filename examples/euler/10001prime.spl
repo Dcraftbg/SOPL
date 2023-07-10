@@ -1,11 +1,6 @@
 const prime_l = 10_001;
 include "../../libs/libc/stdio.spl"
 extern "C" exit(int);
-func TODO(msg: *char){
-    puts("TODO:");
-    puts(msg);
-    exit(1);
-}
 func is_prime(num: int : bool) {
     let divisor: int = 2;
     while num%divisor != 0 {
