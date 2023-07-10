@@ -11,7 +11,7 @@ extern "C" snprintf(*char, size_t, *char, ... <Any> : int);
 //extern "C" vsnprintf(*char, size_t, *char, );
 //extern "C" vsprintf;
 //extern "C" vsscanf;
-//extern "C" vfprintf;
+//extern "C" vfprintf; 
 //extern "C" vfscanf;
 extern "C" tmpnam(*char);
 extern "C" tmpfile();

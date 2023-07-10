@@ -3728,7 +3728,7 @@ impl OfP {
                 Some(VarType::PTR(Ptr::ref_to(buffers[i.to_owned()].typ.clone())))
             },
             Self::GLOBALVAR(v) => Some(build.global_vars.get(v).unwrap().typ.var_type(build)),
-        }
+        } 
     }
     fn LOIRGNasm(&self, regs: Vec<Register>, f: &mut File, program: &CmdProgram,build: &BuildProgram, local_vars: &Vec<HashMap<String, LocalVariable>>, buffers: &Vec<BuildBuf>, stack_size: usize, loc: &ProgramLocation) -> std::io::Result<Vec<Register>>{
         let mut out: Vec<Register> = Vec::with_capacity(regs.len());

@@ -19,7 +19,7 @@ a RAX +
 After the update:
 ```
 a += b+c*d;
-```
+``` 
 Not only is this now removing one of the core parts of using Registers in sopl in the first place, but its also preparing for their eventual deprecation.
 One of the only things that using raw registers is good for is returning from functions and that is expected to be fixed by the next patch (hopefully).
 

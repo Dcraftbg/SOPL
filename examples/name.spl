@@ -19,5 +19,5 @@ func main() {
     strset(name, NAMELEN,0);
     printf("What is your name? ");
     gets(name);
-    printf("Hello %s!\n",name);    
+    printf("Hello %s!\n",name);      
 }

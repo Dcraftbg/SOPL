@@ -16,7 +16,7 @@ func is_hexanumeric(c: char : bool) {
 }
 func is_lowercase(c: char : bool) {
     return c>='a' && c <='z';
-}
+} 
 func is_uppercase(c: char : bool) {
     return c>='A' && c <='Z';
 }

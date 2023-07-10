@@ -17,7 +17,7 @@ func strset(dst: *char,  size: size_t, val: char) {
     let i: size_t = 0;
     while i < size {
         *(dst+i) = val;
-        i += 1;
+        i += 1; 
     }
 }
 const nullptr = cast<ptr>(0);

@@ -1,8 +1,9 @@
 **(Latest patch versions in github history and at the top of Change Log)**
 
-Newest Version: [0.16.2A](#0162a)
+Newest Version: [0.16.3A](#0163a)
 # Manual:
-  - [0.16.2A](#0162a)
+  - [0.16.3A](#0163a) 
+    - [0.16.2A](#0162a) 
     - [0.16.1A](#0161a)
     - [0.16A](#016a)
   - [0.15.1A](#0151a)  
@@ -51,6 +52,14 @@ Newest Version: [0.16.2A](#0162a)
   - [0.2A](#02a)
   - [0.1A](#01a)
 # Change Log
+ ## 0.16.3A
+   - Changed a lot of examples
+   - Added jumpif and jumpnif (inner parts of the compiler)
+   - Updated while and if to use jumpifs
+   - Updated README documentation
+   - Updated arcs to explain the existance of config files
+   - Fixed argument alignment - hopefully for the last fricking time
+   - Updated strlib
  ## 0.16.2A
    - Fixed argument alignment 
    - Temporarily disabled argument alignment for 32 bit
