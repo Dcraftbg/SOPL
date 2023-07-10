@@ -29,6 +29,10 @@ Made for easy navigation around the README.md
   - [Including](#including)
   - [Functions](#functions)
   - [Control-flow](#control-flow)
+    - [Ifs](#if-statements)
+    - [While](#while-loops)
+    - [makelabel](#makelabel)
+    - [goto](#goto)
   - [Strings](#strings)
   - [Managing-c-functions](#managing-c-functions-and-their-return-values)
   - [Externals](#extern)
@@ -287,7 +291,7 @@ Pre 0.1A Added ifs
 Pre 0.1A Added elses
 
 
-If statements:
+#### If statements:
 **Syntax:**
 ```sopl
 if (condition) {(Body)}
@@ -316,7 +320,7 @@ while i < 10 {
 }
 ```
 
-While loops:
+#### While loops:
 **Syntax:**
 ```sopl
 while (condition) {(Body)}
@@ -333,14 +337,14 @@ func main(){
 }
 ```
 
-@makelabel:
+#### @makelabel:
 Labels are going to be important for the next control flow statement, goto. To define a label, use:
 **Syntax:**
 ```sopl
 @makelabel("here goes name of your label as a string")
 ```
 
-@goto:
+#### @goto:
 Now that we have made a label, we can jump to it (if it is within the same function)
 **Syntax:**
 ```sopl
