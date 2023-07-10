@@ -9,8 +9,11 @@ With Rust like syntax with the same amount of low level programming as C
 
 Sopl is a lightweight, easily extendable, programming language.
 It is currently in it's very early stages and is syntacically bound to change over time. I'll try to not change it semantically too much but be warned if you are using it to build projects yourself as things may break over versions.
+
 For more info on current versions checkout [version.md](version.md)
+
 For more info on what im currently working on checkout the recently started trello page: https://trello.com/b/OjR79UQt/sopl
+
 **Manual:**
 Made for easy navigation around the README.md
 - [Quickstart](#quickstart)
@@ -148,9 +151,10 @@ Currently SOPL Highlighting only supports vscode but in the future I plan to add
 - vim
 - emacs
 - neovim
+
 etc.
-For highlighting checkout: [this](https://github.com/Dimitar85898/SOPL-Highlighting) 
-- https://github.com/Dimitar85898/SOPL-Highlighting
+
+For highlighting checkout: [this](https://github.com/Dimitar85898/SOPL-Highlighting) - https://github.com/Dimitar85898/SOPL-Highlighting
 ## How to use?
 *Note that documentation may not cover all of the latest features tho you might expect updates on them shortly after implementation*
 *If you want to learn most of the details checkout theversions*
@@ -164,9 +168,9 @@ func main() {
 }
 ```
 ### Locals
-[0.12A](version.md#012a) Added expressions
-[0.11.6A](version.md#0116a) Made local variables be on the stack and merged parameters with variables
-Pre 0.1A Added local variables
+- [0.12A](version.md#012a) Added expressions
+- [0.11.6A](version.md#0116a) Made local variables be on the stack and merged parameters with variables
+- Pre 0.1A Added local variables
 
 **Syntax:**
 ```sopl
@@ -190,7 +194,7 @@ else {
 }
 ```
 ### Constants
-[0.11.4A](version.md#0114a) Added types for constants as well as casting
+- [0.11.4A](version.md#0114a) Added types for constants as well as casting
 Pre 0.1A
 
 **Syntax:**
@@ -213,7 +217,7 @@ In a constants expression can only be things that can be evaluated at compile ti
 Whilst local variables had a major revamp to their Expression system in 0.12A, constants are still stuck in the old ways of handling things. That is planned to change in the near future
 
 ### Expressions
-[0.12A](version.md#012a) Added expressions
+- [0.12A](version.md#012a) Added expressions
 
 Expressions in SOPL are like those in mathematics. We use expressions in all kinds of things like the conditions in if statements or the result of a setoperation.
 Any OfP by definition is an Expression of type 'value'. If you add an operation it becomes an 'expression tree'. An example of this is the following:
@@ -224,8 +228,8 @@ a = b+c*d; // b+c*d is an Expression of type 'expression tree'
 Expressions are really useful but are also unstable currently if they are too complicated. Most of the expressions you'll see are going to be simple and can easily be evaluated, however if the expression is too complicated the program won't compile and it will require you to put the values under temporary variables.
 
 ### Including
-[0.5.1A](version.md#051a) Fixed bug where constants weren't being included 
-Pre 0.1A Added including
+- [0.5.1A](version.md#051a) Fixed bug where constants weren't being included 
+- Pre 0.1A Added including
 
 **Syntax**
 ```spl
@@ -247,10 +251,10 @@ func main() {
 ```
 
 ### Functions
-* 0.12.1A Added 'result' as an OfP
-* 0.11A Changed how functions are called with the introduction of argument contracts
-* 0.6A Changed to now have named parameters
-* Pre 0.1A
+- 0.12.1A Added 'result' as an OfP
+- 0.11A Changed how functions are called with the introduction of argument contracts
+- 0.6A Changed to now have named parameters
+- Pre 0.1A
 
 **Syntax**:
 ```
@@ -274,7 +278,7 @@ func sayHello() {
 }
 func counter(c: long : long) {
   c -= 1;
-  counter(c) 
+  counter(c)
   return c;
 }
 ```
@@ -283,13 +287,14 @@ As of 0.11A, the 'rs' keyword is planned to be deprecated, and instead replaced 
 As of 0.6A, there is a new keyword called 'rs' short for "Return stack"
 
 ### Control flow
-[0.13.3A](version.md#013a) Added @goto and @makelabel
-[0.12.2A](version.md#012a) Added while loops
-[0.12A](version.md#012a) Finally settled the syntax of ifs
-[0.11.11A](version.md#01111a) Added 'temporary' ifs
-[0.5A](version.md#05a) Disabled for revamping
-Pre 0.1A Added ifs
-Pre 0.1A Added elses
+
+- [0.13.3A](version.md#013a) Added @goto and @makelabel
+- [0.12.2A](version.md#012a) Added while loops
+- [0.12A](version.md#012a) Finally settled the syntax of ifs
+- [0.11.11A](version.md#01111a) Added 'temporary' ifs
+- [0.5A](version.md#05a) Disabled for revamping
+- Pre 0.1A Added ifs
+- Pre 0.1A Added elses
 
 
 #### If statements:
@@ -365,10 +370,9 @@ func main() {
 ```
 
 ### Strings
-> Changed Strings to automatically be CStrings and added s as a way to have sized strings once again
-> Strings  -> Pre 0.1A 
-
-> CStrings -> 0.2A
+- Changed Strings to automatically be CStrings and added s as a way to have sized strings once again - it was too annoying having to type ""c every couple of minutes
+- Strings  -> Pre 0.1A 
+- CStrings -> 0.2A
 
 In sopl there are 2 different types of strings. There are:
 ```
@@ -387,13 +391,10 @@ func main() {
 }
 ```
 
-**[NOTE] It is generally recommended to use cstrings whenever possible if the function doesn't use the length as a parameter. In < 0.1A strings had to be pushed and then the length of them popped which is no longer sufficient and may cause your code to be inefficient**
-
-
 ### Managing C functions and their return values
 
-SOPL is made to be compatible with the C functions and using them throughout your code is totally acceptable.
-To link with external C funcions you can use the 'extern' keyword. If a result is expected to be returned by the function, you can use the = before the function to assign it to a variable.
+SOPL is made to be compatible with the C language and using C functions throughout your code is totally acceptable.
+To link with external C funcions you can use the 'extern' keyword.
 
 **Example(s)**:
 ```sopl
@@ -409,11 +410,11 @@ func main(){
 
 
 ### Extern
-  * Changed syntax in [0.11A](version.md#011a)
-  * Added Files related in [0.7A](version.md#07a):
-    - [stdio.spl](src/C/stdio.spl)
-    - [stdlib.spl](src/C/stdlib.spl)
-  * Added in Pre 0.1A
+- Changed syntax in [0.11A](version.md#011a)
+- Added Files related in [0.7A](version.md#07a):
+  - [stdio.spl](src/C/stdio.spl)
+  - [stdlib.spl](src/C/stdlib.spl)
+- Added in Pre 0.1A
 
 **Syntax**:
 ```
@@ -466,7 +467,7 @@ func main(){
 }
 ```
 ### Interrupts
-[0.4A](version.md#04a) Added interrupts
+- [0.4A](version.md#04a) Added interrupts
   
 Interrupts are essential for anything you build on platforms such as linux if you don't want to use libc. Whilst they aren't useful as much on windows machines WSL could be used to make linux syscalls into something which can run on windows.
 
@@ -476,8 +477,9 @@ interrupt 128
 ```
 
 ### Registers
-* Added float registers and the last remaining r\<n\> registers in [0.11A](version.md#011a)
-* Added the majority of the registers Pre 0.1A
+- Registers are now officially "deprecated" - using them throughout your code is fine, but it isn't recommended as it may cause a lot of unwanted bugs
+- Added float registers and the last remaining r\<n\> registers in [0.11A](version.md#011a)
+- Added the majority of the registers Pre 0.1A
 
 Current register support:
 - [x] RAX
@@ -582,8 +584,7 @@ Currently supported platform specific libs:
 Platform specific libs can help you make fast programs that also use platform specific things (WinAPI on windows, Syscalls on Linux)
 
 ### Target specific libs
-With the currently unfinished libs, its almost a necesity to use target specific libs. Its entirely possible to write whole programs without them, however this can prove to be challanging. I'm hopping that I will be able to fix this once I have stdsopl.spl going. 
-
+With the currently unfinished libs, its almost a necesity to use target specific libs. Its entirely possible to write whole programs without them, however this can prove to be challenging. 
 Currently supported target specific libs:
 - C:
   - stdio.spl
@@ -595,4 +596,4 @@ Currently supported independent libs:
 - strlib:
   [x] strlib.spl
   [ ] chrlib.spl (Not done because we don't have boolean operations nor chars working yet)
-  [ ] strnum.spl
+  [/] strnum.spl - it isn't entirely finished, it requires itostr, but it does have strtoi
