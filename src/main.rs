@@ -766,7 +766,7 @@ impl Expression {
                     Op::EQ => {
                         let eval_regs = vec![RAX,RBX,RCX,RDX];
                         let left_regs = con.left.as_ref().unwrap().LEIRnasm(eval_regs.clone(), f, program, build, local_vars, buffers, stack_size, loc)?;
-                        let reg = RSP.to_byte_size(left_regs[0].size());
+                        let reg = RSI.to_byte_size(left_regs[0].size());
                         writeln!(f, "   mov {}, {}",reg,left_regs[0])?;
                         let right_regs = con.left.as_ref().unwrap().LEIRnasm(eval_regs.clone(), f, program, build, local_vars, buffers, stack_size, loc)?;
                         writeln!(f, "   cmp {}, {}",reg,right_regs[0])?;
@@ -775,7 +775,7 @@ impl Expression {
                     Op::NEQ => {
                         let eval_regs = vec![RAX,RBX,RCX,RDX];
                         let left_regs = con.left.as_ref().unwrap().LEIRnasm(eval_regs.clone(), f, program, build, local_vars, buffers, stack_size, loc)?;
-                        let reg = RSP.to_byte_size(left_regs[0].size());
+                        let reg = RSI.to_byte_size(left_regs[0].size());
                         writeln!(f, "   mov {}, {}",reg,left_regs[0])?;
                         let right_regs = con.left.as_ref().unwrap().LEIRnasm(eval_regs.clone(), f, program, build, local_vars, buffers, stack_size, loc)?;
                         writeln!(f, "   cmp {}, {}",reg,right_regs[0])?;
@@ -784,7 +784,7 @@ impl Expression {
                     Op::GT => {
                         let eval_regs = vec![RAX,RBX,RCX,RDX];
                         let left_regs = con.left.as_ref().unwrap().LEIRnasm(eval_regs.clone(), f, program, build, local_vars, buffers, stack_size, loc)?;
-                        let reg = RSP.to_byte_size(left_regs[0].size());
+                        let reg = RSI.to_byte_size(left_regs[0].size());
                         writeln!(f, "   mov {}, {}",reg,left_regs[0])?;
                         let right_regs = con.left.as_ref().unwrap().LEIRnasm(eval_regs.clone(), f, program, build, local_vars, buffers, stack_size, loc)?;
                         writeln!(f, "   cmp {}, {}",reg,right_regs[0])?;
@@ -793,7 +793,7 @@ impl Expression {
                     Op::LT => {
                         let eval_regs = vec![RAX,RBX,RCX,RDX];
                         let left_regs = con.left.as_ref().unwrap().LEIRnasm(eval_regs.clone(), f, program, build, local_vars, buffers, stack_size, loc)?;
-                        let reg = RSP.to_byte_size(left_regs[0].size());
+                        let reg = RSI.to_byte_size(left_regs[0].size());
                         writeln!(f, "   mov {}, {}",reg,left_regs[0])?;
                         let right_regs = con.left.as_ref().unwrap().LEIRnasm(eval_regs.clone(), f, program, build, local_vars, buffers, stack_size, loc)?;
                         writeln!(f, "   cmp {}, {}",reg,right_regs[0])?;
@@ -802,7 +802,7 @@ impl Expression {
                     Op::GTEQ => {
                         let eval_regs = vec![RAX,RBX,RCX,RDX];
                         let left_regs = con.left.as_ref().unwrap().LEIRnasm(eval_regs.clone(), f, program, build, local_vars, buffers, stack_size, loc)?;
-                        let reg = RSP.to_byte_size(left_regs[0].size());
+                        let reg = RSI.to_byte_size(left_regs[0].size());
                         writeln!(f, "   mov {}, {}",reg,left_regs[0])?;
                         let right_regs = con.left.as_ref().unwrap().LEIRnasm(eval_regs.clone(), f, program, build, local_vars, buffers, stack_size, loc)?;
                         writeln!(f, "   cmp {}, {}",reg,right_regs[0])?;
@@ -811,7 +811,7 @@ impl Expression {
                     Op::LTEQ => {
                         let eval_regs = vec![RAX,RBX,RCX,RDX];
                         let left_regs = con.left.as_ref().unwrap().LEIRnasm(eval_regs.clone(), f, program, build, local_vars, buffers, stack_size, loc)?;
-                        let reg = RSP.to_byte_size(left_regs[0].size());
+                        let reg = RSI.to_byte_size(left_regs[0].size());
                         writeln!(f, "   mov {}, {}",reg,left_regs[0])?;
                         let right_regs = con.left.as_ref().unwrap().LEIRnasm(eval_regs.clone(), f, program, build, local_vars, buffers, stack_size, loc)?;
                         writeln!(f, "   cmp {}, {}",reg,right_regs[0])?;
@@ -898,7 +898,7 @@ impl Expression {
                     Op::EQ => {
                         let eval_regs = vec![RAX,RBX,RCX,RDX];
                         let left_regs = con.left.as_ref().unwrap().LEIRnasm(eval_regs.clone(), f, program, build, local_vars, buffers, stack_size, loc)?;
-                        let reg = RSP.to_byte_size(left_regs[0].size());
+                        let reg = RSI.to_byte_size(left_regs[0].size());
                         writeln!(f, "   mov {}, {}",reg,left_regs[0])?;
                         let right_regs = con.left.as_ref().unwrap().LEIRnasm(eval_regs.clone(), f, program, build, local_vars, buffers, stack_size, loc)?;
                         writeln!(f, "   cmp {}, {}",reg,right_regs[0])?;
@@ -907,7 +907,7 @@ impl Expression {
                     Op::NEQ => {
                         let eval_regs = vec![RAX,RBX,RCX,RDX];
                         let left_regs = con.left.as_ref().unwrap().LEIRnasm(eval_regs.clone(), f, program, build, local_vars, buffers, stack_size, loc)?;
-                        let reg = RSP.to_byte_size(left_regs[0].size());
+                        let reg = RSI.to_byte_size(left_regs[0].size());
                         writeln!(f, "   mov {}, {}",reg,left_regs[0])?;
                         let right_regs = con.left.as_ref().unwrap().LEIRnasm(eval_regs.clone(), f, program, build, local_vars, buffers, stack_size, loc)?;
                         writeln!(f, "   cmp {}, {}",reg,right_regs[0])?;
@@ -916,7 +916,7 @@ impl Expression {
                     Op::GT => {
                         let eval_regs = vec![RAX,RBX,RCX,RDX];
                         let left_regs = con.left.as_ref().unwrap().LEIRnasm(eval_regs.clone(), f, program, build, local_vars, buffers, stack_size, loc)?;
-                        let reg = RSP.to_byte_size(left_regs[0].size());
+                        let reg = RSI.to_byte_size(left_regs[0].size());
                         writeln!(f, "   mov {}, {}",reg,left_regs[0])?;
                         let right_regs = con.left.as_ref().unwrap().LEIRnasm(eval_regs.clone(), f, program, build, local_vars, buffers, stack_size, loc)?;
                         writeln!(f, "   cmp {}, {}",reg,right_regs[0])?;
@@ -925,7 +925,7 @@ impl Expression {
                     Op::LT => {
                         let eval_regs = vec![RAX,RBX,RCX,RDX];
                         let left_regs = con.left.as_ref().unwrap().LEIRnasm(eval_regs.clone(), f, program, build, local_vars, buffers, stack_size, loc)?;
-                        let reg = RSP.to_byte_size(left_regs[0].size());
+                        let reg = RSI.to_byte_size(left_regs[0].size());
                         writeln!(f, "   mov {}, {}",reg,left_regs[0])?;
                         let right_regs = con.left.as_ref().unwrap().LEIRnasm(eval_regs.clone(), f, program, build, local_vars, buffers, stack_size, loc)?;
                         writeln!(f, "   cmp {}, {}",reg,right_regs[0])?;
@@ -934,7 +934,7 @@ impl Expression {
                     Op::GTEQ => {
                         let eval_regs = vec![RAX,RBX,RCX,RDX];
                         let left_regs = con.left.as_ref().unwrap().LEIRnasm(eval_regs.clone(), f, program, build, local_vars, buffers, stack_size, loc)?;
-                        let reg = RSP.to_byte_size(left_regs[0].size());
+                        let reg = RSI.to_byte_size(left_regs[0].size());
                         writeln!(f, "   mov {}, {}",reg,left_regs[0])?;
                         let right_regs = con.left.as_ref().unwrap().LEIRnasm(eval_regs.clone(), f, program, build, local_vars, buffers, stack_size, loc)?;
                         writeln!(f, "   cmp {}, {}",reg,right_regs[0])?;
@@ -943,7 +943,7 @@ impl Expression {
                     Op::LTEQ => {
                         let eval_regs = vec![RAX,RBX,RCX,RDX];
                         let left_regs = con.left.as_ref().unwrap().LEIRnasm(eval_regs.clone(), f, program, build, local_vars, buffers, stack_size, loc)?;
-                        let reg = RSP.to_byte_size(left_regs[0].size());
+                        let reg = RSI.to_byte_size(left_regs[0].size());
                         writeln!(f, "   mov {}, {}",reg,left_regs[0])?;
                         let right_regs = con.left.as_ref().unwrap().LEIRnasm(eval_regs.clone(), f, program, build, local_vars, buffers, stack_size, loc)?;
                         writeln!(f, "   cmp {}, {}",reg,right_regs[0])?;
@@ -6311,100 +6311,102 @@ fn nasm_x86_64_handle_scope(f: &mut File, build: &BuildProgram, program: &CmdPro
             }
             Instruction::EXPAND_IF_SCOPE(s)   => {
                 let binst = inst_count.clone();
+                let olabel = format!(".IF_SCOPE_{}",binst);
                 let condition = match s.typ {
                     NormalScopeType::IF(ref c) => c,
                     _ => panic!("Unreachable")
                 };
-                if condition.is_ofp() {
-                    let val = condition.unwrap_val();
-                    match val {
-                        OfP::REGISTER(reg) => {
-                            let reg = reg.to_byte_size(1);
-                            writeln!(f, "   cmp {}, 0",reg.to_string())?;
-                        },
-                        OfP::LOCALVAR(v) => {
-                            let var = get_local_build(&local_vars,v).unwrap();
-                            com_assert!(loc,var.typ.weak_eq(&VarType::BOOLEAN),"Error: Expected boolean but found {}",var.typ.to_string(false));
-                            if stack_size-var.operand == 0 {
-                                writeln!(f, "   cmp {} [{}], 0",size_to_nasm_type(var.typ.get_size(program)),program.stack_ptr())?;
-                            }
-                            else {
-                                writeln!(f, "   cmp {} [{}+{}], 0",size_to_nasm_type(var.typ.get_size(program)),program.stack_ptr(),stack_size-var.operand)?;
-                            }
-                        },
-                        OfP::CONST(val) => {
-                            writeln!(f, "   mov rax, {}",val.get_num_data())?;
-                            writeln!(f, "   cmp rax, 0")?;
-                        },
-                        OfP::RESULT(func,args) => {
-                            let sp_taken = nasm_x86_64_prep_args(program, build, f, args, stack_size, &local_vars)?;
-                            writeln!(f, "   call {}{}",program.architecture.func_prefix,func)?;
-                            if sp_taken-stack_size > 0 {
-                                writeln!(f, "   add {}, {}",program.stack_ptr(),sp_taken-stack_size)?
-                            }
-                            writeln!(f, "   cmp {}, 0",Register::AL.to_string())?;
-                        },
-                        _ => todo!()
-                    }
-                    writeln!(f, "   jnz .IF_SCOPE_{}",binst)?;
-                }
-                else {
-                    let val = condition.unwrap_expr();
-                    com_assert!(loc,val.op.is_boolean(),"Error: Condition MUST be of type boolean but encountered op {}",val.op.to_string());
-                    match val.op {
-                        Op::EQ   => {
-                            let oreg1 = val.left.as_ref().unwrap().LEIRnasm(vec![Register::RAX, Register::RBX, Register::RCX], f, program, build, &local_vars, &bufs, stack_size, loc)?;
-                            let tmp = Register::RSI.to_byte_size(oreg1[0].size());
-                            writeln!(f, "   mov {}, {}",tmp.to_string(),oreg1[0].to_string())?;
-                            let oreg2 = val.right.as_ref().unwrap().LEIRnasm(vec![Register::RAX, Register::RBX, Register::RCX], f, program, build, &local_vars, &bufs, stack_size, loc)?;
+                condition.jumpif_nasm_x86_64(olabel, f, program, build, loc, stack_size, local_vars, &bufs)?;
+                // if condition.is_ofp() {
+                //     let val = condition.unwrap_val();
+                //     match val {
+                //         OfP::REGISTER(reg) => {
+                //             let reg = reg.to_byte_size(1);
+                //             writeln!(f, "   cmp {}, 0",reg.to_string())?;
+                //         },
+                //         OfP::LOCALVAR(v) => {
+                //             let var = get_local_build(&local_vars,v).unwrap();
+                //             com_assert!(loc,var.typ.weak_eq(&VarType::BOOLEAN),"Error: Expected boolean but found {}",var.typ.to_string(false));
+                //             if stack_size-var.operand == 0 {
+                //                 writeln!(f, "   cmp {} [{}], 0",size_to_nasm_type(var.typ.get_size(program)),program.stack_ptr())?;
+                //             }
+                //             else {
+                //                 writeln!(f, "   cmp {} [{}+{}], 0",size_to_nasm_type(var.typ.get_size(program)),program.stack_ptr(),stack_size-var.operand)?;
+                //             }
+                //         },
+                //         OfP::CONST(val) => {
+                //             writeln!(f, "   mov rax, {}",val.get_num_data())?;
+                //             writeln!(f, "   cmp rax, 0")?;
+                //         },
+                //         OfP::RESULT(func,args) => {
+                //             let sp_taken = nasm_x86_64_prep_args(program, build, f, args, stack_size, &local_vars)?;
+                //             writeln!(f, "   call {}{}",program.architecture.func_prefix,func)?;
+                //             if sp_taken-stack_size > 0 {
+                //                 writeln!(f, "   add {}, {}",program.stack_ptr(),sp_taken-stack_size)?
+                //             }
+                //             writeln!(f, "   cmp {}, 0",Register::AL.to_string())?;
+                //         },
+                //         _ => todo!()
+                //     }
+                //     writeln!(f, "   jnz .IF_SCOPE_{}",binst)?;
+                // }
+                // else {
+                //     let val = condition.unwrap_expr();
+                //     com_assert!(loc,val.op.is_boolean(),"Error: Condition MUST be of type boolean but encountered op {}",val.op.to_string());
+                //     match val.op {
+                //         Op::EQ   => {
+                //             let oreg1 = val.left.as_ref().unwrap().LEIRnasm(vec![Register::RAX, Register::RBX, Register::RCX], f, program, build, &local_vars, &bufs, stack_size, loc)?;
+                //             let tmp = Register::RSI.to_byte_size(oreg1[0].size());
+                //             writeln!(f, "   mov {}, {}",tmp.to_string(),oreg1[0].to_string())?;
+                //             let oreg2 = val.right.as_ref().unwrap().LEIRnasm(vec![Register::RAX, Register::RBX, Register::RCX], f, program, build, &local_vars, &bufs, stack_size, loc)?;
 
-                            writeln!(f, "   cmp {}, {}",tmp.to_string(),oreg2[0].to_byte_size(tmp.size()).to_string())?;
-                            writeln!(f, "   jz .IF_SCOPE_{}",binst)?;
-                        },
-                        Op::NEQ  => {
-                            let oreg1 = val.left.as_ref().unwrap().LEIRnasm(vec![Register::RAX, Register::RBX, Register::RCX], f, program, build, &local_vars, &bufs, stack_size, loc)?;
-                            let tmp = Register::RSI.to_byte_size(oreg1[0].size());
-                            writeln!(f, "   mov {}, {}",tmp.to_string(),oreg1[0].to_string())?;
-                            let oreg2 = val.right.as_ref().unwrap().LEIRnasm(vec![Register::RAX, Register::RBX, Register::RCX], f, program, build, &local_vars, &bufs, stack_size, loc)?;
-                            writeln!(f, "   cmp {}, {}",tmp.to_string(),oreg2[0].to_byte_size(tmp.size()).to_string())?;
-                            writeln!(f, "   jnz .IF_SCOPE_{}",binst)?;
-                        },
-                        Op::GT   => {
-                            let oreg1 = val.left.as_ref().unwrap().LEIRnasm(vec![Register::RAX, Register::RBX, Register::RCX], f, program, build, &local_vars, &bufs, stack_size, loc)?;
-                            let tmp = Register::RSI.to_byte_size(oreg1[0].size());
-                            writeln!(f, "   mov {}, {}",tmp.to_string(),oreg1[0].to_string())?;
-                            let oreg2 = val.right.as_ref().unwrap().LEIRnasm(vec![Register::RAX, Register::RBX, Register::RCX], f, program, build, &local_vars, &bufs, stack_size, loc)?;
-                            writeln!(f, "   cmp {}, {}",tmp.to_string(),oreg2[0].to_byte_size(tmp.size()).to_string())?;
-                            writeln!(f, "   jg .IF_SCOPE_{}",binst)?;
-                        },
-                        Op::GTEQ => {
-                            let oreg1 = val.left.as_ref().unwrap().LEIRnasm(vec![Register::RAX, Register::RBX, Register::RCX], f, program, build, &local_vars, &bufs, stack_size, loc)?;
-                            let tmp = Register::RSI.to_byte_size(oreg1[0].size());
-                            writeln!(f, "   mov {}, {}",tmp.to_string(),oreg1[0].to_string())?;
-                            let oreg2 = val.right.as_ref().unwrap().LEIRnasm(vec![Register::RAX, Register::RBX, Register::RCX], f, program, build, &local_vars, &bufs, stack_size, loc)?;
-                            writeln!(f, "   cmp {}, {}",tmp.to_string(),oreg2[0].to_byte_size(tmp.size()).to_string())?;
-                            writeln!(f, "   jge .IF_SCOPE_{}",binst)?;
-                        },
-                        Op::LT   => {
-                            let oreg1 = val.left.as_ref().unwrap().LEIRnasm(vec![Register::RAX, Register::RBX, Register::RCX], f, program, build, &local_vars, &bufs, stack_size, loc)?;
-                            let tmp = Register::RSI.to_byte_size(oreg1[0].size());
-                            writeln!(f, "   mov {}, {}",tmp.to_string(),oreg1[0].to_string())?;
-                            let oreg2 = val.right.as_ref().unwrap().LEIRnasm(vec![Register::RAX, Register::RBX, Register::RCX], f, program, build, &local_vars, &bufs, stack_size, loc)?;
-                            writeln!(f, "   cmp {}, {}",tmp.to_string(),oreg2[0].to_byte_size(tmp.size()).to_string())?;
-                            writeln!(f, "   jl .IF_SCOPE_{}",binst)?;
-                        },
-                        Op::LTEQ => {
-                            let oreg1 = val.left.as_ref().unwrap().LEIRnasm(vec![Register::RAX, Register::RBX, Register::RCX], f, program, build, &local_vars, &bufs, stack_size, loc)?;
-                            let tmp = Register::RSI.to_byte_size(oreg1[0].size());
-                            writeln!(f, "   mov {}, {}",tmp.to_string(),oreg1[0].to_string())?;
-                            let oreg2 = val.right.as_ref().unwrap().LEIRnasm(vec![Register::RAX, Register::RBX, Register::RCX], f, program, build, &local_vars, &bufs, stack_size, loc)?;
-                            writeln!(f, "   cmp {}, {}",tmp.to_string(),oreg2[0].to_byte_size(tmp.size()).to_string())?;
-                            writeln!(f, "   jle .IF_SCOPE_{}",binst)?;
-                        },
-                        Op::NOT  => todo!(),
-                        _ => panic!("Unreachable")
-                    }
-                }
+                //             writeln!(f, "   cmp {}, {}",tmp.to_string(),oreg2[0].to_byte_size(tmp.size()).to_string())?;
+                //             writeln!(f, "   jz .IF_SCOPE_{}",binst)?;
+                //         },
+                //         Op::NEQ  => {
+                //             let oreg1 = val.left.as_ref().unwrap().LEIRnasm(vec![Register::RAX, Register::RBX, Register::RCX], f, program, build, &local_vars, &bufs, stack_size, loc)?;
+                //             let tmp = Register::RSI.to_byte_size(oreg1[0].size());
+                //             writeln!(f, "   mov {}, {}",tmp.to_string(),oreg1[0].to_string())?;
+                //             let oreg2 = val.right.as_ref().unwrap().LEIRnasm(vec![Register::RAX, Register::RBX, Register::RCX], f, program, build, &local_vars, &bufs, stack_size, loc)?;
+                //             writeln!(f, "   cmp {}, {}",tmp.to_string(),oreg2[0].to_byte_size(tmp.size()).to_string())?;
+                //             writeln!(f, "   jnz .IF_SCOPE_{}",binst)?;
+                //         },
+                //         Op::GT   => {
+                //             let oreg1 = val.left.as_ref().unwrap().LEIRnasm(vec![Register::RAX, Register::RBX, Register::RCX], f, program, build, &local_vars, &bufs, stack_size, loc)?;
+                //             let tmp = Register::RSI.to_byte_size(oreg1[0].size());
+                //             writeln!(f, "   mov {}, {}",tmp.to_string(),oreg1[0].to_string())?;
+                //             let oreg2 = val.right.as_ref().unwrap().LEIRnasm(vec![Register::RAX, Register::RBX, Register::RCX], f, program, build, &local_vars, &bufs, stack_size, loc)?;
+                //             writeln!(f, "   cmp {}, {}",tmp.to_string(),oreg2[0].to_byte_size(tmp.size()).to_string())?;
+                //             writeln!(f, "   jg .IF_SCOPE_{}",binst)?;
+                //         },
+                //         Op::GTEQ => {
+                //             let oreg1 = val.left.as_ref().unwrap().LEIRnasm(vec![Register::RAX, Register::RBX, Register::RCX], f, program, build, &local_vars, &bufs, stack_size, loc)?;
+                //             let tmp = Register::RSI.to_byte_size(oreg1[0].size());
+                //             writeln!(f, "   mov {}, {}",tmp.to_string(),oreg1[0].to_string())?;
+                //             let oreg2 = val.right.as_ref().unwrap().LEIRnasm(vec![Register::RAX, Register::RBX, Register::RCX], f, program, build, &local_vars, &bufs, stack_size, loc)?;
+                //             writeln!(f, "   cmp {}, {}",tmp.to_string(),oreg2[0].to_byte_size(tmp.size()).to_string())?;
+                //             writeln!(f, "   jge .IF_SCOPE_{}",binst)?;
+                //         },
+                //         Op::LT   => {
+                //             let oreg1 = val.left.as_ref().unwrap().LEIRnasm(vec![Register::RAX, Register::RBX, Register::RCX], f, program, build, &local_vars, &bufs, stack_size, loc)?;
+                //             let tmp = Register::RSI.to_byte_size(oreg1[0].size());
+                //             writeln!(f, "   mov {}, {}",tmp.to_string(),oreg1[0].to_string())?;
+                //             let oreg2 = val.right.as_ref().unwrap().LEIRnasm(vec![Register::RAX, Register::RBX, Register::RCX], f, program, build, &local_vars, &bufs, stack_size, loc)?;
+                //             writeln!(f, "   cmp {}, {}",tmp.to_string(),oreg2[0].to_byte_size(tmp.size()).to_string())?;
+                //             writeln!(f, "   jl .IF_SCOPE_{}",binst)?;
+                //         },
+                //         Op::LTEQ => {
+                //             let oreg1 = val.left.as_ref().unwrap().LEIRnasm(vec![Register::RAX, Register::RBX, Register::RCX], f, program, build, &local_vars, &bufs, stack_size, loc)?;
+                //             let tmp = Register::RSI.to_byte_size(oreg1[0].size());
+                //             writeln!(f, "   mov {}, {}",tmp.to_string(),oreg1[0].to_string())?;
+                //             let oreg2 = val.right.as_ref().unwrap().LEIRnasm(vec![Register::RAX, Register::RBX, Register::RCX], f, program, build, &local_vars, &bufs, stack_size, loc)?;
+                //             writeln!(f, "   cmp {}, {}",tmp.to_string(),oreg2[0].to_byte_size(tmp.size()).to_string())?;
+                //             writeln!(f, "   jle .IF_SCOPE_{}",binst)?;
+                //         },
+                //         Op::NOT  => todo!(),
+                //         _ => panic!("Unreachable")
+                //     }
+                // }
                 if let Some((_,elses)) = scope.get_body(build).get(i+1) {
                     match elses {
                         Instruction::EXPAND_ELSE_SCOPE(elses) => {
@@ -6413,14 +6415,14 @@ fn nasm_x86_64_handle_scope(f: &mut File, build: &BuildProgram, program: &CmdPro
                             stack_size-=shadow_space;
                             stack_sizes.push(stack_size);
                             nasm_x86_64_handle_scope(f, build, program, TCScopeType::NORMAL(&elses), local_vars, stack_sizes,stack_size,func_stack_begin,inst_count)?;
-                            
+                 
                             stack_size+=shadow_space;
                             writeln!(f, "   sub {}, {}",program.stack_ptr(),shadow_space)?;
                         }
                         _ => {}
                     }
                 }
-
+                
 
                 writeln!(f, "   jmp .IF_SCOPE_END_{}",binst)?;
                 writeln!(f, "   .IF_SCOPE_{}:",binst)?;
