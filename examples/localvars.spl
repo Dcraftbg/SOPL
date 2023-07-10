@@ -1,14 +1,7 @@
-extern "C" printf(ptr, long : int);
-
-func hello() {
-    let z: long
-    z = 5l;
-}
+include "../libs/libc/stdio.spl"
 func main() {
-    let y: long
-    let x: long
-    x = 5l;
-    y = 4l;
+    let y: long = 5l;
+    let x: long = 4l;
     x += y;
     printf("Hi %ld\n", x);
 }

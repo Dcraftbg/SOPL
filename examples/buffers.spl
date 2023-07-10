@@ -1,7 +1,7 @@
 include "../libs/strlib/strlib.spl"
 include "../libs/libc/stdio.spl"
+let name: [char, 500];
 func main(){
-    let name: [char, 500];
     strset(name, 500, 0);
     scanf("%s",name);
     printf("Hello: %s\n",name);

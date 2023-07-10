@@ -1,10 +1,8 @@
-extern "C" puts(ptr : int);
+include "../libs/libc/stdio.spl"
 func main(){
-    let a: *char;
-    a = "Hello World!";
+    let a: *char = "Hello World!";
     {
-        let b: *char;
-        b = a;
+        let b: *char = a;
         puts(a);
         puts(b);
     }

@@ -1,7 +1,4 @@
-extern "C" puts(*char : int);
-func printstr(a: *char) {
-    puts(a)
-}
+include "../libs/libc/stdio.spl"
 func main() {
-    printstr("Hello World!")
+    puts("Hello World!")
 }

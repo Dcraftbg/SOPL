@@ -1,12 +1,8 @@
 extern "C" printf(*char, int : int);
 func main(){
-    let a: int;
-    let b: int;
-    let c: int;
-    let d: int;
-    a = 5;
-    b = 4;
-    c = 5;
-    d = a+b*c;
+    let a: int = 5;
+    let b: int = 4;
+    let c: int = 5;
+    let d: int = a+b*c;
     printf("d=%d\n",d);
 }

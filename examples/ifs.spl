@@ -1,10 +1,7 @@
-extern "C" puts(*char : int);
-extern "C" printf(*char, bool : int);
+include "../libs/libc/stdio.spl"
 func main(){
-    let a: int
-    let b: int
-    a = 5;
-    b = 5;
+    let a: int = 5;
+    let b: int = 5;
     if a==b {
         printf("Al: %x\n",1);
     }
