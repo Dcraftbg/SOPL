@@ -278,6 +278,7 @@ As of 0.11A, the 'rs' keyword is planned to be deprecated, and instead replaced 
 As of 0.6A, there is a new keyword called 'rs' short for "Return stack"
 
 ### Control flow
+[0.13.3A](version.md#013a) Added @goto and @makelabel
 [0.12.2A](version.md#012a) Added while loops
 [0.12A](version.md#012a) Finally settled the syntax of ifs
 [0.11.11A](version.md#01111a) Added 'temporary' ifs
@@ -285,9 +286,12 @@ As of 0.6A, there is a new keyword called 'rs' short for "Return stack"
 Pre 0.1A Added ifs
 Pre 0.1A Added elses
 
+
+If statements:
 **Syntax:**
 ```sopl
 if (condition) {(Body)}
+(else) {}
 ```
 
 **Examples:**
@@ -311,6 +315,50 @@ while i < 10 {
   printf("Hello World!"c);
 }
 ```
+
+While loops:
+**Syntax:**
+```sopl
+while (condition) {(Body)}
+```
+**Examples:**
+```sopl
+func main(){
+  let i: int;
+  i = 0;
+  while i < 5 {
+    printf("%d> Hello World!\n",i);
+    i+=1;
+  }
+}
+```
+
+@makelabel:
+Labels are going to be important for the next control flow statement, goto. To define a label, use:
+**Syntax:**
+```sopl
+@makelabel("here goes name of your label as a string")
+```
+
+@goto:
+Now that we have made a label, we can jump to it (if it is within the same function)
+**Syntax:**
+```sopl
+@goto("here goes name of your label as a string")
+```
+**Examples**
+```sopl
+func main() {
+  let i: int = 0;
+  while i < 100 {
+    if i == 69 {
+      @goto("break")
+    }
+  }
+  @makelabel("break")
+}
+```
+
 ### Strings
 > Changed Strings to automatically be CStrings and added s as a way to have sized strings once again
 > Strings  -> Pre 0.1A 
