@@ -716,14 +716,14 @@ impl Expression {
                         }
                     }
                     OfP::RESULT(func, args) => {
-                        let sp_taken = nasm_x86_64_prep_args(program, build, f, args, stack_size, local_vars)?;
+                        let sp_taken = nasm_x86_64_prep_args(program, build, f, args, stack_size, local_vars,buffers)?;
                         writeln!(f, "   call {}",func)?;
                         if sp_taken-stack_size > 0 {
                             writeln!(f, "   add {}, {}",program.stack_ptr(),sp_taken-stack_size)?
                         }
                         let reg = Register::RAX.to_byte_size(build.get_contract_of_symbol(func).unwrap().Outputs.get(0).unwrap_or(&VarType::LONG).get_size(program));
                         writeln!(f, "   cmp {}, 0", reg)?;
-                        writeln!(f, "   jnz")?;
+                        writeln!(f, "   jnz {}",label)?;
                         /*
                         let sp_taken = nasm_x86_64_prep_args(program, build, f, args, stack_size, local_vars)?;
                         writeln!(f, "   call {}{}",program.architecture.func_prefix,func)?;
@@ -764,56 +764,159 @@ impl Expression {
                 use Register::*;
                 match con.op {
                     Op::EQ => {
+                        let res_right = con.right.as_ref().unwrap().result_of_c(program, build, local_vars, buffers,loc).unwrap();
+                        let res_left = con.left.as_ref().unwrap().result_of_c(program, build, local_vars, buffers,loc).unwrap();
                         let eval_regs = vec![RAX,RBX,RCX,RDX];
+                        if res_right.get_size(program) > res_left.get_size(program) {
+                            writeln!(f, "   xor {}, {}",RSI,RSI)?;
+                        }
                         let left_regs = con.left.as_ref().unwrap().LEIRnasm(eval_regs.clone(), f, program, build, local_vars, buffers, stack_size, loc)?;
-                        let reg = RSI.to_byte_size(left_regs[0].size());
+                        let mut reg = RSI.to_byte_size(left_regs[0].size());
+                        if res_right.get_size(program) < res_left.get_size(program) {
+                            writeln!(f, "   xor {}, {}",eval_regs[0],eval_regs[0])?;
+                        }
                         writeln!(f, "   mov {}, {}",reg,left_regs[0])?;
-                        let right_regs = con.left.as_ref().unwrap().LEIRnasm(eval_regs.clone(), f, program, build, local_vars, buffers, stack_size, loc)?;
+                        let mut right_regs = con.right.as_ref().unwrap().LEIRnasm(eval_regs.clone(), f, program, build, local_vars, buffers, stack_size, loc)?;
+                        if reg.size() > right_regs[0].size() {
+                            right_regs[0] = right_regs[0].to_byte_size(reg.size())
+                        }
+                        if reg.size() < right_regs[0].size() {
+                            reg = reg.to_byte_size(right_regs[0].size())
+                        }
                         writeln!(f, "   cmp {}, {}",reg,right_regs[0])?;
                         writeln!(f, "   jz {}",label)?;
+                        /*
+                        let res_right = right.result_of_c(program, build, local_vars, buffers, loc).unwrap();
+                        let res_left = left.result_of_c(program, build, local_vars, buffers, loc).unwrap();
+                        if res_left.get_size(program) > res_right.get_size(program) {
+                            writeln!(f,"   xor {}, {}",regs[1],regs[1])?
+                        }
+                        else if res_right.get_size(program) > res_left.get_size(program) {
+                            writeln!(f,"   xor {}, {}",regs[0],regs[0])?
+                        }
+                        let mut left_oregs = left_expr.eval_nasm(regs.clone(), f, program, build, local_vars, buffers, stack_size, loc)?;
+                        let mut right_oregs = right_expr.eval_nasm(regs[1..].to_vec(), f, program, build, local_vars, buffers, stack_size, loc)?;
+                        if left_oregs[0].size() > right_oregs[0].size() {
+                            
+                            right_oregs[0] = right_oregs[0].to_byte_size(left_oregs[0].size());
+                        }
+                        else if left_oregs[0].size() < right_oregs[0].size() {
+                            left_oregs[0] = left_oregs[0].to_byte_size(right_oregs[0].size());
+                        }
+                         */
                     }
                     Op::NEQ => {
+                        let res_right = con.right.as_ref().unwrap().result_of_c(program, build, local_vars, buffers,loc).unwrap();
+                        let res_left = con.left.as_ref().unwrap().result_of_c(program, build, local_vars,buffers, loc).unwrap();
                         let eval_regs = vec![RAX,RBX,RCX,RDX];
+                        if res_right.get_size(program) > res_left.get_size(program) {
+                            writeln!(f, "   xor {}, {}",RSI,RSI)?;
+                        }
                         let left_regs = con.left.as_ref().unwrap().LEIRnasm(eval_regs.clone(), f, program, build, local_vars, buffers, stack_size, loc)?;
-                        let reg = RSI.to_byte_size(left_regs[0].size());
+                        let mut reg = RSI.to_byte_size(left_regs[0].size());
+                        if res_right.get_size(program) < res_left.get_size(program) {
+                            writeln!(f, "   xor {}, {}",eval_regs[0],eval_regs[0])?;
+                        }
                         writeln!(f, "   mov {}, {}",reg,left_regs[0])?;
-                        let right_regs = con.left.as_ref().unwrap().LEIRnasm(eval_regs.clone(), f, program, build, local_vars, buffers, stack_size, loc)?;
+                        let mut right_regs = con.right.as_ref().unwrap().LEIRnasm(eval_regs.clone(), f, program, build, local_vars, buffers, stack_size, loc)?;
+                        if reg.size() > right_regs[0].size() {
+                            right_regs[0] = right_regs[0].to_byte_size(reg.size())
+                        }
+                        if reg.size() < right_regs[0].size() {
+                            reg = reg.to_byte_size(right_regs[0].size())
+                        }
                         writeln!(f, "   cmp {}, {}",reg,right_regs[0])?;
                         writeln!(f, "   jnz {}",label)?;
                     }
                     Op::GT => {
+                        let res_right = con.right.as_ref().unwrap().result_of_c(program, build, local_vars, buffers,loc).unwrap();
+                        let res_left = con.left.as_ref().unwrap().result_of_c(program, build, local_vars, buffers,loc).unwrap();
                         let eval_regs = vec![RAX,RBX,RCX,RDX];
+                        if res_right.get_size(program) > res_left.get_size(program) {
+                            writeln!(f, "   xor {}, {}",RSI,RSI)?;
+                        }
                         let left_regs = con.left.as_ref().unwrap().LEIRnasm(eval_regs.clone(), f, program, build, local_vars, buffers, stack_size, loc)?;
-                        let reg = RSI.to_byte_size(left_regs[0].size());
+                        let mut reg = RSI.to_byte_size(left_regs[0].size());
+                        if res_right.get_size(program) < res_left.get_size(program) {
+                            writeln!(f, "   xor {}, {}",eval_regs[0],eval_regs[0])?;
+                        }
                         writeln!(f, "   mov {}, {}",reg,left_regs[0])?;
-                        let right_regs = con.left.as_ref().unwrap().LEIRnasm(eval_regs.clone(), f, program, build, local_vars, buffers, stack_size, loc)?;
+                        let mut right_regs = con.right.as_ref().unwrap().LEIRnasm(eval_regs.clone(), f, program, build, local_vars, buffers, stack_size, loc)?;
+                        if reg.size() > right_regs[0].size() {
+                            right_regs[0] = right_regs[0].to_byte_size(reg.size())
+                        }
+                        if reg.size() < right_regs[0].size() {
+                            reg = reg.to_byte_size(right_regs[0].size())
+                        }
                         writeln!(f, "   cmp {}, {}",reg,right_regs[0])?;
                         writeln!(f, "   jg {}",label)?;
                     }
                     Op::LT => {
+                        let res_right = con.right.as_ref().unwrap().result_of_c(program, build, local_vars, buffers,loc).unwrap();
+                        let res_left = con.left.as_ref().unwrap().result_of_c(program, build, local_vars, buffers,loc).unwrap();
                         let eval_regs = vec![RAX,RBX,RCX,RDX];
+                        if res_right.get_size(program) > res_left.get_size(program) {
+                            writeln!(f, "   xor {}, {}",RSI,RSI)?;
+                        }
                         let left_regs = con.left.as_ref().unwrap().LEIRnasm(eval_regs.clone(), f, program, build, local_vars, buffers, stack_size, loc)?;
-                        let reg = RSI.to_byte_size(left_regs[0].size());
+                        let mut reg = RSI.to_byte_size(left_regs[0].size());
+                        if res_right.get_size(program) < res_left.get_size(program) {
+                            writeln!(f, "   xor {}, {}",eval_regs[0],eval_regs[0])?;
+                        }
                         writeln!(f, "   mov {}, {}",reg,left_regs[0])?;
-                        let right_regs = con.left.as_ref().unwrap().LEIRnasm(eval_regs.clone(), f, program, build, local_vars, buffers, stack_size, loc)?;
+                        let mut right_regs = con.right.as_ref().unwrap().LEIRnasm(eval_regs.clone(), f, program, build, local_vars, buffers, stack_size, loc)?;
+                        if reg.size() > right_regs[0].size() {
+                            right_regs[0] = right_regs[0].to_byte_size(reg.size())
+                        }
+                        if reg.size() < right_regs[0].size() {
+                            reg = reg.to_byte_size(right_regs[0].size())
+                        }
                         writeln!(f, "   cmp {}, {}",reg,right_regs[0])?;
                         writeln!(f, "   jl {}",label)?;
                     }
                     Op::GTEQ => {
+                        let res_right = con.right.as_ref().unwrap().result_of_c(program, build, local_vars, buffers, loc).unwrap();
+                        let res_left = con.left.as_ref().unwrap().result_of_c(program, build, local_vars, buffers, loc).unwrap();
                         let eval_regs = vec![RAX,RBX,RCX,RDX];
+                        if res_right.get_size(program) > res_left.get_size(program) {
+                            writeln!(f, "   xor {}, {}",RSI,RSI)?;
+                        }
                         let left_regs = con.left.as_ref().unwrap().LEIRnasm(eval_regs.clone(), f, program, build, local_vars, buffers, stack_size, loc)?;
-                        let reg = RSI.to_byte_size(left_regs[0].size());
+                        let mut reg = RSI.to_byte_size(left_regs[0].size());
+                        if res_right.get_size(program) < res_left.get_size(program) {
+                            writeln!(f, "   xor {}, {}",eval_regs[0],eval_regs[0])?;
+                        }
                         writeln!(f, "   mov {}, {}",reg,left_regs[0])?;
-                        let right_regs = con.left.as_ref().unwrap().LEIRnasm(eval_regs.clone(), f, program, build, local_vars, buffers, stack_size, loc)?;
+                        let mut right_regs = con.right.as_ref().unwrap().LEIRnasm(eval_regs.clone(), f, program, build, local_vars, buffers, stack_size, loc)?;
+                        if reg.size() > right_regs[0].size() {
+                            right_regs[0] = right_regs[0].to_byte_size(reg.size())
+                        }
+                        if reg.size() < right_regs[0].size() {
+                            reg = reg.to_byte_size(right_regs[0].size())
+                        }
                         writeln!(f, "   cmp {}, {}",reg,right_regs[0])?;
                         writeln!(f, "   jge {}",label)?;
                     }
                     Op::LTEQ => {
+                        let res_right = con.right.as_ref().unwrap().result_of_c(program, build, local_vars, buffers, loc).unwrap();
+                        let res_left = con.left.as_ref().unwrap().result_of_c(program, build, local_vars, buffers, loc).unwrap();
                         let eval_regs = vec![RAX,RBX,RCX,RDX];
+                        if res_right.get_size(program) > res_left.get_size(program) {
+                            writeln!(f, "   xor {}, {}",RSI,RSI)?;
+                        }
                         let left_regs = con.left.as_ref().unwrap().LEIRnasm(eval_regs.clone(), f, program, build, local_vars, buffers, stack_size, loc)?;
-                        let reg = RSI.to_byte_size(left_regs[0].size());
+                        let mut reg = RSI.to_byte_size(left_regs[0].size());
+                        if res_right.get_size(program) < res_left.get_size(program) {
+                            writeln!(f, "   xor {}, {}",eval_regs[0],eval_regs[0])?;
+                        }
                         writeln!(f, "   mov {}, {}",reg,left_regs[0])?;
-                        let right_regs = con.left.as_ref().unwrap().LEIRnasm(eval_regs.clone(), f, program, build, local_vars, buffers, stack_size, loc)?;
+                        let mut right_regs = con.right.as_ref().unwrap().LEIRnasm(eval_regs.clone(), f, program, build, local_vars, buffers, stack_size, loc)?;
+                        if reg.size() > right_regs[0].size() {
+                            right_regs[0] = right_regs[0].to_byte_size(reg.size())
+                        }
+                        if reg.size() < right_regs[0].size() {
+                            reg = reg.to_byte_size(right_regs[0].size())
+                        }
                         writeln!(f, "   cmp {}, {}",reg,right_regs[0])?;
                         writeln!(f, "   jle {}",label)?;
                     }
@@ -861,14 +964,14 @@ impl Expression {
                         }
                     }
                     OfP::RESULT(func, args) => {
-                        let sp_taken = nasm_x86_64_prep_args(program, build, f, args, stack_size, local_vars)?;
+                        let sp_taken = nasm_x86_64_prep_args(program, build, f, args, stack_size, local_vars,buffers)?;
                         writeln!(f, "   call {}",func)?;
                         if sp_taken-stack_size > 0 {
                             writeln!(f, "   add {}, {}",program.stack_ptr(),sp_taken-stack_size)?
                         }
                         let reg = Register::RAX.to_byte_size(build.get_contract_of_symbol(func).unwrap().Outputs.get(0).unwrap_or(&VarType::LONG).get_size(program));
                         writeln!(f, "   cmp {}, 0", reg)?;
-                        writeln!(f, "   jz")?;
+                        writeln!(f, "   jz {}",label)?;
                     }
                     OfP::GLOBALVAR(_) => {
                         todo!("Cannot have global variables in contract")
@@ -896,56 +999,140 @@ impl Expression {
                 use Register::*;
                 match con.op {
                     Op::EQ => {
+                        let res_right = con.right.as_ref().unwrap().result_of_c(program, build, local_vars, buffers, loc).unwrap();
+                        let res_left = con.left.as_ref().unwrap().result_of_c(program, build, local_vars, buffers, loc).unwrap();
                         let eval_regs = vec![RAX,RBX,RCX,RDX];
+                        if res_right.get_size(program) > res_left.get_size(program) {
+                            writeln!(f, "   xor {}, {}",RSI,RSI)?;
+                        }
                         let left_regs = con.left.as_ref().unwrap().LEIRnasm(eval_regs.clone(), f, program, build, local_vars, buffers, stack_size, loc)?;
-                        let reg = RSI.to_byte_size(left_regs[0].size());
+                        let mut reg = RSI.to_byte_size(left_regs[0].size());
+                        if res_right.get_size(program) < res_left.get_size(program) {
+                            writeln!(f, "   xor {}, {}",eval_regs[0],eval_regs[0])?;
+                        }
                         writeln!(f, "   mov {}, {}",reg,left_regs[0])?;
-                        let right_regs = con.left.as_ref().unwrap().LEIRnasm(eval_regs.clone(), f, program, build, local_vars, buffers, stack_size, loc)?;
+                        let mut right_regs = con.right.as_ref().unwrap().LEIRnasm(eval_regs.clone(), f, program, build, local_vars, buffers, stack_size, loc)?;
+                        if reg.size() > right_regs[0].size() {
+                            right_regs[0] = right_regs[0].to_byte_size(reg.size())
+                        }
+                        if reg.size() < right_regs[0].size() {
+                            reg = reg.to_byte_size(right_regs[0].size())
+                        }
                         writeln!(f, "   cmp {}, {}",reg,right_regs[0])?;
                         writeln!(f, "   jnz {}",label)?;
                     }
                     Op::NEQ => {
+                        let res_right = con.right.as_ref().unwrap().result_of_c(program, build, local_vars, buffers, loc).unwrap();
+                        let res_left = con.left.as_ref().unwrap().result_of_c(program, build, local_vars, buffers, loc).unwrap();
                         let eval_regs = vec![RAX,RBX,RCX,RDX];
+                        if res_right.get_size(program) > res_left.get_size(program) {
+                            writeln!(f, "   xor {}, {}",RSI,RSI)?;
+                        }
                         let left_regs = con.left.as_ref().unwrap().LEIRnasm(eval_regs.clone(), f, program, build, local_vars, buffers, stack_size, loc)?;
-                        let reg = RSI.to_byte_size(left_regs[0].size());
+                        let mut reg = RSI.to_byte_size(left_regs[0].size());
+                        if res_right.get_size(program) < res_left.get_size(program) {
+                            writeln!(f, "   xor {}, {}",eval_regs[0],eval_regs[0])?;
+                        }
                         writeln!(f, "   mov {}, {}",reg,left_regs[0])?;
-                        let right_regs = con.left.as_ref().unwrap().LEIRnasm(eval_regs.clone(), f, program, build, local_vars, buffers, stack_size, loc)?;
+                        let mut right_regs = con.right.as_ref().unwrap().LEIRnasm(eval_regs.clone(), f, program, build, local_vars, buffers, stack_size, loc)?;
+                        if reg.size() > right_regs[0].size() {
+                            right_regs[0] = right_regs[0].to_byte_size(reg.size())
+                        }
+                        if reg.size() < right_regs[0].size() {
+                            reg = reg.to_byte_size(right_regs[0].size())
+                        }
                         writeln!(f, "   cmp {}, {}",reg,right_regs[0])?;
                         writeln!(f, "   jz {}",label)?;
                     }
                     Op::GT => {
+                        let res_right = con.right.as_ref().unwrap().result_of_c(program, build, local_vars, buffers, loc).unwrap();
+                        let res_left = con.left.as_ref().unwrap().result_of_c(program, build, local_vars, buffers, loc).unwrap();
                         let eval_regs = vec![RAX,RBX,RCX,RDX];
+                        if res_right.get_size(program) > res_left.get_size(program) {
+                            writeln!(f, "   xor {}, {}",RSI,RSI)?;
+                        }
                         let left_regs = con.left.as_ref().unwrap().LEIRnasm(eval_regs.clone(), f, program, build, local_vars, buffers, stack_size, loc)?;
-                        let reg = RSI.to_byte_size(left_regs[0].size());
+                        let mut reg = RSI.to_byte_size(left_regs[0].size());
+                        if res_right.get_size(program) < res_left.get_size(program) {
+                            writeln!(f, "   xor {}, {}",eval_regs[0],eval_regs[0])?;
+                        }
                         writeln!(f, "   mov {}, {}",reg,left_regs[0])?;
-                        let right_regs = con.left.as_ref().unwrap().LEIRnasm(eval_regs.clone(), f, program, build, local_vars, buffers, stack_size, loc)?;
+                        let mut right_regs = con.right.as_ref().unwrap().LEIRnasm(eval_regs.clone(), f, program, build, local_vars, buffers, stack_size, loc)?;
+                        if reg.size() > right_regs[0].size() {
+                            right_regs[0] = right_regs[0].to_byte_size(reg.size())
+                        }
+                        if reg.size() < right_regs[0].size() {
+                            reg = reg.to_byte_size(right_regs[0].size())
+                        }
                         writeln!(f, "   cmp {}, {}",reg,right_regs[0])?;
                         writeln!(f, "   jle {}",label)?;
                     }
                     Op::LT => {
+                        let res_right = con.right.as_ref().unwrap().result_of_c(program, build, local_vars, buffers, loc).unwrap();
+                        let res_left = con.left.as_ref().unwrap().result_of_c(program, build, local_vars, buffers, loc).unwrap();
                         let eval_regs = vec![RAX,RBX,RCX,RDX];
+                        if res_right.get_size(program) > res_left.get_size(program) {
+                            writeln!(f, "   xor {}, {}",RSI,RSI)?;
+                        }
                         let left_regs = con.left.as_ref().unwrap().LEIRnasm(eval_regs.clone(), f, program, build, local_vars, buffers, stack_size, loc)?;
-                        let reg = RSI.to_byte_size(left_regs[0].size());
+                        let mut reg = RSI.to_byte_size(left_regs[0].size());
+                        if res_right.get_size(program) < res_left.get_size(program) {
+                            writeln!(f, "   xor {}, {}",eval_regs[0],eval_regs[0])?;
+                        }
                         writeln!(f, "   mov {}, {}",reg,left_regs[0])?;
-                        let right_regs = con.left.as_ref().unwrap().LEIRnasm(eval_regs.clone(), f, program, build, local_vars, buffers, stack_size, loc)?;
+                        let mut right_regs = con.right.as_ref().unwrap().LEIRnasm(eval_regs.clone(), f, program, build, local_vars, buffers, stack_size, loc)?;
+                        if reg.size() > right_regs[0].size() {
+                            right_regs[0] = right_regs[0].to_byte_size(reg.size())
+                        }
+                        if reg.size() < right_regs[0].size() {
+                            reg = reg.to_byte_size(right_regs[0].size())
+                        }
                         writeln!(f, "   cmp {}, {}",reg,right_regs[0])?;
                         writeln!(f, "   jge {}",label)?;
                     }
                     Op::GTEQ => {
+                        let res_right = con.right.as_ref().unwrap().result_of_c(program, build, local_vars, buffers, loc).unwrap();
+                        let res_left = con.left.as_ref().unwrap().result_of_c(program, build, local_vars, buffers, loc).unwrap();
                         let eval_regs = vec![RAX,RBX,RCX,RDX];
+                        if res_right.get_size(program) > res_left.get_size(program) {
+                            writeln!(f, "   xor {}, {}",RSI,RSI)?;
+                        }
                         let left_regs = con.left.as_ref().unwrap().LEIRnasm(eval_regs.clone(), f, program, build, local_vars, buffers, stack_size, loc)?;
-                        let reg = RSI.to_byte_size(left_regs[0].size());
+                        let mut reg = RSI.to_byte_size(left_regs[0].size());
+                        if res_right.get_size(program) < res_left.get_size(program) {
+                            writeln!(f, "   xor {}, {}",eval_regs[0],eval_regs[0])?;
+                        }
                         writeln!(f, "   mov {}, {}",reg,left_regs[0])?;
-                        let right_regs = con.left.as_ref().unwrap().LEIRnasm(eval_regs.clone(), f, program, build, local_vars, buffers, stack_size, loc)?;
+                        let mut right_regs = con.right.as_ref().unwrap().LEIRnasm(eval_regs.clone(), f, program, build, local_vars, buffers, stack_size, loc)?;
+                        if reg.size() > right_regs[0].size() {
+                            right_regs[0] = right_regs[0].to_byte_size(reg.size())
+                        }
+                        if reg.size() < right_regs[0].size() {
+                            reg = reg.to_byte_size(right_regs[0].size())
+                        }
                         writeln!(f, "   cmp {}, {}",reg,right_regs[0])?;
                         writeln!(f, "   jl {}",label)?;
                     }
                     Op::LTEQ => {
+                        let res_right = con.right.as_ref().unwrap().result_of_c(program, build, local_vars, buffers, loc).unwrap();
+                        let res_left = con.left.as_ref().unwrap().result_of_c(program, build, local_vars, buffers, loc).unwrap();
                         let eval_regs = vec![RAX,RBX,RCX,RDX];
+                        if res_right.get_size(program) > res_left.get_size(program) {
+                            writeln!(f, "   xor {}, {}",RSI,RSI)?;
+                        }
                         let left_regs = con.left.as_ref().unwrap().LEIRnasm(eval_regs.clone(), f, program, build, local_vars, buffers, stack_size, loc)?;
-                        let reg = RSI.to_byte_size(left_regs[0].size());
+                        let mut reg = RSI.to_byte_size(left_regs[0].size());
+                        if res_right.get_size(program) < res_left.get_size(program) {
+                            writeln!(f, "   xor {}, {}",eval_regs[0],eval_regs[0])?;
+                        }
                         writeln!(f, "   mov {}, {}",reg,left_regs[0])?;
-                        let right_regs = con.left.as_ref().unwrap().LEIRnasm(eval_regs.clone(), f, program, build, local_vars, buffers, stack_size, loc)?;
+                        let mut right_regs = con.right.as_ref().unwrap().LEIRnasm(eval_regs.clone(), f, program, build, local_vars, buffers, stack_size, loc)?;
+                        if reg.size() > right_regs[0].size() {
+                            right_regs[0] = right_regs[0].to_byte_size(reg.size())
+                        }
+                        if reg.size() < right_regs[0].size() {
+                            reg = reg.to_byte_size(right_regs[0].size())
+                        }
                         writeln!(f, "   cmp {}, {}",reg,right_regs[0])?;
                         writeln!(f, "   jg {}",label)?;
                     }
@@ -984,14 +1171,14 @@ impl Expression {
             _ => false
         }
     }
-    fn result_of_c(&self,program: &CmdProgram,build: &BuildProgram, local_vars: &Vec<HashMap<String,LocalVariable>>, loc: &ProgramLocation) -> Option<VarType>  {
+    fn result_of_c(&self,program: &CmdProgram,build: &BuildProgram, local_vars: &Vec<HashMap<String,LocalVariable>>, buffers: &Vec<BuildBuf>, loc: &ProgramLocation) -> Option<VarType>  {
         match self {
-            Self::val(v) => v.var_type(build, local_vars),
+            Self::val(v) => v.var_type(build, local_vars,buffers),
             Self::expr(s) => {
                 if let Some(v1) = &s.left {
-                    let res1 = v1.result_of_c(program, build, local_vars,loc);
+                    let res1 = v1.result_of_c(program, build, local_vars,buffers,loc);
                     if let Some(v2) = &s.right {
-                        let res2 = v2.result_of_c(program, build, local_vars,loc);
+                        let res2 = v2.result_of_c(program, build, local_vars,buffers,loc);
                         if res1.is_some() && res2.is_some() && res1.as_ref().unwrap().weak_eq(&res2.as_ref().unwrap()) {
                             res1
                         }
@@ -1011,7 +1198,7 @@ impl Expression {
                 }
                 else if let Some(v2) = &s.right {
                     if s.op == Op::STAR {
-                        let res = v2.result_of_c(program, build, local_vars,loc);
+                        let res = v2.result_of_c(program, build, local_vars,buffers,loc);
                         let res = res.unwrap();
                         com_assert!(loc,res.is_some_ptr(),"Error: Cannot dereference void pointer!");
                         res.get_ptr_val()
@@ -1036,7 +1223,7 @@ impl Expression {
                         }
                     }
                     else{
-                        v2.result_of_c(program, build, local_vars,loc)
+                        v2.result_of_c(program, build, local_vars,buffers,loc)
                     }
                 }
                 else {
@@ -1170,8 +1357,8 @@ impl ExprTree {
                 let left = com_expect!(loc,self.left.as_ref(),"Error: Cannot evaluate Op '{}' without left parameter",Op::PLUS.to_string());
                 let right       = com_expect!(loc,self.right.as_ref(),"Error: Cannot evaluate Op '{}' without left parameter",Op::PLUS.to_string());
                 
-                //let res_right = right.result_of_c(program, build, local_vars, loc).unwrap();
-                //let res_left = left.result_of_c(program, build, local_vars, loc).unwrap();
+                //let res_right = right.result_of_c(program, build, local_vars, buffers, loc).unwrap();
+                //let res_left = left.result_of_c(program, build, local_vars, buffers, loc).unwrap();
 
                 //if res_right.get_size(program) > res_left.get_size(program) {
                 //    writeln!(f, "   xor {}, {}",regs[1],regs[1])?;
@@ -1184,8 +1371,8 @@ impl ExprTree {
                     Expression::expr(left_expr) => {
                         match right {
                             Expression::expr(right_expr) => {
-                                let res_right = right.result_of_c(program, build, local_vars, loc).unwrap();
-                                let res_left = left.result_of_c(program, build, local_vars, loc).unwrap();
+                                let res_right = right.result_of_c(program, build, local_vars, buffers,loc).unwrap();
+                                let res_left = left.result_of_c(program, build, local_vars, buffers,loc).unwrap();
                                 if res_left.get_size(program) > res_right.get_size(program) {
                                     writeln!(f,"   xor {}, {}",regs[1],regs[1])?
                                 }
@@ -1213,8 +1400,8 @@ impl ExprTree {
                                         o = left_oregs;
                                     }
                                     _ => {
-                                        let res_right = right.result_of_c(program, build, local_vars, loc).unwrap();
-                                        let res_left = left.result_of_c(program, build, local_vars, loc).unwrap();
+                                        let res_right = right.result_of_c(program, build, local_vars, buffers,loc).unwrap();
+                                        let res_left = left.result_of_c(program, build, local_vars, buffers,loc).unwrap();
                                         if res_left.get_size(program) > res_right.get_size(program) {
                                             writeln!(f,"   xor {}, {}",regs[1],regs[1])?
                                         }
@@ -1247,8 +1434,8 @@ impl ExprTree {
                                     }
 
                                     _ => {
-                                        let res_right = right.result_of_c(program, build, local_vars, loc).unwrap();
-                                        let res_left = left.result_of_c(program, build, local_vars, loc).unwrap();
+                                        let res_right = right.result_of_c(program, build, local_vars, buffers,loc).unwrap();
+                                        let res_left = left.result_of_c(program, build, local_vars, buffers,loc).unwrap();
                                         if res_left.get_size(program) > res_right.get_size(program) {
                                             writeln!(f,"   xor {}, {}",regs[0],regs[0])?
                                         }
@@ -1276,8 +1463,8 @@ impl ExprTree {
                                         o = left_oregs;
                                     }
                                     _ => {
-                                        let res_right = right.result_of_c(program, build, local_vars, loc).unwrap();
-                                        let res_left = left.result_of_c(program, build, local_vars, loc).unwrap();
+                                        let res_right = right.result_of_c(program, build, local_vars, buffers,loc).unwrap();
+                                        let res_left = left.result_of_c(program, build, local_vars, buffers,loc).unwrap();
                                         if res_left.get_size(program) > res_right.get_size(program) {
                                             writeln!(f,"   xor {}, {}",regs[1],regs[1])?
                                         }
@@ -1305,8 +1492,8 @@ impl ExprTree {
                 let left = com_expect!(loc,self.left.as_ref(),"Error: Cannot evaluate Op '{}' without left parameter",Op::MINUS.to_string());
                 let right       = com_expect!(loc,self.right.as_ref(),"Error: Cannot evaluate Op '{}' without left parameter",Op::MINUS.to_string());
                 
-                let res_right = right.result_of_c(program, build, local_vars, loc).unwrap();
-                let res_left = left.result_of_c(program, build, local_vars, loc).unwrap();
+                let res_right = right.result_of_c(program, build, local_vars, buffers,loc).unwrap();
+                let res_left = left.result_of_c(program, build, local_vars, buffers,loc).unwrap();
 
                 if res_right.get_size(program) > res_left.get_size(program) {
                     writeln!(f, "   xor {}, {}",regs[1],regs[1])?;
@@ -1557,7 +1744,7 @@ impl ExprTree {
                     let rightregs1 = right.LEIRnasm(regs.to_vec(), f, program, build, local_vars, buffers, stack_size, loc)?;
                     com_assert!(loc,rightregs1.len() == 1, "TODO: Handle multi-parameter loading for expressions!");
                     let rego = &rightregs1[0];
-                    let resof = right.result_of_c(program, build, local_vars,loc).unwrap();
+                    let resof = right.result_of_c(program, build, local_vars,buffers,loc).unwrap();
                     com_assert!(loc, resof.is_some_ptr(), "Error: Cannot dereference void pointer!");
                     let resof = resof.get_ptr_val().unwrap();
                     writeln!(f, "   mov {}, {} [{}]",rego.to_byte_size(resof.get_size(program)).to_string(),size_to_nasm_type(resof.get_size(program)),rego.to_string())?;
@@ -1662,8 +1849,8 @@ impl ExprTree {
                 let left = com_expect!(loc,self.left.as_ref(),"Error: Cannot evaluate Op '{}' without left parameter",Op::SRIGHT.to_string());
                 let right       = com_expect!(loc,self.right.as_ref(),"Error: Cannot evaluate Op '{}' without left parameter",Op::SRIGHT.to_string());
                 
-                let res_right = right.result_of_c(program, build, local_vars, loc).unwrap();
-                let res_left = left.result_of_c(program, build, local_vars, loc).unwrap();
+                let res_right = right.result_of_c(program, build, local_vars, buffers, loc).unwrap();
+                let res_left = left.result_of_c(program, build, local_vars, buffers, loc).unwrap();
 
                 if res_right.get_size(program) > res_left.get_size(program) {
                     writeln!(f, "   xor {}, {}",regs[1],regs[1])?;
@@ -1763,8 +1950,8 @@ impl ExprTree {
                 let left = com_expect!(loc,self.left.as_ref(),"Error: Cannot evaluate Op '{}' without left parameter",Op::SLEFT.to_string());
                 let right       = com_expect!(loc,self.right.as_ref(),"Error: Cannot evaluate Op '{}' without left parameter",Op::SLEFT.to_string());
                 
-                let res_right = right.result_of_c(program, build, local_vars, loc).unwrap();
-                let res_left = left.result_of_c(program, build, local_vars, loc).unwrap();
+                let res_right = right.result_of_c(program, build, local_vars, buffers, loc).unwrap();
+                let res_left = left.result_of_c(program, build, local_vars, buffers, loc).unwrap();
 
                 if res_right.get_size(program) > res_left.get_size(program) {
                     writeln!(f, "   xor {}, {}",regs[1],regs[1])?;
@@ -1865,8 +2052,8 @@ impl ExprTree {
                 let left = com_expect!(loc,self.left.as_ref(),"Error: Cannot evaluate Op '{}' without left parameter",Op::BOR.to_string());
                 let right       = com_expect!(loc,self.right.as_ref(),"Error: Cannot evaluate Op '{}' without left parameter",Op::BOR.to_string());
                 
-                let res_right = right.result_of_c(program, build, local_vars, loc).unwrap();
-                let res_left = left.result_of_c(program, build, local_vars, loc).unwrap();
+                let res_right = right.result_of_c(program, build, local_vars, buffers, loc).unwrap();
+                let res_left = left.result_of_c(program, build, local_vars, buffers, loc).unwrap();
 
                 if res_right.get_size(program) > res_left.get_size(program) {
                     writeln!(f, "   xor {}, {}",regs[1],regs[1])?;
@@ -3531,13 +3718,15 @@ impl OfP {
             Self::GLOBALVAR(_) => todo!()
         }
     }
-    fn var_type(&self, build: &BuildProgram, local_vars: &Vec<HashMap<String, LocalVariable>>) -> Option<VarType> {
+    fn var_type(&self, build: &BuildProgram, local_vars: &Vec<HashMap<String, LocalVariable>>, buffers: &Vec<BuildBuf>) -> Option<VarType> {
         match self {
             Self::REGISTER(reg) => Some(reg.to_var_type()),
             Self::CONST(v) => Some(v.to_type(build)[0].clone()),
             Self::LOCALVAR(v) => Some(get_local_build(local_vars, v).unwrap().typ.clone()),
             Self::RESULT(f, _) => build.functions.get(f).unwrap().contract.Outputs.get(0).cloned(),
-            Self::BUFFER(_) => todo!(),
+            Self::BUFFER(i) => {
+                Some(VarType::PTR(Ptr::ref_to(buffers[i.to_owned()].typ.clone())))
+            },
             Self::GLOBALVAR(v) => Some(build.global_vars.get(v).unwrap().typ.var_type(build)),
         }
     }
@@ -3642,7 +3831,7 @@ impl OfP {
                 }
             },
             OfP::RESULT(func, args) => {
-                let sp_taken = nasm_x86_64_prep_args(program, build, f, args, stack_size, local_vars)?;
+                let sp_taken = nasm_x86_64_prep_args(program, build, f, args, stack_size, local_vars,buffers)?;
                 writeln!(f, "   call {}{}",program.architecture.func_prefix,func)?;
                 if sp_taken-stack_size > 0 {
                     writeln!(f, "   add {}, {}",program.stack_ptr(),sp_taken-stack_size)?
@@ -5818,7 +6007,7 @@ fn optimization_ops(build: &mut BuildProgram, program: &CmdProgram) -> optim_ops
         OptimizationMode::DEBUG => optim_ops { usedStrings: HashMap::new(), usedExterns: HashSet::new(), usedFuncs: HashSet::new() },
     }
 }
-fn nasm_x86_64_prep_args(program: &CmdProgram, build: &BuildProgram, f: &mut File, contract: &Vec<OfP>, mut stack_size: usize, local_vars: &Vec<HashMap<String, LocalVariable>>) -> io::Result<usize> {
+fn nasm_x86_64_prep_args(program: &CmdProgram, build: &BuildProgram, f: &mut File, contract: &Vec<OfP>, mut stack_size: usize, local_vars: &Vec<HashMap<String, LocalVariable>>,buffers: &Vec<BuildBuf>) -> io::Result<usize> {
     let org_stack_size = stack_size;
     let mut int_passed_count: usize = 0;
     let mut offset: usize=0;
@@ -5826,9 +6015,9 @@ fn nasm_x86_64_prep_args(program: &CmdProgram, build: &BuildProgram, f: &mut Fil
     if program.architecture.options.argumentPassing != ArcPassType::PUSHALL {
         for iargs in contract.iter().rev() {
             if program.architecture.options.argumentPassing.custom_unwrap().nums_ptrs.is_some() && int_passed_count >= program.architecture.options.argumentPassing.custom_unwrap().nums_ptrs.as_ref().unwrap().len() {
-                offset += iargs.var_type(build, local_vars).unwrap().get_size(program);
+                offset += iargs.var_type(build, local_vars,buffers).unwrap().get_size(program);
             }
-            match iargs.var_type(build, local_vars).unwrap()  {
+            match iargs.var_type(build, local_vars,buffers).unwrap()  {
                 VarType::CHAR    | VarType::SHORT   | VarType::BOOLEAN | VarType::INT     | VarType::LONG    | VarType::PTR(_)  => int_passed_count+=1,
                 VarType::CUSTOM(_) => {},
             }
@@ -6128,7 +6317,7 @@ fn nasm_x86_64_handle_scope(f: &mut File, build: &BuildProgram, program: &CmdPro
                             let var = com_expect!(loc,get_local_build(&local_vars,varOrg),"Error: Unknown variable found during compilation {}",varOrg);
                             let oreg  = Register::RAX.to_byte_size(var.typ.get_size(program));
                             let oreg2 = Register::RBX.to_byte_size(var.typ.get_size(program));
-                            let result = Op2.result_of_c(program, build, local_vars, loc).unwrap();
+                            let result = Op2.result_of_c(program, build, local_vars, &bufs, loc).unwrap();
                             if result.get_size(program) < var.typ.get_size(program) {
                                 writeln!(f, "   xor {}, {}",Register::RAX.to_byte_size(var.typ.get_size(program)),Register::RAX.to_byte_size(var.typ.get_size(program)))?
                             }
@@ -6148,7 +6337,7 @@ fn nasm_x86_64_handle_scope(f: &mut File, build: &BuildProgram, program: &CmdPro
                 else {
                     let expr = Op.unwrap_expr();
                     com_assert!(loc, expr.op == Op::STAR, "Error: Expected op STAR but found {}",expr.op.to_string());
-                    let res_right = expr.right.as_ref().unwrap().result_of_c(program, build, &local_vars, loc).unwrap();
+                    let res_right = expr.right.as_ref().unwrap().result_of_c(program, build, &local_vars, &bufs,loc).unwrap();
                     
                     com_assert!(loc, res_right.is_some_ptr(), "Error: Cannot dereference void pointer");
                     let oregs = expr.right.as_ref().unwrap().LEIRnasm(vec![Register::RAX.to_byte_size(res_right.get_size(program)),Register::RBX.to_byte_size(res_right.get_size(program)),Register::RCX.to_byte_size(res_right.get_size(program))], f, program, build, &local_vars, &bufs,stack_size, loc)?;
@@ -6159,7 +6348,7 @@ fn nasm_x86_64_handle_scope(f: &mut File, build: &BuildProgram, program: &CmdPro
                 }
             }
             Instruction::CALLRAW(Word, contract) => {
-                let sp_taken = nasm_x86_64_prep_args(program, build, f, contract, stack_size, &local_vars)?;
+                let sp_taken = nasm_x86_64_prep_args(program, build, f, contract, stack_size, &local_vars,&bufs)?;
                 let rax = Register::RAX.to_byte_size((program.architecture.bits/8) as usize);
                 writeln!(f, "   xor {}, {}",rax,rax)?;
                 if let Some(external) = build.externals.get(Word) {
@@ -6264,7 +6453,7 @@ fn nasm_x86_64_handle_scope(f: &mut File, build: &BuildProgram, program: &CmdPro
                 todo!("Divset is not yet implemented!");
             }
             Instruction::CALL(Word,args) => {
-                let sp_taken = nasm_x86_64_prep_args(program, build, f, args, stack_size, &local_vars)?;
+                let sp_taken = nasm_x86_64_prep_args(program, build, f, args, stack_size, &local_vars,&bufs)?;
                 let rax = Register::RAX.to_byte_size((program.architecture.bits/8) as usize);
                 writeln!(f, "   xor {}, {}",rax,rax)?;
                 if let Some(external) = build.externals.get(Word) {
@@ -6441,105 +6630,106 @@ fn nasm_x86_64_handle_scope(f: &mut File, build: &BuildProgram, program: &CmdPro
                 
             },
             Instruction::EXPAND_WHILE_SCOPE(s) => {
+                let olabel = format!(".WHILE_SCOPE_END_{}",inst_count);
                 writeln!(f, "   .WHILE_SCOPE_{}:",inst_count)?;
+
                 let condition = match s.typ {
                     NormalScopeType::WHILE(ref c) => c,
                     _ => panic!("Unreachable")
                 };
-                if condition.is_ofp() {
-                    let val = condition.unwrap_val();
+                condition.jumpifn_nasm_x86_64(olabel, f, program, build, loc, stack_size, local_vars, &bufs)?;
+                // if condition.is_ofp() {
+                //     let val = condition.unwrap_val();
 
-                    match val {
-                        OfP::REGISTER(reg) => {
-                            let reg = reg.to_byte_size(1);
-                            writeln!(f, "   cmp {}, 0",reg.to_string())?;
-                        },
-                        OfP::LOCALVAR(v) => {
-                            let var = get_local_build(&local_vars, v).unwrap();
-                            com_assert!(loc,var.typ.weak_eq(&VarType::BOOLEAN),"Error: Expected boolean but found {}",var.typ.to_string(false));
-                            if stack_size-var.operand == 0 {
-                                writeln!(f, "   cmp {} [{}], 0",size_to_nasm_type(var.typ.get_size(program)),program.stack_ptr())?;
-                            }
-                            else {
-                                writeln!(f, "   cmp {} [{}+{}], 0",size_to_nasm_type(var.typ.get_size(program)),program.stack_ptr(),stack_size-var.operand)?;
-                            }
-                        },
-                        OfP::CONST(val) => {
-                            writeln!(f, "   mov rax, {}",val.get_num_data())?;
-                            writeln!(f, "   cmp rax, 0")?;
-                        },
-                        OfP::RESULT(func, args) => {
-                            let sp_taken = nasm_x86_64_prep_args(program, build, f, args, stack_size, &local_vars)?;
-                            writeln!(f, "   call {}{}",program.architecture.func_prefix,func)?;
-                            if sp_taken-stack_size > 0 {
-                                writeln!(f, "   add {}, {}",program.stack_ptr(),sp_taken-stack_size)?
-                            }
-                            writeln!(f, "   cmp {}, 0",Register::AL.to_string())?;
-                        },
-                        _ => todo!()
-                    }
-                    writeln!(f, "   jz .WHILE_SCOPE_END_{}",inst_count)?;
-                }
-                else {
-                    let val = condition.unwrap_expr();
-                    com_assert!(loc,val.op.is_boolean(),"Error: Condition MUST be of type boolean but encountered op {}",val.op.to_string());
-                    match val.op {
-                        Op::EQ   => {
-                            let oreg1 = val.left.as_ref().unwrap().LEIRnasm(vec![Register::RAX, Register::RBX, Register::RCX], f, program, build, &local_vars, &bufs, stack_size, loc)?;
-                            let tmp = Register::RSI.to_byte_size(oreg1[0].size());
-                            writeln!(f, "   mov {}, {}",tmp.to_string(),oreg1[0].to_string())?;
-                            let oreg2 = val.right.as_ref().unwrap().LEIRnasm(vec![Register::RAX, Register::RBX, Register::RCX], f, program, build, &local_vars, &bufs, stack_size, loc)?;
-                            writeln!(f, "   cmp {}, {}",tmp.to_string(),oreg2[0].to_byte_size(tmp.size()).to_string())?;
-                            writeln!(f, "   jnz .WHILE_SCOPE_END_{}",inst_count)?;
-                        },
-                        Op::NEQ  => {
-                            let oreg1 = val.left.as_ref().unwrap().LEIRnasm(vec![Register::RAX, Register::RBX, Register::RCX], f, program, build, &local_vars, &bufs, stack_size, loc)?;
-                            let tmp = Register::RSI.to_byte_size(oreg1[0].size());
+                //     match val {
+                //         OfP::REGISTER(reg) => {
+                //             let reg = reg.to_byte_size(1);
+                //             writeln!(f, "   cmp {}, 0",reg.to_string())?;
+                //         },
+                //         OfP::LOCALVAR(v) => {
+                //             let var = get_local_build(&local_vars, v).unwrap();
+                //             com_assert!(loc,var.typ.weak_eq(&VarType::BOOLEAN),"Error: Expected boolean but found {}",var.typ.to_string(false));
+                //             if stack_size-var.operand == 0 {
+                //                 writeln!(f, "   cmp {} [{}], 0",size_to_nasm_type(var.typ.get_size(program)),program.stack_ptr())?;
+                //             }
+                //             else {
+                //                 writeln!(f, "   cmp {} [{}+{}], 0",size_to_nasm_type(var.typ.get_size(program)),program.stack_ptr(),stack_size-var.operand)?;
+                //             }
+                //         },
+                //         OfP::CONST(val) => {
+                //             writeln!(f, "   mov rax, {}",val.get_num_data())?;
+                //             writeln!(f, "   cmp rax, 0")?;
+                //         },
+                //         OfP::RESULT(func, args) => {
+                //             let sp_taken = nasm_x86_64_prep_args(program, build, f, args, stack_size, &local_vars)?;
+                //             writeln!(f, "   call {}{}",program.architecture.func_prefix,func)?;
+                //             if sp_taken-stack_size > 0 {
+                //                 writeln!(f, "   add {}, {}",program.stack_ptr(),sp_taken-stack_size)?
+                //             }
+                //             writeln!(f, "   cmp {}, 0",Register::AL.to_string())?;
+                //         },
+                //         _ => todo!()
+                //     }
+                //     writeln!(f, "   jz .WHILE_SCOPE_END_{}",inst_count)?;
+                // }
+                // else {
+                //     let val = condition.unwrap_expr();
+                //     com_assert!(loc,val.op.is_boolean(),"Error: Condition MUST be of type boolean but encountered op {}",val.op.to_string());
+                //     match val.op {
+                //         Op::EQ   => {
+                //             let oreg1 = val.left.as_ref().unwrap().LEIRnasm(vec![Register::RAX, Register::RBX, Register::RCX], f, program, build, &local_vars, &bufs, stack_size, loc)?;
+                //             let tmp = Register::RSI.to_byte_size(oreg1[0].size());
+                //             writeln!(f, "   mov {}, {}",tmp.to_string(),oreg1[0].to_string())?;
+                //             let oreg2 = val.right.as_ref().unwrap().LEIRnasm(vec![Register::RAX, Register::RBX, Register::RCX], f, program, build, &local_vars, &bufs, stack_size, loc)?;
+                //             writeln!(f, "   cmp {}, {}",tmp.to_string(),oreg2[0].to_byte_size(tmp.size()).to_string())?;
+                //             writeln!(f, "   jnz .WHILE_SCOPE_END_{}",inst_count)?;
+                //         },
+                //         Op::NEQ  => {
+                //             let oreg1 = val.left.as_ref().unwrap().LEIRnasm(vec![Register::RAX, Register::RBX, Register::RCX], f, program, build, &local_vars, &bufs, stack_size, loc)?;
+                //             let tmp = Register::RSI.to_byte_size(oreg1[0].size());
                             
-                            writeln!(f, "   mov {}, {}",tmp.to_string(),oreg1[0].to_string())?;
+                //             writeln!(f, "   mov {}, {}",tmp.to_string(),oreg1[0].to_string())?;
 
-                            let oreg2 = val.right.as_ref().unwrap().LEIRnasm(vec![Register::RAX, Register::RBX, Register::RCX], f, program, build, &local_vars, &bufs, stack_size, loc)?;
-                            writeln!(f, "   cmp {}, {}",tmp.to_string(),oreg2[0].to_byte_size(tmp.size()).to_string())?;
-                            writeln!(f, "   jz .WHILE_SCOPE_END_{}",inst_count)?;
-                        },
-                        Op::GT   => {
-                            let oreg1 = val.left.as_ref().unwrap().LEIRnasm(vec![Register::RAX, Register::RBX, Register::RCX], f, program, build, &local_vars, &bufs, stack_size, loc)?;
-                            let tmp = Register::RSI.to_byte_size(oreg1[0].size());
-                            writeln!(f, "   mov {}, {}",tmp.to_string(),oreg1[0].to_string())?;
-                            let oreg2 = val.right.as_ref().unwrap().LEIRnasm(vec![Register::RAX, Register::RBX, Register::RCX], f, program, build, &local_vars, &bufs, stack_size, loc)?;
-                            writeln!(f, "   cmp {}, {}",tmp.to_string(),oreg2[0].to_byte_size(tmp.size()).to_string())?;
-                            writeln!(f, "   jle .WHILE_SCOPE_END_{}",inst_count)?;
-                        },
-                        Op::GTEQ => {
-                            let oreg1 = val.left.as_ref().unwrap().LEIRnasm(vec![Register::RAX, Register::RBX, Register::RCX], f, program, build, &local_vars, &bufs, stack_size, loc)?;
-                            let tmp = Register::RSI.to_byte_size(oreg1[0].size());
-                            writeln!(f, "   mov {}, {}",tmp.to_string(),oreg1[0].to_string())?;
-                            let oreg2 = val.right.as_ref().unwrap().LEIRnasm(vec![Register::RAX, Register::RBX, Register::RCX], f, program, build, &local_vars, &bufs, stack_size, loc)?;
-                            writeln!(f, "   cmp {}, {}",tmp.to_string(),oreg2[0].to_byte_size(tmp.size()).to_string())?;
-                            writeln!(f, "   jl .WHILE_SCOPE_END_{}",inst_count)?;
-                        },
-                        Op::LT   => {
-                            let oreg1 = val.left.as_ref().unwrap().LEIRnasm(vec![Register::RAX, Register::RBX, Register::RCX], f, program, build, &local_vars, &bufs, stack_size, loc)?;
-                            let tmp = Register::RSI.to_byte_size(oreg1[0].size());
-                            writeln!(f, "   mov {}, {}",tmp.to_string(),oreg1[0].to_string())?;
-                            let oreg2 = val.right.as_ref().unwrap().LEIRnasm(vec![Register::RAX, Register::RBX, Register::RCX], f, program, build, &local_vars, &bufs, stack_size, loc)?;
-                            writeln!(f, "   cmp {}, {}",tmp.to_string(),oreg2[0].to_byte_size(tmp.size()).to_string())?;
-                            writeln!(f, "   jge .WHILE_SCOPE_END_{}",inst_count)?;
-                        },
-                        Op::LTEQ => {
-                            let oreg1 = val.left.as_ref().unwrap().LEIRnasm(vec![Register::RAX, Register::RBX, Register::RCX], f, program, build, &local_vars, &bufs, stack_size, loc)?;
-                            let tmp = Register::RSI.to_byte_size(oreg1[0].size());
-                            writeln!(f, "   mov {}, {}",tmp.to_string(),oreg1[0].to_string())?;
-                            let oreg2 = val.right.as_ref().unwrap().LEIRnasm(vec![Register::RAX, Register::RBX, Register::RCX], f, program, build, &local_vars, &bufs, stack_size, loc)?;
-                            writeln!(f, "   cmp {}, {}",tmp.to_string(),oreg2[0].to_byte_size(tmp.size()).to_string())?;
-                            writeln!(f, "   jg .WHILE_SCOPE_END_{}",inst_count)?;
-                        },
-                        Op::NOT  => todo!(),
-                        _ => panic!("Unreachable")
-                    }
-                }
-
-                
+                //             let oreg2 = val.right.as_ref().unwrap().LEIRnasm(vec![Register::RAX, Register::RBX, Register::RCX], f, program, build, &local_vars, &bufs, stack_size, loc)?;
+                //             writeln!(f, "   cmp {}, {}",tmp.to_string(),oreg2[0].to_byte_size(tmp.size()).to_string())?;
+                //             writeln!(f, "   jz .WHILE_SCOPE_END_{}",inst_count)?;
+                //         },
+                //         Op::GT   => {
+                //             let oreg1 = val.left.as_ref().unwrap().LEIRnasm(vec![Register::RAX, Register::RBX, Register::RCX], f, program, build, &local_vars, &bufs, stack_size, loc)?;
+                //             let tmp = Register::RSI.to_byte_size(oreg1[0].size());
+                //             writeln!(f, "   mov {}, {}",tmp.to_string(),oreg1[0].to_string())?;
+                //             let oreg2 = val.right.as_ref().unwrap().LEIRnasm(vec![Register::RAX, Register::RBX, Register::RCX], f, program, build, &local_vars, &bufs, stack_size, loc)?;
+                //             writeln!(f, "   cmp {}, {}",tmp.to_string(),oreg2[0].to_byte_size(tmp.size()).to_string())?;
+                //             writeln!(f, "   jle .WHILE_SCOPE_END_{}",inst_count)?;
+                //         },
+                //         Op::GTEQ => {
+                //             let oreg1 = val.left.as_ref().unwrap().LEIRnasm(vec![Register::RAX, Register::RBX, Register::RCX], f, program, build, &local_vars, &bufs, stack_size, loc)?;
+                //             let tmp = Register::RSI.to_byte_size(oreg1[0].size());
+                //             writeln!(f, "   mov {}, {}",tmp.to_string(),oreg1[0].to_string())?;
+                //             let oreg2 = val.right.as_ref().unwrap().LEIRnasm(vec![Register::RAX, Register::RBX, Register::RCX], f, program, build, &local_vars, &bufs, stack_size, loc)?;
+                //             writeln!(f, "   cmp {}, {}",tmp.to_string(),oreg2[0].to_byte_size(tmp.size()).to_string())?;
+                //             writeln!(f, "   jl .WHILE_SCOPE_END_{}",inst_count)?;
+                //         },
+                //         Op::LT   => {
+                //             let oreg1 = val.left.as_ref().unwrap().LEIRnasm(vec![Register::RAX, Register::RBX, Register::RCX], f, program, build, &local_vars, &bufs, stack_size, loc)?;
+                //             let tmp = Register::RSI.to_byte_size(oreg1[0].size());
+                //             writeln!(f, "   mov {}, {}",tmp.to_string(),oreg1[0].to_string())?;
+                //             let oreg2 = val.right.as_ref().unwrap().LEIRnasm(vec![Register::RAX, Register::RBX, Register::RCX], f, program, build, &local_vars, &bufs, stack_size, loc)?;
+                //             writeln!(f, "   cmp {}, {}",tmp.to_string(),oreg2[0].to_byte_size(tmp.size()).to_string())?;
+                //             writeln!(f, "   jge .WHILE_SCOPE_END_{}",inst_count)?;
+                //         },
+                //         Op::LTEQ => {
+                //             let oreg1 = val.left.as_ref().unwrap().LEIRnasm(vec![Register::RAX, Register::RBX, Register::RCX], f, program, build, &local_vars, &bufs, stack_size, loc)?;
+                //             let tmp = Register::RSI.to_byte_size(oreg1[0].size());
+                //             writeln!(f, "   mov {}, {}",tmp.to_string(),oreg1[0].to_string())?;
+                //             let oreg2 = val.right.as_ref().unwrap().LEIRnasm(vec![Register::RAX, Register::RBX, Register::RCX], f, program, build, &local_vars, &bufs, stack_size, loc)?;
+                //             writeln!(f, "   cmp {}, {}",tmp.to_string(),oreg2[0].to_byte_size(tmp.size()).to_string())?;
+                //             writeln!(f, "   jg .WHILE_SCOPE_END_{}",inst_count)?;
+                //         },
+                //         Op::NOT  => todo!(),
+                //         _ => panic!("Unreachable")
+                //     }
+                // }
                 let binst = inst_count.clone();
                 local_vars.push(HashMap::new());
                 writeln!(f, "   add {}, {}",program.stack_ptr(),shadow_space)?;
