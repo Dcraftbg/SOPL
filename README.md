@@ -597,4 +597,5 @@ Currently supported independent libs:
   [x] strlib.spl
   [ ] chrlib.spl (Not done because we don't have boolean operations nor chars working yet)
   [/] strnum.spl - it isn't entirely finished, it requires itostr, but it does have strtoi
- 
+- mathlib:
+  [/] mathlib.spl - its still in development, but does have some features like floorSqrt
