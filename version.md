@@ -1,4 +1,4 @@
-**(Latest patch versions in github history and at the top of Change Log)**
+**(Latest patch versions in github history and at the top of Change Log) - note that they are not noted with a version number until that version is totally complete**
 
 Newest Version: [0.16.3A](#0163a)
 # Manual:
@@ -11,7 +11,7 @@ Newest Version: [0.16.3A](#0163a)
   - [0.14A](#014a)
   - [0.13.3A](#0133a)
     - [0.13.2A](#0132a)
-    - [0.13.1A](#0131a)
+    - [0.13.1A](#0131a) 
     - [0.13A](#013a)
   - [0.12.5A](#0125a) 
     - [0.12.4A](#0124a) 
@@ -72,12 +72,11 @@ Newest Version: [0.16.3A](#0163a)
    - Removed UUID dependency cuz why the fuck did I have it in the first place?
    - Sped up compile time by a TON (no need to generate stupid UUIDs)
    - Added -i flag for quicker including
-   
  ## 0.15.2A
    - Added cfg support with lighthouse for the examples architectures
  ## 0.15.1A
    - Various bug fixes
-   - Added binary operators << >> |
+   - Added binary operators << >> | &
    - Added todos for ~ operator
  ## 0.15A
    - Added mathlib.spl
@@ -150,7 +149,7 @@ Newest Version: [0.16.3A](#0163a)
    - Added flags for architectures
    - Added DLL importing (currently only works as extern)
    - Added DLL exporting (currently only works as global)
-   - Removed auto-exporting of functions (you need to do dll_export to make them global now)
+   - Removed auto-exporting of functions (you need to do dll_export to make them global now, **although this was reverted later on**)
  ## 0.11.7A
    - Fixed a few bugs to do with string UUID overloading
    - Added pointers with types (*char, **int, etc.)

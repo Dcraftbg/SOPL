@@ -14,7 +14,7 @@ For more info on current versions checkout [version.md](version.md)
 
 For more info on what im currently working on checkout the recently started trello page: https://trello.com/b/OjR79UQt/sopl
 
-**Manual:**
+## Manual
 Made for easy navigation around the README.md
 - [Quickstart](#quickstart)
 - [Build platforms](#build)
@@ -55,15 +55,15 @@ Another thing worth noting:
 ```
 [NOTE] No architecture found for {OS}_{Arch}! Please specify the output architecture!
 ```
-It is probably because the compiler can't find a proper architecture for your current operating system and Arch. To fix this you can use the -arc flag with | and the path to the architecture configuration (examples [here](examples/arcs/), This should fix the error although it could cause issues if the configuration isn't correct) Like so:
+It is probably because the compiler can't find a proper architecture for your current operating system and Arch. To fix this you can use the -arc flag with - and the path to the architecture configuration (examples [here](examples/arcs/), This should fix the error although it could cause issues if the configuration isn't correct) Like so:
 ```
-cargo run nasm_x86_64 myprogram.spl -arc | myarcconfig.json 
+sopl myprogram.spl -arc - myarcconfig.json 
 ```
 
 ## Build
 > Build platforms: 
 
-Because of how the project is structured, it can easily be expanded to not only NASM assembly but to virtually any stack machine out there.
+Because of how the project is structured, it can easily be expanded to not only NASM assembly but to virtually any assembler out there.
 Current supports include:
 - [x] NASM x86 64
 - [ ] FASM x86 64
@@ -74,16 +74,10 @@ Ideas that are left for discussion and further expansion:
 - [ ] ARM assembly
 - [ ] C
 
-[NOTE] that whilst registers are really powerful and useful for building with x86 64, they might get 'discontinued' after Java integration (theoretical Java integration). They will have support for nasm but in the future their usage will be warned and their features replaced by more modern ones. Deprecation isn't expected any time soon but when the majority of the boxes under 'plans' are ticked off you probably will expect deprecation of them. 
-For anyone wandering things like interrupts are probably going to be handled like so:
-```sopl
-interrupt 128 
-```
-^ Regarding previous [NOTE], functions now no longer take in arguments through the stack and have more modern syntax, lowering the practical usage of registers even more [0.11A](version.md#011a)
 ## Requirements
-**NASM**:
+### NASM
 - Any nasm version that can support 64 bit or 32 bit assembly.
-- Any linker or executable builder (gcc, ld, etc.)
+- Any linker or builder (gcc, ld, etc.) - (note that whilst you can use libc, you can also use native features: i.e. syscalls on Linux (checkout the linux folder under libs) and Windows dll functions - not yet fully implemented)
 
 ## Tools
 SOPL has a few tools to make your life easier!
@@ -98,10 +92,10 @@ One other tool that isn't as major is sopl_test which is generally only recommen
 ## Flags and Versions
 
 Whenever something gets added you will see that 99% of the time [version.md](version.md) gets updated. Thats because it contains the necessary information about any new versions that come out.
-Whilst the README is updated oftenly, for the most modern features you might have to check out the [version.md](version.md) since it contains any information on the latest patches and updates. 
+Whilst the README is updated oftenly, for the most modern features you might have to check out the [version.md](version.md) since it contains information on the latest patches and updates. 
 It also gives you a timeline of the most recent changes (newest -> oldest).
 
-Flags are really important and if not updated here, you can always check out what flag support there is by just running the compiler without anything (This will display information such as the usage, the currently supported builds and any flags you might want to use).
+Flags are really important and if not updated here, you can always check out what flag support there is by just running the compiler without anything or running -usage (This will display information such as the usage, the currently supported builds and any flags you might want to use).
 
 As of [0.16A](version.md#0122a) flags consist of:
 ```
@@ -133,17 +127,45 @@ sopl [flags]
 - [x] includes
 - [x] functions
 - [x] constants
-- [ ] control flow
+- [x] variables
+- [/] types
+  - [x] char
+  - [x] short
+  - [x] int
+  - [x] long
+  - [x] size_t
+  - [ ] float
+  - [ ] double
+- [/] control flow
   - [x] if statements
   - [x] else statements
   - [x] while statements
   - [ ] else if statements
-  - [ ] for statements
+  - [ ] for statements        -> debating which for loop to implement, C style or iterator like.
 - [x] locals
 - [x] type checking
   - [x] Function type checking
+  - [x] External type checking
+- [/] Optimization
+  - [x] Removal of unused strings
+  - [x] Removal of unused functions
+  - [x] Removal of unused externals
+  - [ ] Removal of unused variables
+- [/] casting
+  - [x] Casting for constants
+  - [ ] Casting for variables
+- [/] Evaluation
+  - [x] Variables
+  - [x] Conditions
+  - [ ] Constants -> it still uses the old "evalutation": i.e. Push stuff onto a virtual stack and pop them off with each operation, which fit the style back then, but now is utterly useless
+  - [ ] Function arguments
+- [ ] boolean operations || and &&
+- [ ] returning values bigger than 8 bytes
+- [ ] module system
+- [ ] namespaces
 - [ ] structs
 - [ ] struct methods
+- [ ] non-static struct methods
 - [ ] interfaces
 
 ## Highlighting
@@ -167,6 +189,7 @@ func main() {
   printf("Hello World!"c);
 }
 ```
+
 ### Locals
 - [0.12A](version.md#012a) Added expressions
 - [0.11.6A](version.md#0116a) Made local variables be on the stack and merged parameters with variables
@@ -180,13 +203,10 @@ let (name): (type)
 Local variables are a core part of any programming language. SOPL is no exception. Define a variable like this and then you can use it throughout your code later.
 **Example(s)**
 ```sopl
-let a: int;
-let b: int;
-a = 5+4;
-b = 4+3;
+let a: int = 5+4;
+let b: int = 4+3;
 if a == b {
-  let c: int;
-  c = a+b;
+  let c: int = a+b;
   printf("a=%d, b=%d, c=%d",a,b,c)
 }
 else {
@@ -202,7 +222,7 @@ Pre 0.1A
 const (name)<:(type)> = (your constant expersion goes here) ;
 ```
 
-As in many other languages, Sopl also has a constant system. Constants are expressions that are evaluated at compile time and are therefor very useful. The expression is a set of operations that the program will evaluate. The quickest way to understand how they work is to check out the examples:
+As in many other languages, Sopl also has a constant system. Constants are expressions that are evaluated at compile time and are therefor very useful. The expression is a set of operations that the program will evaluate. The quickest way to understand how they work is to checkout the examples:
 
 ```sopl
 const World = "World"
@@ -213,7 +233,7 @@ const C = A B + ;
 const HelloWorldNine = HelloWorld C + ; // Concatenates the integers and strings together
 ```
 
-In a constants expression can only be things that can be evaluated at compile time, such as Strings, Integers, Longs and other constants. If you try to use something like a function it would tell you that it doesn't recognize it as a constant value. 
+Everything within the expression must be able to be evaluated at compile time, such as Strings, Integers, Longs and other constants. If you try to use something like a function it would tell you that it doesn't recognize it as a constant value. 
 Whilst local variables had a major revamp to their Expression system in 0.12A, constants are still stuck in the old ways of handling things. That is planned to change in the near future
 
 ### Expressions
@@ -225,12 +245,17 @@ Any OfP by definition is an Expression of type 'value'. If you add an operation 
 a = b; // b is an Expression of type 'value'
 a = b+c*d; // b+c*d is an Expression of type 'expression tree'
 ```
-Expressions are really useful but are also unstable currently if they are too complicated. Most of the expressions you'll see are going to be simple and can easily be evaluated, however if the expression is too complicated the program won't compile and it will require you to put the values under temporary variables.
+Expressions are really useful but are also unstable currently if they are too complicated. Most of the expressions you'll see are going to be simple and can easily be evaluated, however if the expression is too complicated the program won't compile and it will require you to put the values under temporary variables - currently there is no recorded case of this happening, however it could very well exist somewhere.
 
 ### Including
+- [0.16A](version.md#016a) Added the -i flag for making a shortcut with including
 - [0.5.1A](version.md#051a) Fixed bug where constants weren't being included 
 - Pre 0.1A Added including
 
+Including works in the same way as in other programming languages like C and C++. It evaluates the symbols inside of the file given, and inserts them into the current build. Whilst they are pretty neat, as of today, they can lead to things like:
+- include loops
+- self including files
+etc.
 **Syntax**
 ```spl
 include "Path/To/File"
@@ -239,7 +264,7 @@ Functions.spl:
 ```spl
 extern "C" puts(*char : int)
 func sayHello() {
-  printf("Hello World!"c)
+  puts("Hello World!")
 }
 ```
 HelloWorld.spl:
@@ -251,9 +276,9 @@ func main() {
 ```
 
 ### Functions
-- 0.12.1A Added 'result' as an OfP
-- 0.11A Changed how functions are called with the introduction of argument contracts
-- 0.6A Changed to now have named parameters
+- [0.12.1A](version.md#0121a) Added 'result' as an OfP
+- [0.11A](version.md#011a) Changed how functions are called with the introduction of argument contracts
+- [0.6A](version.md#06a) Changed to now have named parameters
 - Pre 0.1A
 
 **Syntax**:
@@ -266,7 +291,7 @@ Functions, just like in other languages have a name and a body. In sopl, you hav
 
 A contract is a way to tell the type checker what to expect to have passed to it before calling the function.
 The function contract contains:
-(Input parameters separated by , : Output parameters separated by ,)
+(Input parameters separated by , : Output parameter)
 
 Some things that should be noted are that you really really really shouldn't be using more than one Output parameter type, since the language doesn't support multiple returns (Outputs were kept this way because of the old x86 days and the return stack).
 Inside of functions you can use the "return" keyword to return although it is automatically done for you at the end of the functions declaration that don't have a return type.
@@ -368,11 +393,12 @@ func main() {
   @makelabel("break")
 }
 ```
+One thing to note: the compiler is still a one pass compiler, collection of labels is done with its own system
 
 ### Strings
-- Changed Strings to automatically be CStrings and added s as a way to have sized strings once again - it was too annoying having to type ""c every couple of minutes
-- Strings  -> Pre 0.1A 
-- CStrings -> 0.2A
+- [0.12.5A](version.md#0125a)Changed Strings to automatically be CStrings and added s as a way to have sized strings once again - it was too annoying having to type ""c every couple of minutes
+- [0.2A](version.md#02a) CStrings 
+- Pre 0.1A Strings
 
 In sopl there are 2 different types of strings. There are:
 ```
@@ -410,8 +436,8 @@ func main(){
 
 
 ### Extern
-- Changed syntax in [0.11A](version.md#011a)
-- Added Files related in [0.7A](version.md#07a):
+- [0.11A](version.md#011a) Changed syntax in 
+- [0.7A](version.md#07a) Added Files related in:
   - [stdio.spl](src/C/stdio.spl)
   - [stdlib.spl](src/C/stdlib.spl)
 - Added in Pre 0.1A
@@ -420,7 +446,7 @@ func main(){
 ```
 extern [TYPE] (name) <(extern contract)>;
 ```
-Extern is a way to access outside features inside the language or link to functions from other languages such as IO implementations from C etc.
+Extern is a way to access outside features inside the language or link to functions from other languages such as libc from C etc.
 It has to be noted here that using extern on its own can sometimes lead to unexpected behavior and
 might not be available for the current mode you are running in like if you try to link to standard C functions when you are in JAVA mode.
 
@@ -441,7 +467,7 @@ func main(){
 Buffers can be declared both on the stack and as global variable. To declare a global buffer you can use the following syntax:
 **Syntax:**
 ```
-let name: [(type),(size)];
+let name: [<type>,<size>];
 ```
 **Example(s)**:
 Taken from [buffers.spl](examples/buffers.spl)
@@ -467,6 +493,7 @@ func main(){
 }
 ```
 ### Interrupts
+- [Unknown] Added syscall as a replacement fo interrupt
 - [0.4A](version.md#04a) Added interrupts
   
 Interrupts are essential for anything you build on platforms such as linux if you don't want to use libc. Whilst they aren't useful as much on windows machines WSL could be used to make linux syscalls into something which can run on windows.
@@ -478,8 +505,8 @@ interrupt 128
 
 ### Registers
 - Registers are now officially "deprecated" - using them throughout your code is fine, but it isn't recommended as it may cause a lot of unwanted bugs
-- Added float registers and the last remaining r\<n\> registers in [0.11A](version.md#011a)
-- Added the majority of the registers Pre 0.1A
+- [0.11A](version.md#011a) Added float registers and the last remaining registers.
+- Pre 0.1A Added the majority of the registers
 
 Current register support:
 - [x] RAX
@@ -532,9 +559,6 @@ All of their sub types respectfully:
 - [x] XMM8
 - [x] XMM9
 
-
-
-**[NOTE] RAX is used for returning longs/int/shorts/chars for C functions and your functions so usage of it outside of that is not advised** 
 **Syntax**
 ```
 (RegisterName) (Op | RegisterName) [RegisterName | Op]
