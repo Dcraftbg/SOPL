@@ -1,0 +1,12 @@
+include "../../libs/libc/stdio.spl"
+func in_func() {
+    printf("Hello %s, I am %s, This is my brother %s, Im %d years old, and he is %d years old\na: %d\nb: %d\nc: %d\nd: %d\ne: %d\nf: %d\ng: %d\nchar: %c\nchar2: %c\n","John","Joe","Dave",20,18,1,2,3,4,5,6,7,97,98);
+}
+func main() {
+    in_func();
+    //printf("Hello %s, I am %s, This is my brother %s, Im %d years old, and he is %d years old\na: %d\nb: %d\nc: %d\nd: %d\ne: %d\nf: %d\ng: %d\nh:",john,joe,dave,my_age,bro_age,a,b,c,d,e,f);
+    //printf("Hello %s, I am %s, This is my brother %s, Im %d years old, and he is %d years old\na: %d\nb: %d\nc: %d\nd: %d\ne: %d\nf: %d\n",john,joe,dave,my_age,bro_age,a,b,c,d,e,f);
+    //printf("Hello %s, I am %s, This is my brother %s, Im %d years old, and he is %d years old\na: %d\nb: %d\nc: %d\nd: %d\ne: %d\nf: %d\ng: %d\nchar: %c\nchar2: %c\n","John","Joe","Dave",20,18,1,2,3,4,5,6,7,97,98);
+    //printf("Hello %s, I am %s, This is my brother %s, Im %d years old, and he is %d years old\na: %d\nb: %d\nc: %d\ne: %d\nf: %d\n","John","Joe","Dave",20,18,1,2,3,4,5,6);
+    //Hello John, I am Joe, This is my brother Dave, Im 20 years old, and he is 18 years old c: 97, a: 1 b: 2 c: 3 d: 4 e: 5
+}

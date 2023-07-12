@@ -6095,6 +6095,7 @@ fn nasm_x86_64_prep_args(program: &CmdProgram, build: &BuildProgram, f: &mut Fil
         for iargs in contract.iter().rev() {
             if program.architecture.options.argumentPassing.custom_unwrap().nums_ptrs.is_some() && int_passed_count >= program.architecture.options.argumentPassing.custom_unwrap().nums_ptrs.as_ref().unwrap().len() {
                 offset += iargs.var_type(build, local_vars,buffers).unwrap().get_size(program);
+                offset += offset%8;
             }
             match iargs.var_type(build, local_vars,buffers).unwrap()  {
                 VarType::CHAR    | VarType::SHORT   | VarType::BOOLEAN | VarType::INT     | VarType::LONG    | VarType::PTR(_)  => int_passed_count+=1,
@@ -6122,6 +6123,7 @@ fn nasm_x86_64_prep_args(program: &CmdProgram, build: &BuildProgram, f: &mut Fil
                 
                 if program.architecture.options.argumentPassing == ArcPassType::PUSHALL{
                     stack_size += oreg.size();
+                    stack_size += stack_size%8;
                     writeln!(f, "   mov {} [{}-{}], {}",size_to_nasm_type(oreg.size()), program.stack_ptr(),stack_size-org_stack_size, oreg.to_string())?
                 }
                 else {
@@ -6132,36 +6134,38 @@ fn nasm_x86_64_prep_args(program: &CmdProgram, build: &BuildProgram, f: &mut Fil
                         }
                         else {
                             stack_size += oreg.size();
-                            if additional_space-offset+oreg.size() < shadow_space {
-                                writeln!(f, "   mov {} [{}+{}], {}",size_to_nasm_type(oreg.size()), program.stack_ptr(), shadow_space-(additional_space-offset+oreg.size()), oreg.to_string())?;
+                            stack_size += stack_size%8;
+                            if additional_space+8-offset < shadow_space {
+                                writeln!(f, "   mov {} [{}+{}], {}",size_to_nasm_type(oreg.size()), program.stack_ptr(), shadow_space-(additional_space-offset)-8, oreg.to_string())?;
                             }
-                            else if additional_space-offset+oreg.size() == shadow_space {
+                            else if additional_space+8 -offset == shadow_space {
                                 writeln!(f, "   mov {} [{}], {}",size_to_nasm_type(oreg.size()), program.stack_ptr(), oreg)?
                             }
                             else {
-                                writeln!(f, "   mov {} [{}-{}], {}",size_to_nasm_type(oreg.size()), program.stack_ptr(), additional_space-offset+oreg.size()-shadow_space, oreg.to_string())?;
+                                writeln!(f, "   mov {} [{}-{}], {}",size_to_nasm_type(oreg.size()), program.stack_ptr(), additional_space+8-offset-shadow_space, oreg.to_string())?;
                             }
                             offset-=oreg.size();
-                            
+                            offset-=offset%8;
                         }
                         int_passed_count-=1;
                     }
                     else {
                         stack_size += oreg.size();
+                        stack_size += stack_size%8;
                         writeln!(f, "   mov {} [{}-{}], {}",size_to_nasm_type(oreg.size()), program.stack_ptr(), offset, oreg.to_string())?;
                         offset-=oreg.size();
-                        
+                        offset-=offset%8;
                     }
                 }
             }
             OfP::LOCALVAR(v) => {
                 let var1 = get_local_build(local_vars, v).expect("Unknown local variable parameter");
                 let oreg = Register::RAX.to_byte_size(var1.typ.get_size(program));
-                if stack_size-var1.operand == 0 {
+                if org_stack_size-var1.operand == 0 {
                     writeln!(f, "   mov {}, {} [{}]",oreg.to_string(),size_to_nasm_type(oreg.size()),program.stack_ptr())?;
                 }
                 else {
-                    writeln!(f, "   mov {}, {} [{}+{}]",oreg.to_string(),size_to_nasm_type(oreg.size()),program.stack_ptr(),stack_size-var1.operand)?;
+                    writeln!(f, "   mov {}, {} [{}+{}]",oreg.to_string(),size_to_nasm_type(oreg.size()),program.stack_ptr(),org_stack_size-var1.operand)?;
                 }
                 if program.architecture.options.argumentPassing == ArcPassType::PUSHALL{
                     stack_size += oreg.size();
@@ -6175,25 +6179,27 @@ fn nasm_x86_64_prep_args(program: &CmdProgram, build: &BuildProgram, f: &mut Fil
                         }
                         else {
                             stack_size += oreg.size();
-                            if additional_space-offset+oreg.size() < shadow_space {
-                                writeln!(f, "   mov {} [{}+{}], {}",size_to_nasm_type(oreg.size()), program.stack_ptr(), shadow_space-(additional_space-offset+oreg.size()), oreg.to_string())?;
+                            stack_size += stack_size%8;
+                            if additional_space+8-offset < shadow_space {
+                                writeln!(f, "   mov {} [{}+{}], {}",size_to_nasm_type(oreg.size()), program.stack_ptr(), shadow_space-(additional_space-offset)-8, oreg.to_string())?;
                             }
-                            else if additional_space-offset+oreg.size() == shadow_space {
+                            else if additional_space+8 -offset == shadow_space {
                                 writeln!(f, "   mov {} [{}], {}",size_to_nasm_type(oreg.size()), program.stack_ptr(), oreg)?
                             }
                             else {
-                                writeln!(f, "   mov {} [{}-{}], {}",size_to_nasm_type(oreg.size()), program.stack_ptr(), additional_space-offset+oreg.size()-shadow_space, oreg.to_string())?;
+                                writeln!(f, "   mov {} [{}-{}], {}",size_to_nasm_type(oreg.size()), program.stack_ptr(), additional_space+8-offset-shadow_space, oreg.to_string())?;
                             }
                             offset-=oreg.size();
-                            
+                            offset-=offset%8;
                         }
                         int_passed_count-=1;
                     }
                     else {
                         stack_size += oreg.size();
+                        stack_size += stack_size%8;
                         writeln!(f, "   mov {} [{}-{}], {}",size_to_nasm_type(oreg.size()), program.stack_ptr(),offset, oreg.to_string())?;
                         offset-=oreg.size();
-                        
+                        offset-=offset%8;
                     }
                 }
             }
@@ -6202,8 +6208,10 @@ fn nasm_x86_64_prep_args(program: &CmdProgram, build: &BuildProgram, f: &mut Fil
                 if program.architecture.options.argumentPassing == ArcPassType::PUSHALL ||  program.architecture.options.argumentPassing.custom_get().is_none() ||  program.architecture.options.argumentPassing.custom_unwrap().nums_ptrs.is_none(){
                     for oreg in oregs {
                         stack_size += oreg.size();
+                        stack_size += stack_size%8;
                         writeln!(f, "   mov {} [{}-{}], {}",size_to_nasm_type(oreg.size()), program.stack_ptr(), offset, oreg.to_string())?;
                         offset-=oreg.size();
+                        offset-=offset%8;
                     }
                 }
                 else {
@@ -6215,16 +6223,18 @@ fn nasm_x86_64_prep_args(program: &CmdProgram, build: &BuildProgram, f: &mut Fil
                             }
                             else {
                                 stack_size += oreg.size();
-                                if additional_space-offset+oreg.size() < shadow_space {
-                                    writeln!(f, "   mov {} [{}+{}], {}",size_to_nasm_type(oreg.size()), program.stack_ptr(), shadow_space-(additional_space-offset+oreg.size()), oreg.to_string())?;
+                                stack_size += stack_size%8;
+                                if additional_space+8-offset < shadow_space {
+                                    writeln!(f, "   mov {} [{}+{}], {}",size_to_nasm_type(oreg.size()), program.stack_ptr(), shadow_space-(additional_space-offset)-8, oreg.to_string())?;
                                 }
-                                else if additional_space-offset+oreg.size() == shadow_space {
+                                else if additional_space+8 -offset == shadow_space {
                                     writeln!(f, "   mov {} [{}], {}",size_to_nasm_type(oreg.size()), program.stack_ptr(), oreg)?
                                 }
                                 else {
-                                    writeln!(f, "   mov {} [{}-{}], {}",size_to_nasm_type(oreg.size()), program.stack_ptr(), additional_space-offset+oreg.size()-shadow_space, oreg.to_string())?;
+                                    writeln!(f, "   mov {} [{}-{}], {}",size_to_nasm_type(oreg.size()), program.stack_ptr(), additional_space+8-offset-shadow_space, oreg.to_string())?;
                                 }
                                 offset-=oreg.size();
+                                offset-=offset%8;
                             }
                             int_passed_count-=1;
                         }
@@ -6259,19 +6269,6 @@ fn nasm_x86_64_load_args(f: &mut File, scope: &TCScopeType, build: &BuildProgram
     //let mut offset: usize = 0;
     if program.architecture.options.argumentPassing == ArcPassType::PUSHALL {        
         todo!("Im sure there is a bug to do here with x86 assembly and passing parameters and offsets having to be 8 aligned");
-        
-        //for (_, iarg) in scope.get_contract(build).unwrap().Inputs.iter().rev() {      
-        //    offset+=iarg.get_size(program);
-        //}
-        //for (_, iarg) in scope.get_contract(build).unwrap().Inputs.iter().rev() {
-            //let osize = iarg.get_size(program);
-            //let reg = Register::RAX.to_byte_size(osize);
-            //if offset+shadow_space > 0 {
-            //    writeln!(f, "   mov {}, {} [{}+{}]",reg.to_string(), size_to_nasm_type(osize),program.stack_ptr(),offset+shadow_space)?;
-            //}
-            //writeln!(f, "   mov {} [{}-{}], {}",size_to_nasm_type(osize),program.stack_ptr(),offset,reg.to_string())?;
-            //offset-=osize
-        //};
     }
     else {
         let custom_build = program.architecture.options.argumentPassing.custom_unwrap();
@@ -6285,6 +6282,7 @@ fn nasm_x86_64_load_args(f: &mut File, scope: &TCScopeType, build: &BuildProgram
                 //     offset_of_ins+=8-offset_of_ins%8;
                 // }
                 offset_of_ins += iarg.get_size(program);
+                offset_of_ins += offset_of_ins%8;
             }
             match iarg {
                 VarType::CHAR    | VarType::SHORT   | VarType::BOOLEAN | VarType::INT     | VarType::LONG    | VarType::PTR(_)  => int_ptr_count+=1,
@@ -6292,9 +6290,9 @@ fn nasm_x86_64_load_args(f: &mut File, scope: &TCScopeType, build: &BuildProgram
             }
         }
         
-        if offset_of_ins%8 > 0 {
-            offset_of_ins+=offset_of_ins%8;
-        }
+        //if offset_of_ins%8 > 0 {
+        //    offset_of_ins+=offset_of_ins%8;
+        //}
         let mut offset: usize = 0;
         for (_, iarg) in scope.get_contract(build).unwrap().Inputs.iter().rev() {
             if custom_build.nums_ptrs.is_some() && custom_build.nums_ptrs.as_ref().unwrap().len() > int_ptr_count-1 {
@@ -6325,6 +6323,7 @@ fn nasm_x86_64_load_args(f: &mut File, scope: &TCScopeType, build: &BuildProgram
                 //}
                 
                 offset_of_ins-=osize;
+                offset_of_ins-=offset_of_ins%8;
                 int_ptr_count-=1
             }
         };
