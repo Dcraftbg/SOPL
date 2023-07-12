@@ -674,7 +674,7 @@ impl Op {
     }
     fn is_boolean(&self) -> bool {
         match self {
-            Self::EQ   | Self::NEQ | Self::GT | Self::LT | Self::GTEQ | Self::LTEQ | Self::OR | Self::AND => true,
+            Self::EQ   | Self::NEQ | Self::GT | Self::LT | Self::GTEQ | Self::LTEQ | Self::OR | Self::AND | Self::NOT => true,
             _ => false
         }
     }
@@ -936,14 +936,16 @@ impl Expression {
                         right.jumpifn_nasm_x86_64(&and_false, f, program, build, loc, stack_size, local_vars, buffers, binst, expr_count+2)?;
                         writeln!(f, "   jmp {}",label)?;
                         writeln!(f, "{}_FALSE:",and_end)?;
-                        
-                        
                     }
                     Op::OR => {
                         let left = con.left.as_ref().unwrap();
                         let right = con.right.as_ref().unwrap();
                         left.jumpif_nasm_x86_64(label, f, program, build, loc, stack_size, local_vars, buffers, binst, expr_count+1)?;
                         right.jumpif_nasm_x86_64(label, f, program, build, loc, stack_size, local_vars, buffers, binst, expr_count+2)?;
+                    }
+                    Op::NOT => {
+                        let right = con.right.as_ref().unwrap();
+                        right.jumpifn_nasm_x86_64(label, f, program, build, loc, stack_size, local_vars, buffers, binst, expr_count+1)?;
                     }
                     _ => todo!("Unhandled")
                 }
@@ -1176,6 +1178,10 @@ impl Expression {
                         let right = con.right.as_ref().unwrap();
                         left.jumpifn_nasm_x86_64(label, f, program, build, loc, stack_size, local_vars, buffers, binst, expr_count+1)?;
                         right.jumpifn_nasm_x86_64(label, f, program, build, loc, stack_size, local_vars, buffers, binst, expr_count+2)?;
+                    }
+                    Op::NOT => {
+                        let right = con.right.as_ref().unwrap();
+                        right.jumpif_nasm_x86_64(label, f, program, build, loc, stack_size, local_vars, buffers, binst, expr_count+1)?;
                     }
                     _ => todo!("Unhandled")
                 }
@@ -1864,9 +1870,11 @@ impl ExprTree {
 
             },
             Op::NOT   => {
-                todo!("Not is not yet implemented");
-                
-
+                let right = self.right.as_ref().unwrap();
+                let res = right.LEIRnasm(regs.clone(), f, program, build, local_vars, buffers, stack_size, loc, binst, expr_count)?;
+                writeln!(f, "  cmp {}, 0",res[0])?;
+                writeln!(f, "  sete {}",regs[0].to_byte_size(1))?;
+                o = vec![regs[0].to_byte_size(1)]
             },
             Op::BAND => {
                 if let Some(_) = self.left.as_ref() {
