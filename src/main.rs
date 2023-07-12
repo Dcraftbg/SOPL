@@ -1161,6 +1161,22 @@ impl Expression {
                         writeln!(f, "   cmp {}, {}",reg,right_regs[0])?;
                         writeln!(f, "   jg {}",label)?;
                     }
+                    Op::AND => {
+                        let left = con.left.as_ref().unwrap();
+                        let right = con.right.as_ref().unwrap();
+                        let and_end = format!(".AND_CONDITION_{}_{}",binst,expr_count);
+                        let and_false = and_end.clone()+"_TRUE";
+                        left.jumpif_nasm_x86_64(&and_false, f, program, build, loc, stack_size, local_vars, buffers, binst, expr_count+1)?;
+                        right.jumpif_nasm_x86_64(&and_false, f, program, build, loc, stack_size, local_vars, buffers, binst, expr_count+2)?;
+                        writeln!(f, "   jmp {}",label)?;
+                        writeln!(f, "{}_TRUE:",and_end)?;   
+                    }
+                    Op::OR => {
+                        let left = con.left.as_ref().unwrap();
+                        let right = con.right.as_ref().unwrap();
+                        left.jumpifn_nasm_x86_64(label, f, program, build, loc, stack_size, local_vars, buffers, binst, expr_count+1)?;
+                        right.jumpifn_nasm_x86_64(label, f, program, build, loc, stack_size, local_vars, buffers, binst, expr_count+2)?;
+                    }
                     _ => todo!("Unhandled")
                 }
             },
