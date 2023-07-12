@@ -1,6 +1,6 @@
 **(Latest patch versions in github history and at the top of Change Log) - note that they are not noted with a version number until that version is totally complete**
 
-Newest Version: [0.16.3A](#0163a)
+Newest Version: [0.17A](#017a)
 # Manual:
   - [0.16.3A](#0163a) 
     - [0.16.2A](#0162a) 
@@ -52,6 +52,9 @@ Newest Version: [0.16.3A](#0163a)
   - [0.2A](#02a)
   - [0.1A](#01a)
 # Change Log
+ ## 0.17A
+   - Added || and && for expressions
+   - Added || and && for conditions
  ## 0.16.3A
    - Changed a lot of examples
    - Added jumpif and jumpnif (inner parts of the compiler)
