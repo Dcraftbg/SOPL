@@ -1,7 +1,11 @@
 include "../../libs/libc/stdio.spl"
 func main() {
-    let a: int = 0;
+    let a: int = 4;
     let b: int = 5;
-    let c: int = a == 0 && b == 5;
-    printf("c: %x\n",c);
+    if a==4 && b==5 {
+        printf("Hello!\n")
+    }
+    else {
+        printf("Bye!\n")
+    }
 }

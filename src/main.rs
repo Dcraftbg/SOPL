@@ -674,7 +674,7 @@ impl Op {
     }
     fn is_boolean(&self) -> bool {
         match self {
-            Self::EQ   | Self::NEQ | Self::GT | Self::LT | Self::GTEQ | Self::LTEQ => true,
+            Self::EQ   | Self::NEQ | Self::GT | Self::LT | Self::GTEQ | Self::LTEQ | Self::OR | Self::AND => true,
             _ => false
         }
     }
@@ -926,6 +926,24 @@ impl Expression {
                         }
                         writeln!(f, "   cmp {}, {}",reg,right_regs[0])?;
                         writeln!(f, "   jle {}",label)?;
+                    }
+                    Op::AND => {
+                        let left = con.left.as_ref().unwrap();
+                        let right = con.right.as_ref().unwrap();
+                        let and_end = format!(".AND_CONDITION_{}_{}",binst,expr_count);
+                        let and_false = and_end.clone()+"_FALSE";
+                        left.jumpifn_nasm_x86_64(&and_false, f, program, build, loc, stack_size, local_vars, buffers, binst, expr_count+1)?;
+                        right.jumpifn_nasm_x86_64(&and_false, f, program, build, loc, stack_size, local_vars, buffers, binst, expr_count+2)?;
+                        writeln!(f, "   jmp {}",label)?;
+                        writeln!(f, "{}_FALSE:",and_end)?;
+                        
+                        
+                    }
+                    Op::OR => {
+                        let left = con.left.as_ref().unwrap();
+                        let right = con.right.as_ref().unwrap();
+                        left.jumpif_nasm_x86_64(label, f, program, build, loc, stack_size, local_vars, buffers, binst, expr_count+1)?;
+                        right.jumpif_nasm_x86_64(label, f, program, build, loc, stack_size, local_vars, buffers, binst, expr_count+2)?;
                     }
                     _ => todo!("Unhandled")
                 }
@@ -2490,7 +2508,7 @@ fn tokens_to_expression(body: &[Token],build: &mut BuildProgram, program: &CmdPr
     if currentETree.right.is_none() && currentETree.op == Op::NONE && currentETree.left.is_some() {
         return currentETree.left.unwrap()
     }
-    println!("Final currentETree: {:#?}",currentETree);
+    //println!("Final currentETree: {:#?}",currentETree);
     Expression::expr(Box::new(currentETree))
 }
 #[derive(Debug,PartialEq,Clone)]
