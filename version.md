@@ -53,6 +53,7 @@ Newest Version: [0.17A](#017a)
   - [0.1A](#01a)
 # Change Log
  ## 0.17A
+   - Added ! (not)
    - Added || and && for expressions
    - Added || and && for conditions
  ## 0.16.3A
