@@ -2236,11 +2236,12 @@ impl ExprTree {
         Self { left: None, right: None, op: Op::NONE }
     }
 }
-fn tokens_to_expression(body: &[Token],build: &mut BuildProgram, program: &CmdProgram,locals: &Vec<Locals>, buffers: &mut Vec<BuildBuf>) -> Expression {
+fn tokens_to_expression(body: &[Token],build: &mut BuildProgram, program: &CmdProgram,locals: &Vec<Locals>, buffers: &mut Vec<BuildBuf>, loc: &ProgramLocation) -> Expression {
     
     let mut bracketcount = 0;
     if body.len() == 0 {
-        panic!("Error: Cannot evaluate empty body");
+        //panic!("Error: Cannot evaluate empty body");
+        par_error!(loc, "Cannot evaluate empty body");
     }
     if body.len() == 1 {
         return Expression::val(par_expect!(&body[0],OfP::from_token(&body[0], build, program, locals),"Error: Expected Ofp but found {}",&body[0].typ.to_string(false)));
@@ -2441,7 +2442,7 @@ fn tokens_to_expression(body: &[Token],build: &mut BuildProgram, program: &CmdPr
                 }
                 i2 += 1;
             }
-            currentETree.right = Some(tokens_to_expression(&body[i..i2],build,program,locals,buffers));
+            currentETree.right = Some(tokens_to_expression(&body[i..i2],build,program,locals,buffers,&body[i].location));
             if i2 == body.len() {}
             else {
                 let buf = Expression::expr(Box::new(currentETree));
@@ -2505,7 +2506,7 @@ fn tokens_to_expression(body: &[Token],build: &mut BuildProgram, program: &CmdPr
                         }
                         i += 1;
                     }
-                    let expr = tokens_to_expression(&body[index_from..i-1], build, program, locals,buffers);
+                    let expr = tokens_to_expression(&body[index_from..i-1], build, program, locals,buffers,&body[i-1].location);
                     
                     // if currentETree.left.is_none()  && currentETree.right.is_none() && currentETree.op == Op::NONE && expr.is_expr(){
                     //     currentETree = *(*expr.unwrap_expr()).clone();
@@ -5172,6 +5173,7 @@ fn contains_local<'a>(currentLocals: &'a Vec<Locals>, name: &String) -> bool {
     }
     false
 }
+
 fn parse_token_to_build_inst(token: Token,lexer: &mut Lexer, program: &mut CmdProgram, build: &mut BuildProgram, scopeStack: &mut ScopeStack, currentLocals: &mut Vec<Locals>, currentLabels: &mut HashSet<String>, expectedLabels: &mut HashMap<String, Vec<(ProgramLocation,*mut Instruction)>>, include_folders: &HashSet<PathBuf>){
     match token.typ {
         TokenType::WordType(ref word) => {
@@ -5194,7 +5196,7 @@ fn parse_token_to_build_inst(token: Token,lexer: &mut Lexer, program: &mut CmdPr
             
             if let TokenType::SETOperation(op) = Op.typ {
                 let expr_body: Vec<Token> = lexer.map_while(|t| if t.typ != TokenType::IntrinsicType(IntrinsicType::DOTCOMA) {Some(t)} else { None }).collect();
-                let expr = tokens_to_expression(&expr_body, build, program, &currentLocals,par_expect!(lexer.currentLocation, currentScope.typ.buffers_unwrap_mut(), "Error: Expected to find buffers but found none"));
+                let expr = tokens_to_expression(&expr_body, build, program, &currentLocals,par_expect!(lexer.currentLocation, currentScope.typ.buffers_unwrap_mut(), "Error: Expected to find buffers but found none"),&token.location);
                 let body = currentScope.body_unwrap_mut().unwrap();
                 match &op {
                     SetOp::SET      => {
@@ -5416,7 +5418,7 @@ fn parse_token_to_build_inst(token: Token,lexer: &mut Lexer, program: &mut CmdPr
                             None
                         }
                     }).collect();
-                    let res = tokens_to_expression(&result_body, build, program, &currentLocals,par_expect!(lexer.currentLocation, getTopMut(scopeStack).unwrap().typ.buffers_unwrap_mut(), "Error: Expected to find buffers but found none"));
+                    let res = tokens_to_expression(&result_body, build, program, &currentLocals,par_expect!(lexer.currentLocation, getTopMut(scopeStack).unwrap().typ.buffers_unwrap_mut(), "Error: Expected to find buffers but found none"),&token.location);
                     getTopMut(scopeStack).unwrap().body_unwrap_mut().unwrap().push((token.location.clone(),Instruction::RET(res)));
                 },
                 IntrinsicType::SYSCALL => {
@@ -5698,7 +5700,7 @@ fn parse_token_to_build_inst(token: Token,lexer: &mut Lexer, program: &mut CmdPr
                                 }
                             }).collect();
                             let currentScope = getTopMut(scopeStack).unwrap();
-                            let res = tokens_to_expression(&body, build, program, &currentLocals,par_expect!(lexer.currentLocation, currentScope.typ.buffers_unwrap_mut(), "Error: Expected to find buffers but found none"));
+                            let res = tokens_to_expression(&body, build, program, &currentLocals,par_expect!(lexer.currentLocation, currentScope.typ.buffers_unwrap_mut(), "Error: Expected to find buffers but found none"),&token.location);
                             currentScope.body_unwrap_mut().unwrap().push((lexer.currentLocation.clone(),Instruction::MOV(Expression::val(OfP::LOCALVAR(nametok.unwrap_word().unwrap().clone())),res)))
                         }
                     }
@@ -5758,7 +5760,7 @@ fn parse_token_to_build_inst(token: Token,lexer: &mut Lexer, program: &mut CmdPr
                             Some(t)
                         }
                     }).collect();
-                    let condi = tokens_to_expression(&condition, build, program, &currentLocals, par_expect!(lexer.currentLocation, getTopMut(scopeStack).unwrap().typ.buffers_unwrap_mut(), "Error: Expected to find buffers but found none"));
+                    let condi = tokens_to_expression(&condition, build, program, &currentLocals, par_expect!(lexer.currentLocation, getTopMut(scopeStack).unwrap().typ.buffers_unwrap_mut(), "Error: Expected to find buffers but found none"),&token.location);
                     scopeStack.push(Scope { typ: ScopeType::NORMAL(NormalScope { typ: NormalScopeType::WHILE(condi), body: vec![], locals: Locals::new(), buffers: Vec::new()}), hasBeenOpened: true});
                     currentLocals.push(Locals::new());
                 },
@@ -5771,7 +5773,7 @@ fn parse_token_to_build_inst(token: Token,lexer: &mut Lexer, program: &mut CmdPr
                             Some(t)
                         }
                     }).collect();
-                    let condi = tokens_to_expression(&condition, build, program, &currentLocals, par_expect!(lexer.currentLocation, getTopMut(scopeStack).unwrap().typ.buffers_unwrap_mut(), "Error: Expected to find buffers but found none"));
+                    let condi = tokens_to_expression(&condition, build, program, &currentLocals, par_expect!(lexer.currentLocation, getTopMut(scopeStack).unwrap().typ.buffers_unwrap_mut(), "Error: Expected to find buffers but found none"),&token.location);
                     scopeStack.push(Scope { typ: ScopeType::NORMAL(NormalScope { typ: NormalScopeType::IF(condi), body: vec![], locals: Locals::new(), buffers: Vec::new()}), hasBeenOpened: true});
                     currentLocals.push(Locals::new());
 
@@ -5944,8 +5946,8 @@ fn parse_token_to_build_inst(token: Token,lexer: &mut Lexer, program: &mut CmdPr
             
             let currentScope = getTopMut(scopeStack).unwrap();
             let expr_body: Vec<Token> = lexer.map_while(|t| if t.typ != TokenType::IntrinsicType(IntrinsicType::DOTCOMA) {Some(t)} else { None }).collect();
-            let expr = tokens_to_expression(&expr_body, build, program, &currentLocals, par_expect!(lexer.currentLocation, currentScope.typ.buffers_unwrap_mut(), "Error: Expected to find buffers but found none"));
-            let expr_2 = tokens_to_expression(&body, build, program, &currentLocals,par_expect!(lexer.currentLocation, currentScope.typ.buffers_unwrap_mut(), "Error: Expected to find buffers but found none"));
+            let expr = tokens_to_expression(&expr_body, build, program, &currentLocals, par_expect!(lexer.currentLocation, currentScope.typ.buffers_unwrap_mut(), "Error: Expected to find buffers but found none"),&token.location);
+            let expr_2 = tokens_to_expression(&body, build, program, &currentLocals,par_expect!(lexer.currentLocation, currentScope.typ.buffers_unwrap_mut(), "Error: Expected to find buffers but found none"),&token.location);
             match &setop {
                 
                 SetOp::SET      => {
@@ -7681,10 +7683,29 @@ func b(){
 
 
 
-- [ ] TODO: Implement || and && boolean logic
+- [x] TODO: Implement || and && boolean logic
 - [ ] TODO: Implement function overloading
 - [ ] TODO: Make it so that get_body returns None if scope has not been opened yet
 - [ ] TODO: Update all of readme and add more documentation
 - [ ] TODO: Add more useful examples
 - [ ] TODO: Add some quality of life things such as __FILE__ __LINE__
+*/
+
+// What could have been kinda cool is if we had like:
+/*
+
+enum IntermediateInst {
+    DEFFUNC(String),
+    
+}
+
+struct IntermediateBuild {
+    instructions: Vec<IntermediateInst>,
+    zero_initialized_allocations: Vec<(String,usize)>,
+    allocations: Vec<(String,usize)>
+}
+
+fn build_to_intermediate() -> IntermediateBuild {
+
+}
 */

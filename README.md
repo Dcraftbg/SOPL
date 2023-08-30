@@ -128,7 +128,7 @@ sopl [flags]
 - [x] functions
 - [x] constants
 - [x] variables
-- [/] types
+- [ ] types
   - [x] char
   - [x] short
   - [x] int
@@ -136,7 +136,7 @@ sopl [flags]
   - [x] size_t
   - [ ] float
   - [ ] double
-- [/] control flow
+- [ ] control flow
   - [x] if statements
   - [x] else statements
   - [x] while statements
@@ -146,15 +146,15 @@ sopl [flags]
 - [x] type checking
   - [x] Function type checking
   - [x] External type checking
-- [/] Optimization
+- [ ] Optimization
   - [x] Removal of unused strings
   - [x] Removal of unused functions
   - [x] Removal of unused externals
   - [ ] Removal of unused variables
-- [/] casting
+- [ ] casting
   - [x] Casting for constants
   - [ ] Casting for variables
-- [/] Evaluation
+- [ ] Evaluation
   - [x] Variables
   - [x] Conditions
   - [ ] Constants -> it still uses the old "evalutation": i.e. Push stuff onto a virtual stack and pop them off with each operation, which fit the style back then, but now is utterly useless
@@ -620,6 +620,6 @@ Currently supported independent libs:
 - strlib:
   [x] strlib.spl
   [ ] chrlib.spl (Not done because we don't have boolean operations nor chars working yet)
-  [/] strnum.spl - it isn't entirely finished, it requires itostr, but it does have strtoi
+  [ ] strnum.spl - it isn't entirely finished, it requires itostr, but it does have strtoi
 - mathlib:
-  [/] mathlib.spl - its still in development, but does have some features like floorSqrt
+  [ ] mathlib.spl - its still in development, but does have some features like floorSqrt
