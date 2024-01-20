@@ -1,23 +1,23 @@
 #![allow(non_snake_case)]
 #![allow(non_camel_case_types)]
-#![allow(dead_code)]
 #![allow(unused_macros)]
 #![allow(unused_imports)]
 #![allow(unreachable_patterns)]
+#![allow(dead_code)]
 #![allow(unreachable_code)]
-
 
 mod lexer;
 mod parser;
 mod utils;
 mod cmdprogram;
 mod cfor;
+mod constants;
 
 use lexer::*;
 use parser::*;
 use cmdprogram::*;
 use utils::*;
-
+use constants::*;
 
 use core::{num, panic};
 use std::{env, process::{exit, Command, Stdio}, path::{Path, PathBuf}, ffi::OsStr, str::{FromStr, Chars}, collections::{HashMap, HashSet}, hash::Hash, fs::{File, self}, io::{Read, Write, self}, fmt::{format, Display}, borrow::{BorrowMut, Borrow}, clone, time::{SystemTime, Instant}, rc::Rc, iter::Peekable, cell::{RefCell, Ref, RefMut}, ops::{Deref, DerefMut}, vec, sync::Arc, os, f32::consts::E, any::Any};
@@ -32,48 +32,9 @@ enum CallArgType {
 }
 #[derive(Debug,PartialEq,Clone)]
 struct CallArg {
-    typ: CallArgType,
-    loc: ProgramLocation
+    pub typ: CallArgType,
+    pub loc: ProgramLocation
 }
-impl CallArg {
-    fn from_token(build: &mut BuildProgram, tok: &Token, currentLocals: &Vec<Locals>) -> Option<Self> {
-        match &tok.typ {
-            TokenType::WordType(word) => {
-                if contains_local(currentLocals, word) {
-                    return Some(Self { typ: CallArgType::LOCALVAR(word.clone()), loc: tok.location.clone() });
-                }
-                else if build.constdefs.contains_key(word){
-                    return Some(Self { typ: CallArgType::CONSTANT(build.constdefs.get(word).unwrap().typ.clone()), loc: tok.location.clone() })
-                }
-
-                None
-            },
-            TokenType::StringType(val) => {
-                //let uuid = build.(ProgramString { Typ: ProgramStringType::STR, Data: val.clone() });
-                
-                let id = build.insert_new_str(ProgramString { Typ: ProgramStringType::STR, Data: val.clone() });
-                Some(Self { typ: CallArgType::CONSTANT(RawConstValueType::STR(id)), loc: tok.location.clone()})
-            },
-            TokenType::CStringType(val) => {
-                let id = build.insert_new_str(ProgramString { Typ: ProgramStringType::CSTR, Data: val.clone() });
-                Some(Self { typ: CallArgType::CONSTANT(RawConstValueType::STR(id)), loc: tok.location.clone()})
-            },
-            TokenType::Number32(val) => {
-                Some(Self { typ: CallArgType::CONSTANT(RawConstValueType::INT(val.clone())), loc: tok.location.clone()})
-            },
-            TokenType::Number64(val) => {
-                Some(Self { typ: CallArgType::CONSTANT(RawConstValueType::LONG(val.clone())), loc: tok.location.clone()})
-            },
-            _ => {
-                None
-            }
-        }
-    }
-    fn match_any(_contract1: &Vec<Self>, _contract: &AnyContract) -> bool {
-        true
-    }
-}
-
 #[derive(Debug)]
 pub enum Instruction {
     //PUSH    (OfP),
@@ -140,285 +101,6 @@ impl Function {
     }
 }
 
-
-#[derive(Debug, PartialEq, Clone)]
-enum ConstValueType {
-    BOOLEAN(bool),
-    CHAR(i8),
-    SHORT(i16),
-    INT(i32),
-    LONG(i64),
-    STR(String, ProgramStringType),
-    PTR(Ptr, i64),
-}
-
-#[derive(Debug,PartialEq,Clone)]
-struct ConstValue {
-    typ: ConstValueType,
-    loc: ProgramLocation
-}
-impl ConstValueType {
-    fn unwrap_int_data(&self) -> Option<i64> {
-        match self {
-            Self::INT(d) => Some(d.clone() as i64),
-            Self::LONG(d) => Some(d.clone() as i64),
-            Self::SHORT(d) => Some(d.clone() as i64),
-            Self::CHAR(d) => Some(d.clone() as i64),
-            Self::BOOLEAN(d) => Some(d.clone() as i64),
-            _ => None
-        }
-    }
-    fn unwrap_str_data(&self) -> Option<&String>  {
-        match self {
-            ConstValueType::STR(d, _) => Some(d),
-            _ => None
-        }
-    }
-    fn is_int(&self) -> bool {
-        match self {
-            Self::INT(_) | Self::LONG(_) | Self::SHORT(_) | Self::CHAR(_) | Self::BOOLEAN(_) | Self::PTR(_,_) => true,
-            _ => false
-        }
-    }
-    fn weak_cast(&self, typ: &VarType) -> Option<ConstValueType> {
-        match self {
-            ConstValueType::INT(data) => {
-                match typ {
-                    VarType::CHAR           => Some(ConstValueType::CHAR(data.clone() as i8)),
-                    VarType::SHORT          => Some(ConstValueType::SHORT(data.clone() as i16)),
-                    VarType::BOOLEAN        => Some(ConstValueType::BOOLEAN(*data != 0)),
-                    VarType::INT            => Some(self.clone()),
-                    VarType::LONG           => Some(ConstValueType::LONG(data.clone() as i64)),
-                    VarType::PTR(typ) => Some(ConstValueType::PTR(typ.clone(), data.clone() as i64)),
-                    VarType::CUSTOM(_) => None,
-                }
-            },
-            ConstValueType::LONG(data) => {
-                match typ {
-                    VarType::CHAR => None,
-                    VarType::SHORT => None,
-                    VarType::BOOLEAN => None,
-                    VarType::INT => {
-                        if *data <= i32::MAX as i64 {
-                            Some(ConstValueType::INT(data.clone() as i32))
-                        }
-                        else {
-                            None
-                        }
-                    },
-                    VarType::LONG => Some(self.clone()),
-                    VarType::PTR(typ) => Some(ConstValueType::PTR(typ.clone(), data.clone() as i64)),
-                    VarType::CUSTOM(_) => None,
-                }
-            },
-            ConstValueType::STR(_, _) => None,
-            ConstValueType::PTR(_, _) => {None}
-            ConstValueType::BOOLEAN(_) => todo!(),
-            ConstValueType::CHAR(_) => todo!(),
-            ConstValueType::SHORT(_) => todo!(),
-        }
-    }
-    fn to_var_type(&self) -> Option<VarType> {
-        match self {
-            ConstValueType::INT(_) => Some(VarType::INT),
-            ConstValueType::LONG(_) => Some(VarType::LONG),
-            ConstValueType::STR(_, typ) => if *typ == ProgramStringType::CSTR { Some(VarType::PTR(Ptr{ typ: PtrTyp::TYP(Box::new(VarType::CHAR)), inner_ref: 0})) } else { None },
-            ConstValueType::PTR(typ, _) => Some(VarType::PTR(typ.clone())),
-            ConstValueType::BOOLEAN(_) => Some(VarType::BOOLEAN),
-            ConstValueType::CHAR(_)    => Some(VarType::CHAR),
-            ConstValueType::SHORT(_)   => Some(VarType::SHORT),
-        }
-    }
-    fn is_eq_vartype(&self, vartyp: &VarType) -> bool {
-        match self {
-            ConstValueType::INT(_)            => vartyp.weak_eq(&VarType::INT),
-            ConstValueType::LONG(_)           => vartyp.weak_eq(&VarType::LONG),
-            ConstValueType::STR(_, typ) => if *typ == ProgramStringType::CSTR { vartyp.weak_eq(&VarType::PTR(Ptr {typ: PtrTyp::TYP(Box::new(VarType::CHAR)), inner_ref: 0})) } else {false},
-            ConstValueType::PTR(typ, _) => vartyp.weak_eq(&VarType::PTR(typ.clone())),
-            ConstValueType::BOOLEAN(_)        => vartyp.weak_eq(&VarType::BOOLEAN),
-            ConstValueType::CHAR(_)           => vartyp.weak_eq(&VarType::CHAR),
-            ConstValueType::SHORT(_)          => vartyp.weak_eq(&VarType::SHORT),
-        }
-    }
-    fn mul(&self, Other: &ConstValueType) -> Result<ConstValueType,String> {
-        match self {
-            ConstValueType::INT(val) => {
-                if let Some(v) = Other.unwrap_int_data() {
-                    if v <= i32::MAX as i64 && v >= i32::MIN as i64 {
-                        return Ok(ConstValueType::INT(*val*v as i32));
-                    }
-                    else {
-                        return Err("Error: Value of operation overflows i32 limit!".to_string());
-                    }
-                }
-                else {
-                    return Err("Error: Unexpected - operation on int and string".to_string());
-                }
-            }
-            ConstValueType::LONG(val) => {
-                if let Some(v) = Other.unwrap_int_data() {
-                    return Ok(ConstValueType::LONG(*val*v));
-                }
-                else {
-                    return Err("Error: Unexpected - operation on int and string".to_string());
-                }
-            }
-            ConstValueType::STR(_, _) => {
-                match Other {
-                    _ => {
-                        return Err("Error: Cannot do * operation on a string".to_string());
-                    }
-                }
-            },
-            ConstValueType::PTR(_,_) => {todo!("ConstValueType::PTR")}
-            ConstValueType::BOOLEAN(_) => todo!(),
-            ConstValueType::CHAR(val) => {
-                if let Some(v) = Other.unwrap_int_data() {
-                    if v <= i8::MAX as i64 && v >= i8::MIN as i64 {
-                        return Ok(ConstValueType::CHAR(*val*v as i8));
-                    }
-                    else {
-                        return Err("Error: Value of operation overflows i32 limit!".to_string());
-                    }
-                }
-                else {
-                    return Err("Error: Unexpected - operation on int and string".to_string());
-                }
-            },
-            ConstValueType::SHORT(val) => {
-                if let Some(v) = Other.unwrap_int_data() {
-                    if v <= i16::MAX as i64 && v >= i16::MIN as i64 {
-                        return Ok(ConstValueType::SHORT(*val*v as i16));
-                    }
-                    else {
-                        return Err("Error: Value of operation overflows i32 limit!".to_string());
-                    }
-                }
-                else {
-                    return Err("Error: Unexpected - operation on int and string".to_string());
-                }
-            },
-        }
-    }
-    fn sub(&self, Other: &ConstValueType) -> Result<ConstValueType,String> {
-        match self {
-            ConstValueType::INT(val) => {
-                match Other {
-                    ConstValueType::INT(nval) => {
-                        return Ok(ConstValueType::INT(val-nval));
-                    }
-                    ConstValueType::LONG(nval) => {
-                        return Ok(ConstValueType::LONG((*val as i64)-nval));
-                    }
-                    ConstValueType::STR(_nval, _) => {
-                        return Err("Error: Unexpected - operation on int and string".to_string());
-                    },
-                    ConstValueType::PTR(_,_) => { todo!("ConstValueType::PTR")}
-                    ConstValueType::BOOLEAN(_) => todo!(),
-                    ConstValueType::CHAR(_) => todo!(),
-                    ConstValueType::SHORT(_) => todo!(),
-
-                }
-            }
-            ConstValueType::LONG(val) => {
-                match Other {
-                    ConstValueType::INT(nval) => {
-                        return Ok(ConstValueType::LONG(val-(*nval as i64)));
-                    }
-                    ConstValueType::LONG(nval) => {
-                        return Ok(ConstValueType::LONG(val-nval));
-                    }
-                    ConstValueType::STR(_nval, _) => {
-                        return Err("Error: Unexpected - operation on long and string".to_string());
-                    },
-                    ConstValueType::PTR(_,_) => { todo!("ConstValueType::PTR")}
-                    ConstValueType::BOOLEAN(_) => todo!(),
-                    ConstValueType::CHAR(_) => todo!(),
-                    ConstValueType::SHORT(_) => todo!(),
-
-                }
-            }
-            ConstValueType::STR(_, _) => {
-                match Other {
-                    _ => {
-                        return Err("Error: Cannot do - operation on a string".to_string());
-                    }
-                }
-            },
-            ConstValueType::PTR(_,_) => { todo!("ConstValueType::PTR")}
-            ConstValueType::BOOLEAN(_) => todo!(),
-            ConstValueType::CHAR(_) => todo!(),
-            ConstValueType::SHORT(_) => todo!(),
-
-        }
-    }
-    fn add(&self, Other: &ConstValueType) -> Result<ConstValueType,String> {
-        match self {
-            ConstValueType::INT(val) => {
-                match Other {
-                    ConstValueType::INT(nval) => {
-                        return Ok(ConstValueType::INT(val+nval));
-                    }
-                    ConstValueType::LONG(nval) => {
-                        return Ok(ConstValueType::LONG((*val as i64)+nval));
-                    }
-                    ConstValueType::STR(nval, typ) => {
-                        return Ok(ConstValueType::STR(val.to_string()+nval, typ.clone()));
-                    },
-                    ConstValueType::PTR(_,_) => { todo!("ConstValueType::PTR")}
-                    ConstValueType::BOOLEAN(_) => todo!(),
-                    ConstValueType::CHAR(_) => todo!(),
-                    ConstValueType::SHORT(_) => todo!(),
-
-                }
-            }
-            ConstValueType::LONG(val) => {
-                match Other {
-                    ConstValueType::INT(nval) => {
-                        return Ok(ConstValueType::LONG(val+(*nval as i64)));
-                    }
-                    ConstValueType::LONG(nval) => {
-                        return Ok(ConstValueType::LONG(val+nval));
-                    }
-                    ConstValueType::STR(nval, typ) => {
-                        return Ok(ConstValueType::STR(val.to_string()+nval, typ.clone()));
-                    },
-                    ConstValueType::PTR(_,_) => { todo!("ConstValueType::PTR")}
-                    ConstValueType::BOOLEAN(_) => todo!(),
-                    ConstValueType::CHAR(_) => todo!(),
-                    ConstValueType::SHORT(_) => todo!(),
-
-                }
-            }
-            ConstValueType::STR(val,typ) => {
-                match Other {
-                    ConstValueType::INT(nval) => {
-                        return Ok(ConstValueType::STR(val.clone()+&nval.to_string(), typ.clone()));
-                    }
-                    ConstValueType::LONG(nval) => {
-                        return Ok(ConstValueType::STR(val.clone()+&nval.to_string(), typ.clone()));
-                    }
-                    ConstValueType::STR(nval,_) => {
-                        let out = val.clone()+nval;
-                        return Ok(ConstValueType::STR(out,typ.clone()));
-                    },
-                    ConstValueType::PTR(_,_) => { todo!("ConstValueType::PTR")}
-                    ConstValueType::BOOLEAN(_) => todo!(),
-                    ConstValueType::CHAR(_) => todo!(),
-                    ConstValueType::SHORT(_) => todo!(),
-
-                }
-            },
-            ConstValueType::PTR(_,_) => { todo!("ConstValueType::PTR")}
-            ConstValueType::BOOLEAN(_) => todo!(),
-            ConstValueType::CHAR(_) => todo!(),
-            ConstValueType::SHORT(_) => todo!(),
-
-        }
-    }
-}
-
-type RawConstants = HashMap<String, RawConstValue>;
 #[derive(Debug)]
 pub struct DLL_import {
     pub from: String,
@@ -2086,17 +1768,13 @@ fn usage(program: &String) {
     println!("     Currently supported targets: ");
     list_targets(9);
     println!("     flags: ");
-    println!("         -t (target)                                     -> compiles to the given target (default is nasm_x86_64)");
+    println!("         -t (target)                                     -> compiles to the given target (default is {TARGET_DEFAULT})");
     println!("         -o (output path)                                -> outputs to that file (example: hello.asm in nasm_x86_64 mode). If the output path is not specified it defaults to the modes default (for nasm_x86_64 thats a.asm)");
-    println!("         (NOT RECOMMENDED - use lighthouse instead) -r   -> runs the program for you if the option is available for that language mode (for example in nasm_x86_64 it calls nasm with gcc to link it to an executeable)");
-    println!("         (NOT RECOMMENDED - use lighthouse instead) -b   -> builds the program for you if the option is available for that language mode");
     println!("         -i (path to directory to shortcut)              -> Adds a shortcut when including (if it finds the file it automatically expands the path) so you could do -i libs/libc and then just do include \"stdio.spl\" instead of the whole ordeal you had before");
     println!("         -release                                        -> builds the program in release mode");
     println!("         -ntc                                            -> (NoTypeChecking) Disable type checking");
     println!("         -warn (all, funcs, externs, strings)            -> Enable unused warns for parameter");
     println!("         -ruf                                            -> Remove unused functions");
-    println!("         -arc (builtin arc)                              -> builds for a builtin architecture");
-    println!("         -arc - (path to custom arc)                     -> builds for a custom architecture following the syntax described in ./examples/arcs");
     println!("         -usage                                          -> Show this page");
     println!("--------------------------------------------");
 }
@@ -2107,7 +1785,6 @@ fn dump_tokens(lexer: &mut Lexer) {
 }
 
 type TargetBuildfn_t = fn(&CmdProgram, &BuildProgram, &str) -> io::Result<()>;
-
 fn build_llvm_native(p: &CmdProgram, b: &BuildProgram, path: &str) -> io::Result<()> {
     todo!()
 }
@@ -2115,7 +1792,7 @@ struct Target {
     build: TargetBuildfn_t,
     name: &'static str,
 }
-
+const TARGET_DEFAULT: &'static str = "llvm_native";
 const TARGETS: &[Target] = &[
     Target {
         name: "llvm-native",
@@ -2165,14 +1842,6 @@ fn main() {
                 }).clone();
                 i += 1;
             },
-            "-b" => {
-                program.should_build = true
-            }
-            "-r" => {
-                program.should_build = true;
-                program.should_run = true
-
-            }
             "-release" => {
                 program.in_mode = OptimizationMode::RELEASE
             }

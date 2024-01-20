@@ -16,17 +16,6 @@ pub enum RawConstValueType{
     PTR(Ptr, i64)
 }
 impl RawConstValueType {
-    pub fn size(&self, program: &CmdProgram) -> usize {
-        match self {
-            Self::CHAR(_) => 1,
-            Self::SHORT(_)   => 2,
-            Self::INT(_)  => 4,
-            Self::LONG(_) => 8,
-            Self::STR(_) => todo!("This"),
-            Self::PTR(_, _) => (program.architecture.bits/8) as usize,
-            _ => self::panic!("This should be unreachable")
-        }
-    }
     pub fn to_string(&self, build: &BuildProgram) -> String {
         match self {
             Self::SHORT(v)  => format!("{}",v),

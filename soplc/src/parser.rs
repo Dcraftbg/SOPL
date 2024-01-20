@@ -47,14 +47,6 @@ pub enum PtrTyp {
     VOID,
     TYP(Box<VarType>),
 }
-impl PtrTyp {
-    pub fn size(&self, program: &CmdProgram) -> usize {
-        match self {
-            Self::VOID => (program.architecture.bits / 8) as usize,
-            Self::TYP(typ) => typ.get_size(program)
-        }
-    }
-}
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct Ptr {
@@ -181,23 +173,6 @@ impl VarType {
             VarType::CUSTOM(_) => {
                 todo!("Implement custom")
             }
-        }
-    }
-    pub fn get_size(&self, program: &CmdProgram) -> usize{
-        match self {
-            VarType::CHAR    => 1,
-            VarType::SHORT   => 2,
-            VarType::BOOLEAN => 1,
-            VarType::INT     => 4,
-            VarType::LONG    => 8,
-            VarType::PTR(_) => {
-                match program.architecture.bits{
-                    32 => 4,
-                    64 => 8,
-                    _    => 4
-                }
-            },
-            VarType::CUSTOM(_) => todo!(),
         }
     }
     pub fn weak_eq(&self, other: &Self) -> bool {
@@ -607,20 +582,6 @@ pub struct External {
     pub contract: Option<AnyContract>
 }
 impl ExternalType {
-   pub fn prefix(&self, program: &CmdProgram) -> String {
-       match self {
-       ExternalType::RawExternal => String::new(),
-           ExternalType::CExternal => program.architecture.cextern_prefix.clone(),
-           _ => String::new()
-       }
-   }
-   pub fn suffix(&self) -> String {
-       match self {
-           ExternalType::RawExternal => String::new(),
-           ExternalType::CExternal   => String::new(),
-           _ => String::new()
-       }
-   }
    pub fn to_string(&self) -> String {
        match self {
            ExternalType::RawExternal => "RawExternal".to_string(),
