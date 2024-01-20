@@ -2105,10 +2105,31 @@ fn dump_tokens(lexer: &mut Lexer) {
         println!("Token: {:?}",token);
     }
 }
+
+type TargetBuildfn_t = fn(&CmdProgram, &BuildProgram, &str) -> io::Result<()>;
+
+fn build_llvm_native(p: &CmdProgram, b: &BuildProgram, path: &str) -> io::Result<()> {
+    todo!()
+}
+struct Target {
+    build: TargetBuildfn_t,
+    name: &'static str,
+}
+
+const TARGETS: &[Target] = &[
+    Target {
+        name: "llvm-native",
+        build: build_llvm_native,
+    },
+];
+
+
+
 fn list_targets(indent: usize){
     let indent = " ".repeat(indent);
-    print!("{}",indent);
-    println!("- llvm-native");
+    for target in TARGETS {
+        println!("{}-{}", indent, target.name);
+    }
 }
 fn main() {
     #[cfg(not(debug_assertions))]
@@ -2217,11 +2238,9 @@ fn main() {
             }
         }
     });
-    match program.target.as_str() {
-        _ => {
-            eprintln!("Undefined target: {}\nSee supported targets by doing -t list",program.target);
-            exit(1);
-        }
+    if TARGETS.iter().find(|target| target.name == program.target.as_str()).is_none() {
+        eprintln!("Unknown target: {}", program.target);
+        list_targets(1);
     }
     let mut Intrinsics: HashMap<String,IntrinsicType> = HashMap::new();
     Intrinsics.insert("extern".to_string(), IntrinsicType::Extern);
@@ -2259,7 +2278,6 @@ fn main() {
     Definitions.insert("bool".to_string(), VarType::BOOLEAN);
     Definitions.insert("ptr".to_string(), VarType::PTR(Ptr{ typ: PtrTyp::VOID, inner_ref: 0}));
     Definitions.insert("short".to_string(), VarType::SHORT);
-    Definitions.insert("size_t".to_string(), if program.architecture.bits == 64 { VarType::LONG } else { VarType::INT});
     
     if program.path.is_empty() {
         println!("Error: Unspecified input file!");
