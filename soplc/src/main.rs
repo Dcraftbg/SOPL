@@ -2105,47 +2105,9 @@ fn dump_tokens(lexer: &mut Lexer) {
         println!("Token: {:?}",token);
     }
 }
-fn json_to_arc(json: &serde_json::Map<String, Value>) -> Architecture {
-    let ops = json.get("options").expect("Expected options but found nothing!").as_object().expect("Ops must be an object!");
-    let argpassing = ops.get("argumentPassing").expect("Expected argumentPassing but found nothing!");
-    let oarc: Architecture = Architecture {
-        bits: json.get("bits").expect("Error: expected value bits but found nothing!").as_u64().expect("Error: expected value of bits to be u64 but found string!") as u32,
-        platform: json.get("os").expect("Error: expected value os but found nothing!").as_str().expect("os must be a string!").to_owned(),
-        options: {
-            if argpassing.is_string() && argpassing.as_str().unwrap() == "PUSHALL" {
-                ArcOps { argumentPassing: ArcPassType::PUSHALL}
-            }
-            else if let Value::Object(argpassing) = argpassing {
-
-                ArcOps { argumentPassing: ArcPassType::CUSTOM(ArcCustomOps {
-                    on_overflow_stack: argpassing.get("on_overflow_stack").expect("Expected on_overflow_stack but found nothing!").as_bool().expect("Value of on_overflow_stack must be boolean!"),
-                    shadow_space: argpassing.get("shadow_space").expect("Expected shadow_space but found nothing!").as_u64().expect("Value of shadow_space must be u64!") as usize }) }
-            }
-            else {
-                todo!()
-            }
-        },
-        func_prefix: json.get("func_prefix").expect("Error: expected func_prefix but found nothing!").as_str().expect("Value of func_prefix must be string").to_string(),
-        cextern_prefix: json.get("cextern_prefix").expect("Error: expected cextern_prefix but found nothing!").as_str().expect("Value of cextern_prefix must be string").to_string(),
-        obj_extension: json.get("obj-extension").expect("Error: expected obj_extension but found nothing!").as_str().expect("Value of obj_extension must be string").to_string(),
-        flags: {
-            let mut o: ArcFlags = ArcFlags { nasm: vec![] };
-            let flagsObj = json.get("flags").expect("Error: expected flags but found nothing!").as_object().expect("Error: Value of flags must be an object!");
-            o.nasm = {
-                let mut o: Vec<String> = Vec::new();
-                let nasm_flags = flagsObj.get("nasm").expect("Error: expected nasm flags but found nothing!").as_array().expect("Error: Value of nasm flags must be an array");
-                for val in nasm_flags {
-                    o.push(val.as_str().expect("Value of flag in nasm must be a string!").to_owned());
-                }
-                o
-            };
-            o
-        },
-    };
-    oarc
-}
 fn list_targets(indent: usize){
     let indent = " ".repeat(indent);
+    print!("{}",indent);
     println!("- llvm-native");
 }
 fn main() {
@@ -2171,20 +2133,6 @@ fn main() {
     let mut program = CmdProgram::new();
     
     program.opath = Path::new(&program.path).with_extension(".o").to_str().unwrap().to_string();
-    let mut Architectures: HashMap<String, Architecture> = HashMap::new();
-    Architectures.insert("windows_x86_64".to_owned(), Architecture { bits: 64, platform: "windows".to_string(), cextern_prefix: "".to_owned(),  func_prefix:"".to_owned(),  options: ArcOps { argumentPassing: ArcPassType::CUSTOM(ArcCustomOps { on_overflow_stack: true, shadow_space: 40}) }        , obj_extension: "obj".to_owned(), flags: ArcFlags { nasm: vec!["-f".to_string(),"win64".to_string()] }});
-    Architectures.insert("windows_x86".to_owned(),    Architecture { bits: 32, platform: "windows".to_string(), cextern_prefix: "_".to_owned(), func_prefix:"_".to_owned(), options: ArcOps { argumentPassing: ArcPassType::PUSHALL }                                                                                                                                                                            , obj_extension: "obj".to_owned(), flags: ArcFlags { nasm: vec!["-f".to_string(),"win32".to_string()] }});
-    Architectures.insert("linux_x86_64".to_owned(),   Architecture { bits: 64, platform: "linux".to_string()  , cextern_prefix: "".to_owned(),  func_prefix:"".to_owned(),  options: ArcOps { argumentPassing: ArcPassType::CUSTOM(ArcCustomOps { on_overflow_stack: true, shadow_space: 0 }) }, obj_extension: "o".to_owned()  , flags: ArcFlags { nasm: vec!["-f".to_string(),"elf64".to_string()] }});
-    Architectures.insert("linux_x86".to_owned(),      Architecture { bits: 32, platform: "linux".to_string()  , cextern_prefix: "_".to_owned(), func_prefix:"_".to_owned(), options: ArcOps { argumentPassing: ArcPassType::PUSHALL }                                                                                                                                                                            , obj_extension: "o".to_owned()  , flags: ArcFlags { nasm: vec!["-f".to_string(),"elf32".to_string()] }});
-    //short calls
-    Architectures.insert("win_x86_64".to_owned(), Architectures.get("windows_x86_64").unwrap().clone());
-    Architectures.insert("win_x86".to_owned(), Architectures.get("windows_x86").unwrap().clone());
-    if let Some(arc) = Architectures.get(&("".to_owned()+env::consts::OS+"_"+env::consts::ARCH)) {
-        program.architecture = arc.clone();
-    }
-    else {
-        println!("[NOTE] No architecture found for {}_{}! Please specify the output architecture!",env::consts::OS,env::consts::ARCH);
-    }
     let mut include_folders:HashSet<PathBuf>  = HashSet::new();
     cfor!(let mut i: usize = 0; i < args.len(); i+=1; {
         let flag = args.get(i).unwrap();
@@ -2256,26 +2204,6 @@ fn main() {
                 }
                 i+=1;
                 include_folders.insert(PathBuf::from(&args[i]));
-            }
-            "-arc" => {
-                let val = args.get(i+1).expect("Error: Unexpected built-in target or path to json");
-                if val == "-" {
-                    let path = Path::new(args.get(i+2).expect("Error: Path not specified for -arc"));
-                    let ext = path.extension().expect(&format!("Error: Path provided doesn't have an extension! Path: '{:?}'",path));
-                    let ext = ext.to_str().unwrap();
-                    assert!(ext=="json","Error: only accepting arc files with the json format!");
-                    assert!(path.is_file() && path.exists(), "Error: path provided '{:?}' is not a file or does not exist!",path);
-                    let f = fs::read_to_string(path).expect("Error: file does not exist or can't be opened!");
-                    let arc: Value = serde_json::from_str(&f).expect("Contents of file not a json!");
-                    let arc = arc.as_object().unwrap();
-                    program.architecture = json_to_arc(arc);
-                    i+=2;
-                }
-                else {
-                    assert!(Architectures.contains_key(val),"Error: Unknown Architecture: {}. It is probably not built in!",val);
-                    program.architecture = Architectures.get(val).unwrap().clone();
-                    i+=1;
-                }
             }
             flag => {
                 if program.path.is_empty() && &flag[0..1] != "-" {
