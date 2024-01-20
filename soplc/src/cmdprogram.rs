@@ -1,16 +1,11 @@
-use crate::register::*;
 #[derive(Debug,Clone, PartialEq)]
 pub struct ArcCustomOps {
-    // None means they are via the stack
-    pub nums_ptrs: Option<Vec<Register>>,
-    pub floats: Option<Vec<Register>>,
-    pub returns: Option<Vec<Register>>,
     pub on_overflow_stack: bool,
     pub shadow_space: usize
 }
 impl ArcCustomOps {
     pub fn new() -> Self {
-        Self {nums_ptrs: None, floats: None, returns: None, on_overflow_stack: true, shadow_space: 0 }
+        Self {on_overflow_stack: true, shadow_space: 0 }
     }
 }
 #[derive(Debug,Clone, PartialEq)]
@@ -95,14 +90,6 @@ pub struct CmdProgram {
     pub architecture: Architecture,
 }
 impl CmdProgram {
-    pub fn stack_ptr(&self) -> Register {
-        if self.architecture.bits == 64 {
-            Register::RSP
-        }
-        else {
-            Register::ESP
-        }
-    }
     pub fn new() -> Self {
         Self { path: String::new(), opath: String::new(), should_build: false, should_run: false, target: "nasm_x86_64".to_string(), in_mode: OptimizationMode::DEBUG, use_type_checking: true, print_unused_warns: false,  remove_unused_functions: false, print_unused_funcs: false, print_unused_externs: false, print_unused_strings: false, architecture: Architecture::new() }
     }

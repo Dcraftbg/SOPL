@@ -221,49 +221,6 @@ impl VarType {
         }
     }
 }
-impl Register {
-    pub fn to_var_type(&self) -> VarType {
-        match self {
-            Register::RAX | Register::RBX | Register::RCX | Register::RDX | Register::RSI | Register::RDI |
-            Register::R8 | Register::R9 | Register::R10 | Register::R11 | Register::R12 | Register::R13 | Register::R14 | Register::R15 => {
-                VarType::LONG
-            },
-            Register::RSP | Register::RBP => {
-                VarType::PTR(Ptr { typ: PtrTyp::VOID, inner_ref: 0 })
-            },
-            Register::EAX | Register::EBX | Register::ECX | Register::EDX | Register::ESI | Register::EDI |
-            Register::R8D | Register::R9D | Register::R10D | Register::R11D | Register::R12D | Register::R13D | Register::R14D | Register::R15D => {
-                VarType::INT
-            },
-            Register::ESP | Register::EBP => {
-                VarType::PTR(Ptr { typ: PtrTyp::VOID, inner_ref: 0})
-            }
-            Register::AX |Register::BX |Register::CX |Register::DX |Register::SP |Register::BP | Register::SI | Register::DI |
-            Register::R8W | Register::R9W | Register::R10W | Register::R11W | Register::R12W | Register::R13W | Register::R14W | Register::R15W => {
-                VarType::SHORT
-            }
-            Register::AL |Register::BL |Register::CL |Register::DL |Register::AH |Register::BH |Register::CH |Register::DH | Register::DIL | Register::SIL |
-            Register::R8B | Register::R9B | Register::R10B | Register::R11B | Register::R12B | Register::R13B | Register::R14B | Register::R15B => {
-                VarType::CHAR
-            }
-            Register::R8 |Register::R9 | Register::R10  | Register::R11  | Register::R12  | Register::R13  | Register::R14  | Register::R15 => {
-                VarType::LONG
-            },
-            Register::R8D => {
-                VarType::INT
-            }
-            Register::XMM0 => todo!("floats"),
-            Register::XMM1 => todo!("floats"),
-            Register::XMM2 => todo!("floats"),
-            Register::XMM3 => todo!("floats"),
-            Register::XMM4 => todo!("floats"),
-            Register::XMM5 => todo!("floats"),
-            Register::XMM6 => todo!("floats"),
-            Register::XMM7 => todo!("floats"),
-
-        }
-    }
-}
 #[derive(Debug, Clone)]
 pub struct BuildBuf {
     pub typ: VarType,

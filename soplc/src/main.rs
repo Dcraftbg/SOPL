@@ -11,16 +11,12 @@ mod lexer;
 mod parser;
 mod utils;
 mod cmdprogram;
-mod register;
-mod nasm_x64;
 mod cfor;
 
-use register::*;
 use lexer::*;
 use parser::*;
 use cmdprogram::*;
 use utils::*;
-use nasm_x64::*;
 
 
 use core::{num, panic};
@@ -32,7 +28,6 @@ use serde_json::Value;
 #[derive(Debug,PartialEq,Clone)]
 enum CallArgType {
     LOCALVAR(String),
-    REGISTER(Register),
     CONSTANT(RawConstValueType)
 }
 #[derive(Debug,PartialEq,Clone)]
@@ -68,9 +63,6 @@ impl CallArg {
             },
             TokenType::Number64(val) => {
                 Some(Self { typ: CallArgType::CONSTANT(RawConstValueType::LONG(val.clone())), loc: tok.location.clone()})
-            },
-            TokenType::Register(reg) => {
-                Some(Self { typ: CallArgType::REGISTER(reg.clone()), loc: tok.location.clone() })
             },
             _ => {
                 None
@@ -1637,87 +1629,6 @@ fn parse_token_to_build_inst(token: Token,lexer: &mut Lexer, program: &mut CmdPr
             body.push((token.location.clone(),Instruction::CALL(name, args)));
 
         },
-        TokenType::Register(reg) => {
-            let currentScope = getTopMut(scopeStack).unwrap();
-            let regOp = par_expect!(lexer.currentLocation,lexer.next(),"Unexpected register operation or another register!");
-            match regOp.typ {
-                TokenType::SETOperation(ref op) => {
-                    match op {
-                        SetOp::SET => {
-                            let token = par_expect!(lexer.currentLocation,lexer.next(),"abruptly ran out of tokens");
-                            match token.typ {
-                                TokenType::Number32(data) => {
-                                    if reg.size() >= 4 {
-                                        let body = currentScope.body_unwrap_mut().unwrap();
-                                        body.push((token.location,Instruction::MOV(Expression::val(OfP::REGISTER(reg)), Expression::val(OfP::CONST(RawConstValueType::INT(data))))))
-                                    }
-                                }
-                                TokenType::Number64(data) => {
-                                    if reg.size() >= 8 {
-                                        let body = currentScope.body_unwrap_mut().unwrap();
-                                        body.push((token.location,Instruction::MOV(Expression::val(OfP::REGISTER(reg)), Expression::val(OfP::CONST(RawConstValueType::LONG(data))))));
-                                    }
-                                }
-                                TokenType::Register(reg2) => {
-                                    currentScope.body_unwrap_mut().unwrap().push((token.location.clone(),Instruction::MOV(Expression::val(OfP::REGISTER(reg)), Expression::val(OfP::REGISTER(reg2)))));
-
-                                }
-                                TokenType::WordType(ref data) => {
-                                    if currentScope.contract_is_some() && currentScope.contract_unwrap().unwrap().Inputs.contains_key(data) {
-                                        let contract = currentScope.contract_unwrap().unwrap();
-                                        par_assert!(token, contract.Inputs.contains_key(data), "Error: Unexpected word for register: '{}'",data);
-                                        currentScope.body_unwrap_mut().unwrap().push((token.location.clone(), Instruction::MOV(Expression::val(OfP::REGISTER(reg)), Expression::val(OfP::LOCALVAR(data.to_owned())))))
-                                    }
-                                    else if let Some(cons) = build.constdefs.get(data) {
-                                        currentScope.body_unwrap_mut().unwrap().push((token.location.clone(), Instruction::MOV(Expression::val(OfP::REGISTER(reg)), Expression::val(OfP::CONST(cons.typ.clone())))))
-                                    }
-                                    else {
-                                        par_error!(token,"Unexpected Type for Mov Intrinsic. Expected Number32/Number64 but found {}",token.typ.to_string(false))
-                                    }
-                                }
-                                _ => par_error!(token,"Unexpected Type for Mov Intrinsic. Expected Number32/Number64 but found {}",token.typ.to_string(false))
-                            }
-                        }
-                        _ => {
-                            par_error!(regOp,"Error: Unexepected operation {}",op.to_string());
-                        }
-                    }
-                }
-                TokenType::Register(reg2) => {
-                    par_assert!(token,reg.size()==reg2.size(),"Gotten two differently sized registers to one op!");
-                    let regOp = lexer.next().expect(&format!("(P) [ERROR] {}:{}:{}: Unexpected register operation!",token.location.clone().file,&token.location.clone().linenumber,&token.location.clone().character));
-                    let body = currentScope.body_unwrap_mut().unwrap();
-                    match regOp.typ {
-                        TokenType::SETOperation(typ) => {
-                            match typ {
-                                SetOp::PLUSSET => {
-                                    body.push((token.location.clone(),Instruction::ADDSET(Expression::val(OfP::REGISTER(reg)), Expression::val(OfP::REGISTER(reg2)))))
-                                }
-                                SetOp::MINUSSET => {
-                                    body.push((token.location.clone(),Instruction::SUBSET(Expression::val(OfP::REGISTER(reg)), Expression::val(OfP::REGISTER(reg2)))))
-                                }
-                                SetOp::MULSET => {
-                                    body.push((token.location.clone(),Instruction::MULSET(Expression::val(OfP::REGISTER(reg)), Expression::val(OfP::REGISTER(reg2)))))
-                                }
-                                SetOp::DIVSET => {
-                                    body.push((token.location.clone(),Instruction::DIVSET(Expression::val(OfP::REGISTER(reg)), Expression::val(OfP::REGISTER(reg2)))))
-                                }
-                                SetOp::SET => {
-                                    body.push((token.location.clone(),Instruction::MOV(Expression::val(OfP::REGISTER(reg)), Expression::val(OfP::REGISTER(reg2)))))
-                                }
-                                other => par_error!(token,"Unexpected Operation! Expected Register Operation but found {}",other.to_string())
-                            }
-                        }
-                        other => {
-                            par_error!(token, "Unexpected token type: Expected Op but found {}",other.to_string(false));
-                        }
-                    }
-                }
-                typ => {
-                    par_error!(token,"Unexpected register operation! Expected Op or another Register but found {}",typ.to_string(false));
-                }
-            }
-        },
         TokenType::Operation(ref op) => {
             par_assert!(token, *op == Op::STAR, "Error: Cannot have op without a star!");
             let mut setop: Option<SetOp> = None;
@@ -1877,250 +1788,6 @@ fn optimization_ops(build: &mut BuildProgram, program: &CmdProgram) -> optim_ops
         OptimizationMode::DEBUG => optim_ops { usedStrings: HashMap::new(), usedExterns: HashSet::new(), usedFuncs: HashSet::new() },
     }
 }
-fn nasm_x86_64_prep_args(program: &CmdProgram, build: &BuildProgram, f: &mut File, contract: &Vec<OfP>, mut stack_size: usize, local_vars: &Vec<HashMap<String, LocalVariable>>,buffers: &Vec<BuildBuf>) -> io::Result<usize> {
-    let org_stack_size = stack_size;
-    let mut int_passed_count: usize = 0;
-    let mut offset: usize=0;
-    let shadow_space = if let ArcPassType::CUSTOM(arc) = &program.architecture.options.argumentPassing { arc.shadow_space } else { 0 };
-    if program.architecture.options.argumentPassing != ArcPassType::PUSHALL {
-        for iargs in contract.iter().rev() {
-            if program.architecture.options.argumentPassing.custom_unwrap().nums_ptrs.is_some() && int_passed_count >= program.architecture.options.argumentPassing.custom_unwrap().nums_ptrs.as_ref().unwrap().len() {
-                offset += iargs.var_type(build, local_vars,buffers).unwrap().get_size(program);
-                offset += offset%8;
-            }
-            match iargs.var_type(build, local_vars,buffers).unwrap()  {
-                VarType::CHAR    | VarType::SHORT   | VarType::BOOLEAN | VarType::INT     | VarType::LONG    | VarType::PTR(_)  => int_passed_count+=1,
-                VarType::CUSTOM(_) => {},
-            }
-        }
-    }
-    let additional_space: usize = offset;
-    for arg in contract.iter().rev() {
-        match arg {
-            OfP::GLOBALVAR(v) => {
-                let var1 = build.global_vars.get(v).expect("Unknown local variable parameter");
-                let oreg = match &var1.typ {
-                    GlobalVarType::BUFFER(i) => {
-                        let oreg = Register::RAX.to_byte_size((program.architecture.bits/8) as usize);
-                        writeln!(f, "   mov {}, _GLOBL_{}",oreg,i)?;
-                        oreg
-                    }
-                    GlobalVarType::CONSTANT(val) => {
-                        let oreg = Register::RAX.to_byte_size(val.to_type(build)[0].get_size(program));
-                        writeln!(f,"   mov {}, {} [_GLOBL_{}]",oreg,size_to_nasm_type(oreg.size()),v)?;
-                        oreg
-                    },
-                };
-                
-                if program.architecture.options.argumentPassing == ArcPassType::PUSHALL{
-                    stack_size += oreg.size();
-                    stack_size += stack_size%8;
-                    writeln!(f, "   mov {} [{}-{}], {}",size_to_nasm_type(oreg.size()), program.stack_ptr(),stack_size-org_stack_size, oreg.to_string())?
-                }
-                else {
-                    let custompassing = program.architecture.options.argumentPassing.custom_unwrap();
-                    if let Some(nptrs) = custompassing.nums_ptrs.as_ref() {
-                        if let Some(oreg2) = nptrs.get(int_passed_count-1) {
-                            writeln!(f, "   mov {}, {}",oreg2.to_byte_size(oreg.size()).to_string(), oreg.to_string())?;
-                        }
-                        else {
-                            stack_size += oreg.size();
-                            stack_size += stack_size%8;
-                            if additional_space+8-offset < shadow_space {
-                                writeln!(f, "   mov {} [{}+{}], {}",size_to_nasm_type(oreg.size()), program.stack_ptr(), shadow_space-(additional_space-offset)-8, oreg.to_string())?;
-                            }
-                            else if additional_space+8 -offset == shadow_space {
-                                writeln!(f, "   mov {} [{}], {}",size_to_nasm_type(oreg.size()), program.stack_ptr(), oreg)?
-                            }
-                            else {
-                                writeln!(f, "   mov {} [{}-{}], {}",size_to_nasm_type(oreg.size()), program.stack_ptr(), additional_space+8-offset-shadow_space, oreg.to_string())?;
-                            }
-                            offset-=oreg.size();
-                            offset-=offset%8;
-                        }
-                        int_passed_count-=1;
-                    }
-                    else {
-                        stack_size += oreg.size();
-                        stack_size += stack_size%8;
-                        writeln!(f, "   mov {} [{}-{}], {}",size_to_nasm_type(oreg.size()), program.stack_ptr(), offset, oreg.to_string())?;
-                        offset-=oreg.size();
-                        offset-=offset%8;
-                    }
-                }
-            }
-            OfP::LOCALVAR(v) => {
-                let var1 = get_local_build(local_vars, v).expect("Unknown local variable parameter");
-                let oreg = Register::RAX.to_byte_size(var1.typ.get_size(program));
-                if org_stack_size-var1.operand == 0 {
-                    writeln!(f, "   mov {}, {} [{}]",oreg.to_string(),size_to_nasm_type(oreg.size()),program.stack_ptr())?;
-                }
-                else {
-                    writeln!(f, "   mov {}, {} [{}+{}]",oreg.to_string(),size_to_nasm_type(oreg.size()),program.stack_ptr(),org_stack_size-var1.operand)?;
-                }
-                if program.architecture.options.argumentPassing == ArcPassType::PUSHALL{
-                    stack_size += oreg.size();
-                    writeln!(f, "   mov {} [{}-{}], {}",size_to_nasm_type(oreg.size()), program.stack_ptr(),stack_size-org_stack_size, oreg.to_string())?
-                }
-                else {
-                    let custompassing = program.architecture.options.argumentPassing.custom_unwrap();
-                    if let Some(nptrs) = custompassing.nums_ptrs.as_ref() {
-                        if let Some(oreg2) = nptrs.get(int_passed_count-1) {
-                            writeln!(f, "   mov {}, {}",oreg2.to_byte_size(oreg.size()).to_string(), oreg.to_string())?;
-                        }
-                        else {
-                            stack_size += oreg.size();
-                            stack_size += stack_size%8;
-                            if additional_space+8-offset < shadow_space {
-                                writeln!(f, "   mov {} [{}+{}], {}",size_to_nasm_type(oreg.size()), program.stack_ptr(), shadow_space-(additional_space-offset)-8, oreg.to_string())?;
-                            }
-                            else if additional_space+8 -offset == shadow_space {
-                                writeln!(f, "   mov {} [{}], {}",size_to_nasm_type(oreg.size()), program.stack_ptr(), oreg)?
-                            }
-                            else {
-                                writeln!(f, "   mov {} [{}-{}], {}",size_to_nasm_type(oreg.size()), program.stack_ptr(), additional_space+8-offset-shadow_space, oreg.to_string())?;
-                            }
-                            offset-=oreg.size();
-                            offset-=offset%8;
-                        }
-                        int_passed_count-=1;
-                    }
-                    else {
-                        stack_size += oreg.size();
-                        stack_size += stack_size%8;
-                        writeln!(f, "   mov {} [{}-{}], {}",size_to_nasm_type(oreg.size()), program.stack_ptr(),offset, oreg.to_string())?;
-                        offset-=oreg.size();
-                        offset-=offset%8;
-                    }
-                }
-            }
-            OfP::CONST(val)  => {
-                let oregs = val.LRNasm(f, build, program,&vec![Register::RAX, Register::RBX])?;
-                if program.architecture.options.argumentPassing == ArcPassType::PUSHALL ||  program.architecture.options.argumentPassing.custom_get().is_none() ||  program.architecture.options.argumentPassing.custom_unwrap().nums_ptrs.is_none(){
-                    for oreg in oregs {
-                        stack_size += oreg.size();
-                        stack_size += stack_size%8;
-                        writeln!(f, "   mov {} [{}-{}], {}",size_to_nasm_type(oreg.size()), program.stack_ptr(), offset, oreg.to_string())?;
-                        offset-=oreg.size();
-                        offset-=offset%8;
-                    }
-                }
-                else {
-                    let custompassing = program.architecture.options.argumentPassing.custom_unwrap();
-                    if let Some(nptrs) = custompassing.nums_ptrs.as_ref() {
-                        for oreg in oregs {
-                            if let Some(oreg2) = nptrs.get(int_passed_count-1) {
-                                writeln!(f, "   mov {}, {}",oreg2.to_byte_size(oreg.size()).to_string(), oreg.to_string())?;
-                            }
-                            else {
-                                stack_size += oreg.size();
-                                stack_size += stack_size%8;
-                                if additional_space+8-offset < shadow_space {
-                                    writeln!(f, "   mov {} [{}+{}], {}",size_to_nasm_type(oreg.size()), program.stack_ptr(), shadow_space-(additional_space-offset)-8, oreg.to_string())?;
-                                }
-                                else if additional_space+8 -offset == shadow_space {
-                                    writeln!(f, "   mov {} [{}], {}",size_to_nasm_type(oreg.size()), program.stack_ptr(), oreg)?
-                                }
-                                else {
-                                    writeln!(f, "   mov {} [{}-{}], {}",size_to_nasm_type(oreg.size()), program.stack_ptr(), additional_space+8-offset-shadow_space, oreg.to_string())?;
-                                }
-                                offset-=oreg.size();
-                                offset-=offset%8;
-                            }
-                            int_passed_count-=1;
-                        }
-                    }
-                    else {
-                        panic!("Unreachable")
-                    }
-                }
-                //println!("stack_size after = {}",stack_size);
-            }
-            _ => todo!(),
-        }
-    }
-    
-    //println!("Final stack_size={}",stack_size);
-    //if program.architecture.bits == 64 {
-    //    stack_size += 8-stack_size%8;
-    //}
-    //println!("Final stack_size={}",stack_size);
-    if stack_size-org_stack_size > 0 {
-        writeln!(f, "   sub {}, {}",program.stack_ptr(),stack_size-org_stack_size)?; //TODO: Setup stackframe only at the start of the scope
-    }
-    Ok(stack_size)
-}
-fn nasm_x86_64_load_args(f: &mut File, scope: &TCScopeType, build: &BuildProgram, program: &CmdProgram) -> io::Result<usize> {
-    let mut shadow_space = 0;
-    if let Some(ops) = program.architecture.options.argumentPassing.custom_get() {
-        if ops.shadow_space > 0 {
-            shadow_space = ops.shadow_space;
-        }
-    }
-    //let mut offset: usize = 0;
-    if program.architecture.options.argumentPassing == ArcPassType::PUSHALL {        
-        todo!("Im sure there is a bug to do here with x86 assembly and passing parameters and offsets having to be 8 aligned");
-    }
-    else {
-        let custom_build = program.architecture.options.argumentPassing.custom_unwrap();
-
-        let mut offset_of_ins: usize = 0;
-        let mut int_ptr_count: usize = 0;
-        
-        for (_, iarg) in scope.get_contract(build).unwrap().Inputs.iter().rev() {
-            if program.architecture.options.argumentPassing.custom_unwrap().nums_ptrs.is_some() && int_ptr_count >= program.architecture.options.argumentPassing.custom_unwrap().nums_ptrs.as_ref().unwrap().len() {
-                // if offset_of_ins%8+iarg.get_size(program) > 8 {
-                //     offset_of_ins+=8-offset_of_ins%8;
-                // }
-                offset_of_ins += iarg.get_size(program);
-                offset_of_ins += offset_of_ins%8;
-            }
-            match iarg {
-                VarType::CHAR    | VarType::SHORT   | VarType::BOOLEAN | VarType::INT     | VarType::LONG    | VarType::PTR(_)  => int_ptr_count+=1,
-                VarType::CUSTOM(_) => {},
-            }
-        }
-        
-        //if offset_of_ins%8 > 0 {
-        //    offset_of_ins+=offset_of_ins%8;
-        //}
-        let mut offset: usize = 0;
-        for (_, iarg) in scope.get_contract(build).unwrap().Inputs.iter().rev() {
-            if custom_build.nums_ptrs.is_some() && custom_build.nums_ptrs.as_ref().unwrap().len() > int_ptr_count-1 {
-                let osize = iarg.get_size(program);
-                let ireg = &custom_build.nums_ptrs.as_ref().unwrap()[int_ptr_count-1].to_byte_size(osize);
-                if offset%8+osize > 8 {
-                    offset+=8-offset%8;
-                }
-                offset+=osize;
-                writeln!(f, "   mov {} [{}-{}], {}",size_to_nasm_type(osize), program.stack_ptr(), offset, ireg.to_string())?;
-                // if (offset-osize)%8 > 0 {
-                //     offset-=8-(offset-osize)%8;
-                // }
-                // offset-=osize;
-                int_ptr_count-=1
-            }
-            else {
-                let osize = iarg.get_size(program);
-                let reg = Register::RAX.to_byte_size(osize);
-                writeln!(f, "   mov {}, {} [{}+{}]",reg.to_string(), size_to_nasm_type(osize),program.stack_ptr(),offset_of_ins+shadow_space)?;
-                if offset%8+osize > 8 {
-                    offset+=8-offset%8;
-                }
-                offset+=osize;
-                writeln!(f, "   mov {} [{}-{}], {}",size_to_nasm_type(osize),program.stack_ptr(),offset,reg.to_string())?;
-                //if (offset_of_ins-osize)%8 > 0 {
-                //    offset_of_ins-=8-(offset_of_ins-osize)%8;
-                //}
-                
-                offset_of_ins-=osize;
-                offset_of_ins-=offset_of_ins%8;
-                int_ptr_count-=1
-            }
-        };
-    }
-    Ok(0)
-}
 fn get_local_build<'a>(currentLocals: &'a Vec<HashMap<String, LocalVariable>>, name: &String) -> Option<&'a LocalVariable> {
     for e in currentLocals {
         if let Some(v) = e.get(name) {
@@ -2128,512 +1795,6 @@ fn get_local_build<'a>(currentLocals: &'a Vec<HashMap<String, LocalVariable>>, n
         }
     }
     None
-}
-
-fn nasm_x86_64_handle_scope(f: &mut File, build: &BuildProgram, program: &CmdProgram, scope: TCScopeType, local_vars: &mut Vec<HashMap<String, LocalVariable>>, stack_sizes: &mut Vec<usize>, mut stack_size: usize, func_stack_begin: usize, inst_count: &mut usize) -> io::Result<()> {
-    //println!("Gotten stack_size: {} ",stack_size);
-    let shadow_space: usize = if let ArcPassType::CUSTOM(argpassing) = &program.architecture.options.argumentPassing {
-        argpassing.shadow_space
-    } else { 0 };
-    *inst_count += 1;
-    let expect_loc_t = LinkedHashMap::new();
-    let contract_loc_t = FunctionContract { Inputs: LinkedHashMap::new(), Outputs: Vec::new()};
-    let expect_locals = scope.get_locals(build).unwrap_or(&expect_loc_t);
-    let contract = scope.get_contract(build).unwrap_or(&contract_loc_t);
-    let stack_size_org: usize = stack_size;
-    local_vars.reserve(contract.Inputs.len()+expect_locals.len());
-    if scope.has_contract() {
-        let _ = nasm_x86_64_load_args(f, &scope, build, program)?;
-    }
-    for (name, val) in expect_locals.iter() {
-        if stack_size%8+val.get_size(program)>8 {
-           // println!("Adding padding...");
-            stack_size+=8-stack_size%8;
-        }
-        stack_size += val.get_size(program);
-        let res = local_vars.len()-1;
-        local_vars[res].insert(name.clone(), LocalVariable { typ: val.clone(), operand: stack_size });
-    }
-    
-    let mut bufs = scope.get_buffers(build).clone();
-    for buf in bufs.iter_mut() {
-        stack_size += buf.size*buf.typ.get_size(program);
-        buf.offset = stack_size;
-    }
-    if stack_size%8 > 0 {
-        stack_size+=8-stack_size%8;
-    }
-    stack_size+=shadow_space;
-    //println!("stack_size after: {}",stack_size);
-    //println!("stack_size%8: {}",stack_size%8);
-    let dif = stack_size-stack_size_org;
-    
-    if dif > 0 {
-        writeln!(f, "   sub {}, {}",program.stack_ptr(),dif)?;
-    }
-    for (i,(loc,inst)) in scope.get_body(build).iter().enumerate() {
-        match inst {
-            Instruction::MOV(Op, Op2) => {
-
-                if let Expression::val(Op) = Op {
-                    match Op {
-                        OfP::REGISTER(Reg1) => {
-                            let oreg2 = Register::RBX.to_byte_size(Reg1.size());
-                            //TODO: This may break
-                            Op2.LEIRnasm(vec![*Reg1,oreg2], f, program, build,&local_vars, &bufs,stack_size, loc,inst_count.clone(),0)?;
-                        }
-                        OfP::LOCALVAR(varOrg) => {
-                            let var = com_expect!(loc,get_local_build(&local_vars,varOrg),"Error: Unknown variable found during compilation {}",varOrg);
-                            let oreg  = Register::RAX.to_byte_size(var.typ.get_size(program));
-                            let oreg2 = Register::RBX.to_byte_size(var.typ.get_size(program));
-                            let result = Op2.result_of_c(program, build, local_vars, &bufs, loc).unwrap();
-                            if result.get_size(program) < var.typ.get_size(program) {
-                                writeln!(f, "   xor {}, {}",Register::RAX.to_byte_size(var.typ.get_size(program)),Register::RAX.to_byte_size(var.typ.get_size(program)))?
-                            }
-                            let oregs = Op2.LEIRnasm(vec![oreg,oreg2,Register::RCX.to_byte_size(var.typ.get_size(program))], f, program,build, &local_vars, &bufs,stack_size, loc,inst_count.clone(),0)?;
-                            if stack_size-var.operand == 0 {
-                                writeln!(f, "   mov {} [{}], {}",size_to_nasm_type(var.typ.get_size(program)),program.stack_ptr(), oregs[0].to_byte_size(var.typ.get_size(program)).to_string())?;
-                            }
-                            else {
-                                writeln!(f, "   mov {} [{}+{}], {}",size_to_nasm_type(var.typ.get_size(program)),program.stack_ptr(),stack_size-var.operand, oregs[0].to_byte_size(var.typ.get_size(program)).to_string())?;
-                            }
-                        }
-                        _ => {
-                            todo!("Unsupported");
-                        }
-                    }
-                }
-                else {
-                    let expr = Op.unwrap_expr();
-                    com_assert!(loc, expr.op == Op::STAR, "Error: Expected op STAR but found {}",expr.op.to_string());
-                    let res_right = expr.right.as_ref().unwrap().result_of_c(program, build, &local_vars, &bufs,loc).unwrap();
-                    
-                    com_assert!(loc, res_right.is_some_ptr(), "Error: Cannot dereference void pointer");
-                    let oregs = expr.right.as_ref().unwrap().LEIRnasm(vec![Register::RAX.to_byte_size(res_right.get_size(program)),Register::RBX.to_byte_size(res_right.get_size(program)),Register::RCX.to_byte_size(res_right.get_size(program))], f, program, build, &local_vars, &bufs,stack_size, loc,inst_count.clone(),0)?;
-                    let res_deref_val = res_right.get_ptr_val().unwrap();
-                    writeln!(f, "   mov rsi, {}",oregs[0].to_string())?;
-                    let oregs2 = Op2.LEIRnasm(vec![Register::RAX.to_byte_size(res_deref_val.get_size(program)),Register::RBX.to_byte_size(res_deref_val.get_size(program)),Register::RCX.to_byte_size(res_deref_val.get_size(program))], f, program, build, &local_vars, &bufs,stack_size, loc,inst_count.clone(),1)?;
-                    writeln!(f, "   mov {} [rsi], {}",size_to_nasm_type(res_deref_val.get_size(program)),oregs2[0].to_byte_size(res_deref_val.get_size(program)).to_string())?;
-                }
-            }
-            Instruction::CALLRAW(Word, contract) => {
-                let sp_taken = nasm_x86_64_prep_args(program, build, f, contract, stack_size, &local_vars,&bufs)?;
-                let rax = Register::RAX.to_byte_size((program.architecture.bits/8) as usize);
-                writeln!(f, "   xor {}, {}",rax,rax)?;
-                if let Some(external) = build.externals.get(Word) {
-                    writeln!(f, "   call {}{}{}",external.typ.prefix(program),Word,external.typ.suffix())?;
-                }
-                else {
-                    writeln!(f, "   call {}",Word)?;
-                }
-                
-                if sp_taken-stack_size > 0 {
-                    writeln!(f, "   add {}, {}",program.stack_ptr(),sp_taken-stack_size)?;
-                }
-            }
-            Instruction::ADDSET(op1, op2) => {
-                let op1 = op1.unwrap_val();
-                match op1 {
-                    OfP::REGISTER(reg1) => {
-                        let reg2 = Register::RAX.to_byte_size(reg1.size());
-                        let reg3 = Register::RBX.to_byte_size(reg1.size());
-                        op2.LEIRnasm(vec![reg2,reg3], f, program,build, &local_vars, &bufs,stack_size, loc,inst_count.clone(),0)?;
-                        writeln!(f, "   add {}, {}",reg1.to_string(), reg2.to_string())?;
-                    }
-                    OfP::LOCALVAR(var1) => {
-                        let var1 = com_expect!(loc,get_local_build(&local_vars,var1),"Error: Unknown variable found during compilation {}",var1);
-                        let reg1 = Register::RAX.to_byte_size(var1.typ.get_size(program));
-                        let reg2 = Register::RBX.to_byte_size(reg1.size());
-                        op2.LEIRnasm(vec![reg1,reg2], f, program,build, &local_vars, &bufs,stack_size, loc,inst_count.clone(),0)?;
-                        if stack_size-var1.operand == 0 {
-                            writeln!(f, "   add {} [{}], {}",size_to_nasm_type(var1.typ.get_size(program)),program.stack_ptr(),reg1.to_string())?;
-                        }
-                        else {
-                            writeln!(f, "   add {} [{}+{}], {}",size_to_nasm_type(var1.typ.get_size(program)),program.stack_ptr(),stack_size-var1.operand,reg1.to_string())?;
-                        }
-                    },
-                    OfP::CONST(_) => todo!(),
-                    OfP::RESULT(_, _) => todo!(),
-                    _ => todo!()
-                }
-            }
-            Instruction::SUBSET(op1, op2) => {
-                let op1 = op1.unwrap_val();
-                match op1 {
-                    OfP::REGISTER(reg1) => {
-                        let reg2 = Register::RAX.to_byte_size(reg1.size());
-                        let reg3 = Register::RBX.to_byte_size(reg1.size());
-                        op2.LEIRnasm(vec![reg2,reg3], f, program,build, &local_vars, &bufs,stack_size, loc,inst_count.clone(),0)?;
-                        writeln!(f, "   sub {}, {}",reg1.to_string(), reg2.to_string())?;
-                    }
-                    OfP::LOCALVAR(var1) => {
-                        let var1 = com_expect!(loc,get_local_build(&local_vars,var1),"Error: Unknown variable found during compilation {}",var1);
-                        let reg1 = Register::RAX.to_byte_size(var1.typ.get_size(program));
-                        let reg2 = Register::RBX.to_byte_size(reg1.size());
-                        op2.LEIRnasm(vec![reg1,reg2], f, program,build, &local_vars, &bufs,stack_size, loc,inst_count.clone(),0)?;
-                        if stack_size-var1.operand == 0 {
-                            writeln!(f, "   sub {} [{}], {}",size_to_nasm_type(var1.typ.get_size(program)),program.stack_ptr(),reg1.to_string())?;
-                        }
-                        else {
-                            writeln!(f, "   sub {} [{}+{}], {}",size_to_nasm_type(var1.typ.get_size(program)),program.stack_ptr(),stack_size-var1.operand,reg1.to_string())?;
-                        }
-                    },
-                    OfP::CONST(_) => todo!(),
-                    OfP::RESULT(_, _) => todo!(),
-                    _ => todo!()
-                }
-            }
-            Instruction::MULSET(op1, op2) => {
-                let op1 = op1.unwrap_val();
-                match op1 {
-                    OfP::REGISTER(reg1) => {
-                        let reg2 = Register::RAX.to_byte_size(reg1.size());
-                        let res = op2.LEIRnasm(vec![reg2], f, program,build, &local_vars, &bufs,stack_size, loc,inst_count.clone(),0)?;
-                        if res[0].to_byte_size(8) != Register::RAX {
-                            writeln!(f, "   mov {}, {}",Register::RAX.to_byte_size(res[0].size()),res[0])?
-                        }
-                        writeln!(f, "   cqo")?;
-                        writeln!(f, "   imul {}",reg1.to_string())?;
-                    }
-                    OfP::LOCALVAR(var1) => {
-                        let var1 = com_expect!(loc,get_local_build(&local_vars, var1),"Error: Unknown variable found during compilation {}",var1);
-                        let reg1 = Register::RAX.to_byte_size(var1.typ.get_size(program));
-                        let res = op2.LEIRnasm(vec![reg1], f, program,build, &local_vars, &bufs,stack_size, loc,inst_count.clone(),0)?;
-                        if res[0].to_byte_size(8) != Register::RAX {
-                            writeln!(f, "   mov {}, {}",Register::RAX.to_byte_size(res[0].size()),res[0])?
-                        }
-                        if stack_size-var1.operand == 0 {
-                            writeln!(f, "   cqo")?;
-                            writeln!(f, "   imul {} [{}]",size_to_nasm_type(var1.typ.get_size(program)),program.stack_ptr())?;
-                            writeln!(f, "   mov {} [{}], {}",size_to_nasm_type(var1.typ.get_size(program)),program.stack_ptr(),Register::RAX.to_byte_size(var1.typ.get_size(program)))?;
-                        }
-                        else {
-                            writeln!(f, "   cqo")?;
-                            writeln!(f, "   imul {} [{}+{}]",size_to_nasm_type(var1.typ.get_size(program)),program.stack_ptr(),stack_size-var1.operand)?;
-                            writeln!(f, "   mov {} [{}+{}], {}",size_to_nasm_type(var1.typ.get_size(program)),program.stack_ptr(),stack_size-var1.operand,Register::RAX.to_byte_size(var1.typ.get_size(program)))?;
-                        }
-                        
-                    },
-                    _ => todo!()
-                }
-
-            }
-            Instruction::DIVSET(_, _) => {
-                todo!("Divset is not yet implemented!");
-            }
-            Instruction::CALL(Word,args) => {
-                let sp_taken = nasm_x86_64_prep_args(program, build, f, args, stack_size, &local_vars,&bufs)?;
-                let rax = Register::RAX.to_byte_size((program.architecture.bits/8) as usize);
-                writeln!(f, "   xor {}, {}",rax,rax)?;
-                if let Some(external) = build.externals.get(Word) {
-                    writeln!(f, "   call {}{}{}",external.typ.prefix(program),Word,external.typ.suffix())?;
-                }
-                else {
-                    writeln!(f, "   call {}",Word)?;
-                }
-                if sp_taken-stack_size > 0 {
-                    writeln!(f, "   add {}, {}",program.stack_ptr(),sp_taken-stack_size)?;
-                }
-            }
-            Instruction::FNBEGIN() => {
-
-
-            }
-            Instruction::RET(expr) => {
-                let dif = if scope.is_normal() {stack_size-func_stack_begin} else {stack_size-stack_size_org};
-                let _regs = expr.LEIRnasm(vec![Register::RAX,Register::RBX,Register::RCX], f, program, build, &local_vars, &bufs,stack_size, loc,inst_count.clone(),0)?;
-                let oreg = Register::RAX.to_byte_size(_regs[0].size());
-                if _regs[0] != oreg {
-                    writeln!(f, "   mov {}, {}",oreg.to_string(),_regs[0].to_string())?;
-                }
-                if dif > 0 {
-                    writeln!(f, "   add {}, {}",program.stack_ptr(),dif)?;
-                }
-                
-                writeln!(f, "   ret")?;
-            }
-            Instruction::DEFVAR(_) => {},
-            Instruction::INTERRUPT(val) => {
-                writeln!(f, "   int 0x{:x}",val)?;
-            },
-            Instruction::EXPAND_SCOPE(s) => {
-                local_vars.push(HashMap::new());
-                stack_sizes.push(stack_size);
-                writeln!(f, "   add {}, {}",program.stack_ptr(),shadow_space)?;
-                stack_size-=shadow_space;
-                nasm_x86_64_handle_scope(f, build, program, TCScopeType::NORMAL(&s),local_vars,stack_sizes,stack_size,func_stack_begin,inst_count)?;
-                
-                stack_size+=shadow_space;
-                writeln!(f, "   sub {}, {}",program.stack_ptr(),shadow_space)?;
-                
-            }
-            Instruction::EXPAND_IF_SCOPE(s)   => {
-                let binst = inst_count.clone();
-                let olabel = format!(".IF_SCOPE_{}",binst);
-                let condition = match s.typ {
-                    NormalScopeType::IF(ref c) => c,
-                    _ => panic!("Unreachable")
-                };
-                condition.jumpif_nasm_x86_64(&olabel,f, program, build, loc, stack_size, local_vars, &bufs,inst_count.clone(),0)?;
-                if let Some((_,elses)) = scope.get_body(build).get(i+1) {
-                    match elses {
-                        Instruction::EXPAND_ELSE_SCOPE(elses) => {
-                            local_vars.push(HashMap::new());
-                            writeln!(f, "   add {}, {}",program.stack_ptr(),shadow_space)?;
-                            stack_size-=shadow_space;
-                            stack_sizes.push(stack_size);
-                            nasm_x86_64_handle_scope(f, build, program, TCScopeType::NORMAL(&elses), local_vars, stack_sizes,stack_size,func_stack_begin,inst_count)?;
-                 
-                            stack_size+=shadow_space;
-                            writeln!(f, "   sub {}, {}",program.stack_ptr(),shadow_space)?;
-                        }
-                        _ => {}
-                    }
-                }
-                
-
-                writeln!(f, "   jmp .IF_SCOPE_END_{}",binst)?;
-                writeln!(f, "   .IF_SCOPE_{}:",binst)?;
-                *inst_count += 1;
-                local_vars.push(HashMap::new());
-                writeln!(f, "   add {}, {}",program.stack_ptr(),shadow_space)?;
-                stack_size-=shadow_space;
-                stack_sizes.push(stack_size);
-                nasm_x86_64_handle_scope(f, build, program, TCScopeType::NORMAL(&s), local_vars, stack_sizes,stack_size,func_stack_begin,inst_count)?;
-                
-                stack_size+=shadow_space;
-                writeln!(f, "   sub {}, {}",program.stack_ptr(),shadow_space)?;
-                *inst_count -= 1;
-
-                writeln!(f, "   .IF_SCOPE_END_{}:",binst)?;
-                
-            },
-            Instruction::EXPAND_WHILE_SCOPE(s) => {
-                let olabel = format!(".WHILE_SCOPE_END_{}",inst_count);
-                let fallback_label = format!(".WHILE_SCOPE_{}",inst_count);
-                writeln!(f, "   {}:",fallback_label)?;
-
-                let condition = match s.typ {
-                    NormalScopeType::WHILE(ref c) => c,
-                    _ => panic!("Unreachable")
-                };
-                condition.jumpifn_nasm_x86_64(&olabel,f, program, build, loc, stack_size, local_vars, &bufs,inst_count.clone(),0)?;
-                let binst = inst_count.clone();
-                local_vars.push(HashMap::new());
-                writeln!(f, "   add {}, {}",program.stack_ptr(),shadow_space)?;
-                stack_size-=shadow_space;
-                stack_sizes.push(stack_size);
-                nasm_x86_64_handle_scope(f, build, program, TCScopeType::NORMAL(&s), local_vars, stack_sizes,stack_size,func_stack_begin,inst_count)?;
-                
-                stack_size+=shadow_space;
-                writeln!(f, "   sub {}, {}",program.stack_ptr(),shadow_space)?;
-                writeln!(f, "   jmp .WHILE_SCOPE_{}" ,binst)?;
-                writeln!(f, "   .WHILE_SCOPE_END_{}:",binst)?;
-
-            }
-            Instruction::EXPAND_ELSE_SCOPE(_) => {
-                
-            },
-            Instruction::SYSCALL => {
-                writeln!(f, "   syscall")?;
-            }
-            Instruction::MAKELABEL(lname) => {
-                write!(f, "   .LABEL_")?;
-                for chr in lname.bytes() {
-                    write!(f, "{}_",chr)?;
-                }
-                writeln!(f, ":\n")?;
-            }
-            Instruction::GOTO(lname, s) => {
-                let mut total_drop: usize = 0;
-                for s in &stack_sizes[s.to_owned()..] {
-                    //println!("Passing by vars: {:?}",vars);
-                    total_drop += s;
-                }
-                if total_drop > 0 {
-                    writeln!(f, "   add {}, {}",program.stack_ptr(),total_drop)?;
-                }
-                
-                write!(f, "   jmp .LABEL_")?;
-                for chr in lname.bytes() {
-                    write!(f, "{}_",chr)?;
-                }
-                writeln!(f)?;
-            }
-            _ => todo!("Re-enable these:")
-            
-        }
-        *inst_count += 1;
-    }
-    if !scope.is_func() {
-        let dif = stack_size-stack_size_org;
-        if dif != 0 {
-            writeln!(f, "   add {}, {}",program.stack_ptr(),dif)?;
-        }
-    }
-    else if scope.unwrap_func() != "main" {
-        let dif = stack_size-stack_size_org;
-        if dif != 0 {
-            writeln!(f, "   add {}, {}",program.stack_ptr(),dif)?;
-        }
-        writeln!(f, "   ret")?;
-    }
-    local_vars.pop();
-    stack_sizes.pop();
-    Ok(())
-}
-fn to_nasm_x86_64(build: &mut BuildProgram, program: &CmdProgram) -> io::Result<()>{
-    let optimization = optimization_ops(build, program);
-    let mut f = File::create(&program.opath).expect(&format!("Error: could not open output file {}",program.opath.as_str()));
-    if program.architecture.bits == 64 {
-        writeln!(&mut f,"BITS 64")?;
-        writeln!(&mut f,"default rel")?;
-    }
-    writeln!(&mut f, "section .bss")?;
-    for (i,buf) in build.buffers.iter().enumerate() {
-        writeln!(&mut f, "   _GLOBL_{}: resb {}",i,buf.size*buf.typ.get_size(program))?;
-    }
-    
-    writeln!(&mut f, "section .data")?;
-
-
-    for (id,stridef) in build.stringdefs.iter().enumerate(){
-        if program.in_mode == OptimizationMode::DEBUG || (optimization.usedStrings.contains_key(&id) && (optimization.usedFuncs.contains(optimization.usedStrings.get(&id).unwrap()) || !program.remove_unused_functions || optimization.usedStrings.get(&id).expect(&format!("Could not find: {}",&id)) == "main")) {
-            write!(&mut f, "   $STRING_{}_: db ",id)?;
-            for chr in stridef.Data.chars() {
-                write!(&mut f, "{}, ",(chr as u8))?;
-            }
-            if program.in_mode == OptimizationMode::DEBUG {
-                writeln!(&mut f, "0    ; {}",stridef.Data.escape_default())?;
-            }
-            else {
-                writeln!(&mut f, "0")?;
-            }
-            match stridef.Typ {
-                ProgramStringType::STR  => {},
-                ProgramStringType::CSTR => {},
-            }
-        }
-        else if program.print_unused_warns || program.print_unused_strings {
-            println!("[NOTE] Unused string:   <{}> \"{}\" - This is probably due to a constant definition that was never used or a function that may have used that strings, that got cut off from the final build",id, stridef.Data.escape_default());
-            for (cd_name, cd) in build.constdefs.iter() {
-                match cd.typ {
-                    RawConstValueType::STR(id2) => {
-                        if id == id2 {
-                            println!("       ^ Found matching constant definition: \"{}\" at {}",cd_name,cd.loc.loc_display());
-                        }
-                    }
-                    _ => {}
-                }
-            }
-        }
-    }
-    for (name,var) in build.global_vars.iter() {
-        write!(&mut f, "   _GLOBL_{}: ",name)?;
-        match &var.typ {
-            //GlobalVarType::BUFFER(i) => writeln!(&mut f, "_GLOBLBUF_{}",i)?,
-            GlobalVarType::CONSTANT(val) => {
-                match val {
-                    RawConstValueType::CHAR(v) => writeln!(&mut f, "db {}",v)?,
-                    RawConstValueType::SHORT(v) => writeln!(&mut f, "dw {}",v)?,
-                    RawConstValueType::INT(v) => writeln!(&mut f, "dd {}",v)?,
-                    RawConstValueType::LONG(v) => writeln!(&mut f, "dq {}",v)?,
-                    RawConstValueType::STR(UUID) => writeln!(&mut f, "$STRING_{}",UUID.to_string().replace("-", ""))?,
-                    RawConstValueType::PTR(_, t) => {
-                        if program.architecture.bits == 32 {
-                            writeln!(&mut f, "dd {}",t)?;
-                        }
-                        else if program.architecture.bits == 64 {
-                            writeln!(&mut f, "dq {}",t)?;
-                        }
-                        else {
-                            panic!("Unreachable")
-                        }
-                    },
-                }
-            },
-            _ => {}
-        }
-    }
-    for (dll_import_name,_) in build.dll_imports.iter() {
-        writeln!(&mut f, "extern {}",dll_import_name)?;
-        
-    }
-    for (dll_export_name,_dll_export) in build.dll_exports.iter() {
-        writeln!(&mut f, "global {}",dll_export_name)?;
-    }
-    for function_name in build.functions.keys() {
-        if function_name == "main" {
-            writeln!(&mut f,"global {}{}",program.architecture.func_prefix,function_name)?;
-        }
-        else {
-            writeln!(&mut f,"global {}{}",program.architecture.func_prefix,function_name)?;
-            if program.in_mode != OptimizationMode::DEBUG && !optimization.usedFuncs.contains(function_name) && program.print_unused_warns && program.print_unused_funcs {
-                println!("[NOTE] {}: Unused function: \"{}\"", build.functions.get(function_name).unwrap().location.loc_display(),function_name);
-            }
-        }
-    }
-    for (Word,exter) in build.externals.iter() {
-        match exter.typ {
-            ExternalType::CExternal| ExternalType::RawExternal => {
-    
-                if program.in_mode == OptimizationMode::DEBUG || optimization.usedExterns.contains(Word) {
-
-                    writeln!(&mut f,"  extern {}{}{}",exter.typ.prefix(&program),Word,exter.typ.suffix())?;
-                }
-                else if program.print_unused_warns || program.print_unused_externs {
-                    println!("[NOTE] {}: Unused external: \"{}\"",exter.loc.loc_display(),Word);
-                }
-            },
-        }
-    }
-    
-    writeln!(&mut f, "section .text")?;
-
-    for (function_name,function) in build.functions.iter() {
-        if program.in_mode != OptimizationMode::DEBUG && program.remove_unused_functions && !optimization.usedFuncs.contains(function_name) && function_name != "main" {
-            continue;
-        }
-
-        if function_name == "main" {
-            writeln!(&mut f, "{}{}:",program.architecture.func_prefix,function_name)?;
-        }
-        else {
-            writeln!(&mut f, "{}{}:",program.architecture.func_prefix,function_name)?;
-        }
-        let mut inst_count = 0;
-        let mut stack_sizes: Vec<usize> = Vec::new();
-        nasm_x86_64_handle_scope(&mut f, build, program, TCScopeType::FUNCTION(function_name.clone()),&mut vec![HashMap::new()],&mut stack_sizes,0,0,&mut inst_count)?;
-        if function_name == "main" {
-
-            let shadow_space: usize = if let ArcPassType::CUSTOM(argpassing) = &program.architecture.options.argumentPassing {
-                argpassing.shadow_space
-            } else { 0 };
-            let mut argsize: usize = 0;
-            for (_,local) in function.locals.iter() {
-                if argsize%8+local.get_size(program) > 8 {
-                    argsize += 8-argsize%8;
-                }
-                argsize += local.get_size(program);
-            }
-            for buf in function.buffers.iter() {
-                argsize += buf.size*buf.typ.get_size(program);
-            }
-            if argsize%8 > 0 {
-                argsize += 8-argsize%8;
-            }
-            argsize+=shadow_space;
-            if argsize > 0 {
-                writeln!(&mut f, "   add {}, {}",program.stack_ptr(),argsize)?;
-            }
-            let rax = Register::RAX.to_byte_size((program.architecture.bits/8) as usize);
-            writeln!(f, "   xor {}, {}",rax,rax)?;
-            writeln!(&mut f, "   ret")?;
-        }
-    }
-    
-    Ok(())
-
 }
 
 #[derive(Debug)]
@@ -2776,7 +1937,6 @@ fn type_check_scope(build: &BuildProgram, program: &CmdProgram, scope: TCScopeTy
                                 typ_assert!(loc,etyp.weak_eq(&var),"Error: Incompatible types for contract\nExpected: {}\nFound: ({}) {}",etyp.to_string(false),name,var.to_string(false));
                             }
                         }
-                        OfP::REGISTER(_) => todo!("Registers are still yet unhandled!"),
                         OfP::CONST(Const) => {
                             let typs = Const.to_type(build);
                             for typ in typs {
@@ -2852,7 +2012,6 @@ fn type_check_scope(build: &BuildProgram, program: &CmdProgram, scope: TCScopeTy
                             };
                             typ_assert!(loc,etyp.weak_eq(&var),"Error: Incompatible types for contract\nExpected: {}\nFound: ({}) {}",etyp.to_string(false),name,var.to_string(false));
                         }
-                        OfP::REGISTER(_) => todo!("Registers are still yet unhandled!"),
                         OfP::CONST(Const) => {
                             let typs = Const.to_type(build);
                             for typ in typs {
@@ -2946,13 +2105,6 @@ fn dump_tokens(lexer: &mut Lexer) {
         println!("Token: {:?}",token);
     }
 }
-fn val_arr_to_reg_arr(list: &Vec<Value>) -> Option<Vec<Register>> {
-    let mut out: Vec<Register> = Vec::with_capacity(list.len());
-    for val in list {
-        out.push(Register::from_string(&val.as_str()?.to_owned())?);
-    }
-    Some(out)
-}
 fn json_to_arc(json: &serde_json::Map<String, Value>) -> Architecture {
     let ops = json.get("options").expect("Expected options but found nothing!").as_object().expect("Ops must be an object!");
     let argpassing = ops.get("argumentPassing").expect("Expected argumentPassing but found nothing!");
@@ -2966,9 +2118,6 @@ fn json_to_arc(json: &serde_json::Map<String, Value>) -> Architecture {
             else if let Value::Object(argpassing) = argpassing {
 
                 ArcOps { argumentPassing: ArcPassType::CUSTOM(ArcCustomOps {
-                    nums_ptrs: Some(val_arr_to_reg_arr(argpassing.get("num_ptrs").expect("Error: expected num_ptrs but found nothing!").as_array().expect("Error: Value of num_ptrs must be array")).expect("Error: unknown syntax or register inside num_ptrs")),
-                    floats: Some(val_arr_to_reg_arr(argpassing.get("floats").expect("Error: expected floats but found nothing!").as_array().expect("Error: Value of floats must be array")).expect("Error: unknown syntax or register inside floats")),
-                    returns: Some(val_arr_to_reg_arr(argpassing.get("returns").expect("Error: expected returns but found nothing!").as_array().expect("Error: Value of returns must be array")).expect("Error: unknown syntax or register inside returns")),
                     on_overflow_stack: argpassing.get("on_overflow_stack").expect("Expected on_overflow_stack but found nothing!").as_bool().expect("Value of on_overflow_stack must be boolean!"),
                     shadow_space: argpassing.get("shadow_space").expect("Expected shadow_space but found nothing!").as_u64().expect("Value of shadow_space must be u64!") as usize }) }
             }
@@ -2997,8 +2146,7 @@ fn json_to_arc(json: &serde_json::Map<String, Value>) -> Architecture {
 }
 fn list_targets(indent: usize){
     let indent = " ".repeat(indent);
-    println!("{}- nasm_x86_64",indent);
-    println!("{}- nasm_x86 (Secondary to x86_64, first features get implemented for 64 bit and afterwards to 32 bit)",indent);
+    println!("- llvm-native");
 }
 fn main() {
     #[cfg(not(debug_assertions))]
@@ -3022,12 +2170,11 @@ fn main() {
     
     let mut program = CmdProgram::new();
     
-    program.opath = Path::new(&program.path).with_extension(".asm").to_str().unwrap().to_string();
+    program.opath = Path::new(&program.path).with_extension(".o").to_str().unwrap().to_string();
     let mut Architectures: HashMap<String, Architecture> = HashMap::new();
-    use Register::*;
-    Architectures.insert("windows_x86_64".to_owned(), Architecture { bits: 64, platform: "windows".to_string(), cextern_prefix: "".to_owned(),  func_prefix:"".to_owned(),  options: ArcOps { argumentPassing: ArcPassType::CUSTOM(ArcCustomOps { nums_ptrs: Some(vec![RCX, RDX,R8,R9]), floats: Some(vec![XMM0,XMM1,XMM2,XMM3]), returns: Some(vec![RAX]), on_overflow_stack: true, shadow_space: 40}) }        , obj_extension: "obj".to_owned(), flags: ArcFlags { nasm: vec!["-f".to_string(),"win64".to_string()] }});
+    Architectures.insert("windows_x86_64".to_owned(), Architecture { bits: 64, platform: "windows".to_string(), cextern_prefix: "".to_owned(),  func_prefix:"".to_owned(),  options: ArcOps { argumentPassing: ArcPassType::CUSTOM(ArcCustomOps { on_overflow_stack: true, shadow_space: 40}) }        , obj_extension: "obj".to_owned(), flags: ArcFlags { nasm: vec!["-f".to_string(),"win64".to_string()] }});
     Architectures.insert("windows_x86".to_owned(),    Architecture { bits: 32, platform: "windows".to_string(), cextern_prefix: "_".to_owned(), func_prefix:"_".to_owned(), options: ArcOps { argumentPassing: ArcPassType::PUSHALL }                                                                                                                                                                            , obj_extension: "obj".to_owned(), flags: ArcFlags { nasm: vec!["-f".to_string(),"win32".to_string()] }});
-    Architectures.insert("linux_x86_64".to_owned(),   Architecture { bits: 64, platform: "linux".to_string()  , cextern_prefix: "".to_owned(),  func_prefix:"".to_owned(),  options: ArcOps { argumentPassing: ArcPassType::CUSTOM(ArcCustomOps { nums_ptrs: Some(vec![RDI, RSI,RDX,RCX,R8,R9]), floats: Some(vec![XMM0,XMM1,XMM2,XMM3]), returns: Some(vec![RAX]), on_overflow_stack: true, shadow_space: 0 }) }, obj_extension: "o".to_owned()  , flags: ArcFlags { nasm: vec!["-f".to_string(),"elf64".to_string()] }});
+    Architectures.insert("linux_x86_64".to_owned(),   Architecture { bits: 64, platform: "linux".to_string()  , cextern_prefix: "".to_owned(),  func_prefix:"".to_owned(),  options: ArcOps { argumentPassing: ArcPassType::CUSTOM(ArcCustomOps { on_overflow_stack: true, shadow_space: 0 }) }, obj_extension: "o".to_owned()  , flags: ArcFlags { nasm: vec!["-f".to_string(),"elf64".to_string()] }});
     Architectures.insert("linux_x86".to_owned(),      Architecture { bits: 32, platform: "linux".to_string()  , cextern_prefix: "_".to_owned(), func_prefix:"_".to_owned(), options: ArcOps { argumentPassing: ArcPassType::PUSHALL }                                                                                                                                                                            , obj_extension: "o".to_owned()  , flags: ArcFlags { nasm: vec!["-f".to_string(),"elf32".to_string()] }});
     //short calls
     Architectures.insert("win_x86_64".to_owned(), Architectures.get("windows_x86_64").unwrap().clone());
@@ -3143,10 +2290,6 @@ fn main() {
         }
     });
     match program.target.as_str() {
-        "nasm_x86_64" => {}
-        "nasm_x86" => {
-            todo!("Nasm x86 is not supported yet");
-        }
         _ => {
             eprintln!("Undefined target: {}\nSee supported targets by doing -t list",program.target);
             exit(1);
@@ -3209,51 +2352,7 @@ fn main() {
         type_check_build(&mut build, &program);
     }
     match program.target.as_str() {
-        "nasm_x86" => {
-            todo!("Nasm x86 is not supported yet");
-        }
-        "nasm_x86_64" => {
-            to_nasm_x86_64(&mut build, &program).expect("Could not build to nasm_x86_64");
-            if program.should_build {
-                println!("-------------");
-                let mut args = program.architecture.flags.nasm.clone();
-                args.append(&mut vec![program.opath.as_str().to_owned()]);
-                println!("   * nasm {}",args.join(" "));
-                let nasm = Command::new("nasm").args(args).output().expect("Could not build nasm!");
-                let v = Path::new(program.opath.as_str()).with_extension(&program.architecture.obj_extension);
-                let v2 = Path::new(program.opath.as_str()).with_extension("");
-                let args = [v.to_str().unwrap(),"-o",v2.to_str().unwrap(), if program.architecture.bits==64 { "-m64"} else {"-m32"}];
-                println!("   * gcc -m64 {}",args.join(" "));
-                let gcc  = Command::new("gcc").args(args).output().expect("Could not build gcc!");
-                if !nasm.status.success() {
-                    println!("--------------");
-                    println!("Nasm: \n{:?}\n-----------",nasm);
-                    println!("--------------");
-                    exit(nasm.status.code().unwrap_or(0));
-                }
-                if !gcc.status.success() {
-                    println!("--------------");
-                    println!("Gcc:  \n{:?}",gcc);
-                    println!("--------------");
-                    exit(nasm.status.code().unwrap_or(0));
-                }
-                println!("--------------");
-                println!("   - Finished build successfully");
-                println!("--------------");
-            }
-            if program.should_run {
-                let exe_path = Path::new(program.opath.as_str()).with_extension("");
-                println!("   * {}", exe_path.to_str().unwrap());
-                println!("--------------");
-                let mut prog = Command::new(exe_path.to_str().unwrap()).stdout(Stdio::inherit()).stdin(Stdio::inherit()).stderr(Stdio::inherit()).spawn().unwrap();
-                let status = prog.wait().unwrap();
-                println!("--------------");
-                println!("Program exited with: {}",status.code().unwrap());
-                println!("--------------");
-            }
-        }
         _ => {
-            
             eprintln!("Target {} is either unsupported or a target is not provided!\n",program.target)
         }
     }
