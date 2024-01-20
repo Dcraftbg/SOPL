@@ -1,0 +1,148 @@
+struct String {
+    data: *char
+    len: long
+    capacity: long
+}
+func is_space(c: char : bool) {
+    ret c '\n' == || c '\t' == || c '\r' == || c ' ' ==
+}
+func is_alphabetic(c: char : bool) {
+    ret c 'a' >= && c 'z' <= || c 'A' >= && c 'Z' <=
+}
+func is_numeric(c: char : bool) {
+    ret c '0' >= && c '9' <=
+}
+func is_lowercase(c: char : bool) {
+    ret c 'a' >= && c 'z' <=
+}
+func is_uppercase(c: char : bool) {
+    ret c 'A' >= && c 'Z' <=
+}
+const LOWERCASE_DIF: long = 'a' 'A' -;
+func to_lowercase(c: char : char) {
+    if is_uppercase(c) {
+        ret c LOWERCASE_DIF -
+    }
+    ret c
+}
+func to_uppercase(c: char : char) {
+    if is_lowercase(c) {
+        ret c LOWERCASE_DIF +
+    }
+    ret c
+}
+func cstr_len(stri: *char : long) {
+    let i: long = 0;
+    while stri[i] != 0 {
+        i++
+    }
+    ret i
+}
+String::{
+    func new(: Self) {
+        Self {data=0, len=0, capacity=0}
+    }
+    func from_str(stri: str: Self) {
+        Self {data=str->data, len=str->capacity, capacity=str->capacity}
+    }
+    func find(this: *Self, c: char : long) {
+        let i: int = 0;
+        while (i stri.len < && this->data[i] c !=){
+            i++
+        }
+        if i stri.len < {
+            ret -1
+        }
+        ret i
+    }
+    func rfind(this: *Self, c: char : long) {
+        let i: int = stri.len;
+        while (i stri.len > && this->data[i] c !=){
+            i--
+        }
+        if i 0 == {
+            ret -1l;
+        }
+        ret i;
+    }
+    func set(this: *Self, i: long, c: char : bool) {
+        let result: bool = 0;
+        if this->len i > {
+            this->data[i] = c
+            result = 1
+        }
+        ret result
+    }
+    func copy(this: *Self, other: *Self : bool) {
+        if this->len other->len <= {
+            let i: long = 0l;
+            while i this->len < {
+                other->data[i] = this->data[i]
+                i++
+            }
+            ret 1
+        }
+        ret 0
+    }
+    func extend(this: *Self, other: *Self : bool) {
+        if this->len other->len + this->capacity <= {
+            let i: long = other->len;
+            while i this->len other->len + < {
+                this->data[i] = other->data[i other->len -]
+                i++;
+            }
+            this->len other->len +
+            ret 1
+        }
+        ret 0
+    }
+    func slice(this: *Self, from: long, to: long : Self)  {
+        ret Self {data=this->data from +, len=to from -, capacity=to from -}
+    }
+    func slice_into(this: *Self, from: long, to: long, into: *Self : bool)  {
+        if this->len < to {
+            ret 0
+        }
+        let i: long = from
+        while i to < {
+            if into->set(i, this->data[i]) ! {
+                ret 0
+            }
+            i++;
+        }
+    }
+    func to_uppercase(this: *Self) {
+        let i: long = 0
+        while i < this->len {
+            this->data[i] = to_uppercase(this->data[i])
+            i++;
+        }
+    }
+    func to_lowercase(this: *Self) {
+        let i: long = 0
+        while i < this->len {
+            this->data[i] = to_lowercase(this->data[i])
+            i++;
+        }
+    }
+}
+
+/*
+Example:
+//Method overloading btw:
+func print(a: String){
+    print(a->data)
+}
+let a: String = String::new()
+a.data = vec[char; 500]
+a.capacity = 500
+a.copy(String::from_str("Hello world!\n"))
+a.set(0, 'W')
+a.to_lowercase()
+a.to_uppercase()
+a.extend(String::from_str("Hi Mom!"))
+print(a) // Prints:
+
+//Wello world!
+//Hi Mom!
+*/

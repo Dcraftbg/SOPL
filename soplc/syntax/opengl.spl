@@ -1,0 +1,38 @@
+extern glfwInit();
+extern glfwCreateWindow(int,int,*char, ptr, ptr);
+extern glfwTerminate();
+extern glfwMakeContextCurrent(ptr);
+extern glfwWindowShouldClose(ptr);
+
+extern glClear(long);
+extern glfwSwapBuffers(ptr);
+extern glfwPollEvents();
+
+extern "C" puts(*char);
+const nullptr: ptr = cast<ptr>(0);            
+const GLEW_OK: int = 0;
+const GL_COLOR_BUFFER_BIT: long = 0x00004000;
+
+
+func main() {
+    let window: ptr;
+    glfwCreateWindow(640,480, "Hello World"c, nullptr, nullptr);
+    window = RAX;
+    if window != 0 {
+        glfwTerminate();
+        RAX = -1;
+        ret
+    }
+    glfwMakeContextCurrent(window);
+    if glewInit() != GLEW_OK { 
+        puts("Error: Could not initialize window!"c);
+        RAX = -1;
+        ret
+    }
+    while glfwWindowShouldClose(window) != 0 {
+        glClear(GL_COLOR_BUFFER_BIT);
+        glfwSwapBuffers(window);
+        glfwPollEvents();
+    }
+    glfwTerminate();
+}   

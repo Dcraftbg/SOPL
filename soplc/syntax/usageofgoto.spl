@@ -1,0 +1,34 @@
+include "../libs/libc/stdio.spl"
+
+func force_fwrite(f: ptr, buf: ptr, buf_size: size_t : bool) {
+    let org_size: size_t = buf_size;
+    while buf_size > 0 {
+        let s: size_t = buf+org_size-buf_size;
+        buf_size -= fwrite(f,s,buf_size);
+        if ferror(f) {
+            @goto("Error")
+        }
+    }
+    return 0;
+    @makelabel("Error");
+    return 1;
+}
+func main(){
+    let f: ptr = fopen("hello.txt","r");
+    if f == 0 {
+        @goto("FreeResources")    
+    }
+    if force_fwrite(f, "Hello World",12) {
+       @goto("FreeResources")
+    }
+
+    //let fp: ptr = @getlabel("FreeSources");
+    //@gotoif("FreeResources", f==nullptr)
+
+    @makelabel("FreeResources")
+    printf("Called free resources!");
+    if f != nullptr {
+        fclose(f);
+    }
+    
+}

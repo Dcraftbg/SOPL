@@ -1,7 +1,9 @@
 **(Latest patch versions in github history and at the top of Change Log) - note that they are not noted with a version number until that version is totally complete**
 
-Newest Version: [0.17A](#017a)
+Newest Version: [0.18A](#018a)
 # Manual:
+  - [0.18A](#018a)
+  - [0.17A](#017a)
   - [0.16.3A](#0163a) 
     - [0.16.2A](#0162a) 
     - [0.16.1A](#0161a)
@@ -52,6 +54,9 @@ Newest Version: [0.17A](#017a)
   - [0.2A](#02a)
   - [0.1A](#01a)
 # Change Log
+ ## 0.18A
+   - Restructured code
+   - Preparing for LLVM update
  ## 0.17A
    - Added ! (not)
    - Added || and && for expressions

@@ -1,0 +1,114 @@
+struct A {
+	A: int,
+	B: long
+}
+func A::GetB(this: *Self : long){
+	return this->B
+}
+A::{
+   func GetB(this: *Self : long) {
+		return this->B
+   }
+   func GetA(this: *Self : int) {
+		return this->A
+   }
+   func GetS(: long) {
+		return 5l
+   }
+}
+A::{
+   func GetD(: long) {
+		return 5l
+	 }
+	 func new(: Self) {
+		return Self {A=0, B=0}
+	 }
+}
+
+
+func add(a: int, b: int : int) {
+   return a + b
+}
+func add-args(args: ... <int> : int){
+   let result: int = 0;
+	for (let i: int = 0; i < args.length(); i++){
+		result += args[i]
+	}
+	return result
+}
+extern "C" printf(*char, ...<any>);
+extern "C" putc(char);
+extern "C" puts(*char);
+extern "C" fputc(*FILE, char);
+
+func main(){
+	A::GetS()
+	let x: A = A::new();
+	x.GetA()
+	x.GetB()
+	putsl(top),
+	putsi(top),
+	putsl(top)	
+	5 push
+	printf("Hello World! %s %d"c,"Hi"c, top<int>);
+	add(5,4);
+	5 push
+	add(top, 4);
+	5 push
+	4 push
+	add(top,top);   
+	unsafe: 
+		RAX = 5l
+		RBX = 4l
+		RCX push
+		{
+		scoped extern "C" printf;
+			"Hello World!"c printf
+			EAX pop
+		}
+	end
+}
+
+
+//basicHelloWorld.spl
+extern "C" printf(*char, ...<any>);
+func main(){
+   printf("Hello World!");
+   printf("Hello World!");
+}
+
+//stdio_files.spl
+//For now
+type FILE = void;
+extern "C" fputs(*char, *FILE : int);
+extern "C" fopen(*char, *char : *FILE);
+extern "C" fclose(*FILE);
+func main(){
+   let x: *FILE = fopen("examples/hello.txt"c, "w")
+   fputs("Hello World!"c,x)
+   fclose(x)
+}
+//name.spl
+macro STD_TYPE: 
+   bool|char|short|int|long|ptr
+end
+extern "C" scanf(*char, ...<*(STD_TYPE)>);
+extern "C" puts(*char);
+extern "C" malloc(usize : ptr);
+extern "C" printf(*char, ...<STD_TYPE>);
+extern "C" free(ptr);
+const name_len = 50;
+func main() {
+    let name: *char = cast<*char>(malloc(name_len));
+    scanf("%s"c, name);
+    printf("Your name is: %s", name);
+    free(name);
+}
+// without malloc
+func main() {
+    let name: *char = [char; name_len];
+	scanf("%s"c, name);
+	printf("Your name is: %s"c, name);
+	name[i] = 'A'
+}
+

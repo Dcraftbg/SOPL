@@ -1,0 +1,11 @@
+const VideoMemory: *short = cast< *short>(0xb8000);
+func put_cstr(str: *char) {
+    let i: int = 0;
+    while *(str+i) != 0 {
+        *(VideoMemory+i*2) = *(VideoMemory+i*2) & 0xFF00 | *(str+i)
+    }
+}
+func kernelMain(multiboot_struct: ptr, magic: int) {
+    put_cstr("Hello World!")
+    while 1 {}
+}

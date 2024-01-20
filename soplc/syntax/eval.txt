@@ -1,0 +1,20 @@
+let a = 
+
+
+
+b + c * d ( e+f, g)
+[Local(b), Add, Local(c), Multiply, Result(d, [Expr(Local(e), Add, Local(f)), Local])]
+                          ^                                                       
+[Multiply(c, d)]
+
+
+rdi = e+f
+rci = g
+call d
+
+
+//Function calls                <- highest priority
+//Binary Operations
+//Multiplication and Division
+//Addition and Subtraction
+//Boolean Operations            <- lowest propority

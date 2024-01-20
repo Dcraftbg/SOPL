@@ -1,0 +1,18 @@
+type NULL = 0;
+type nullptr = cast<ptr>(0);
+type usize = cif _IS_32_BIT {uint} celse {ulong}
+type PTR_SIZE = cif _IS_32_BIT {4} celse {8};
+type uint8 = uchar;
+type uint16 = ushort;
+type uint32 = uint;
+type uint64 = ulong;
+
+cif WIN_TYPES {
+    type BYTE = char;
+    type WORD = short;
+    type DWORD = int;
+    type QWORD = long;
+}
+
+//Examples:
+//let a: usize = 0; -> expands to let a: uint = 0;

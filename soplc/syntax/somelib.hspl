@@ -1,0 +1,17 @@
+
+const SOME_LIB_DLL_PATH: *char = "somelib.dll"c
+cif SOME_LIB_BUILD {
+    macro SOMELIBAPI dll_export SOME_LIB_DLL_PATH end
+    include "somelib.spl"
+}
+cif SOME_LIB_STATIC {
+    macro SOMELIBAPI end
+    include "somelib.spl"
+}
+celse {
+    macro SOMELIBAPI dll_import SOME_LIB_DLL_PATH end
+}
+SOMELIBAPI myprint(*char : int)
+
+// To include
+include "somelib.hspl"

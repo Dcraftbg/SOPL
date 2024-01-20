@@ -1,0 +1,17 @@
+extern "C" printf
+
+func printHello () {
+    "Hello World!"
+    printf
+}
+const HelloWorld = "Hello World!";
+
+func main (int, ptr : int) {
+    "Hello World!" pop
+    printf
+    RAX push
+    RAX = 4
+    RAX pop
+    0 ret
+    
+}

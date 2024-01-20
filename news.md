@@ -1,4 +1,34 @@
 > Here you can expect to find anything really interesting or important
+
+# Switching to LLVM
+20/01/24 **0.18A**
+
+Big news: Sopl has been restructured and is currently being developed to target llvm.
+Nasm support is going to go away (at least for some time).
+
+## Why?
+Development for nasm has been a big burden from the get-go, mainly due to a few reasons:
+- The language hasn't developed a full identity yet and its hard to plan out things in the nasm backend.
+- Nasm supported two platforms at once which was a challenge and a half.
+- Nasm backend was full speghetti and was hard to navigate around.
+- Using llvm would expand our coverage to platforms like ARM which were previously inaccecible. 
+- Developing a language's frontend while trying to also manage the assembly generator meant more work and larger update periods for less of a yield.
+
+## Is nasm generation going away?
+At least until the language has sollidified an identity, nasm generation would not be implemented. 
+Decision on when and if its going to be coming back are yet to be done but the code for the generation would be archived for future use.
+
+## The future of the language
+Using llvm is a step forward in the right direction for sopl, but also one going backwards.
+Countless hours were spent on the nasm generation.
+Big refactoring also means that some features of sopl are going to have to be dropped sadly for the sake of multi-platform support.
+The main few include:
+- Register access (RAX=5 for example)
+- syscalls
+- interrupts
+However, with that being said, a future update might add something like "asm" which would allow you to do all of that and more!
+Termporary, some of the libraries (specifically for linux) are going to stop working. 
+
 # Evaluation and more
 10/06/23 **0.12A**
 

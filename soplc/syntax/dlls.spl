@@ -1,0 +1,3 @@
+dll_import "kernel.dll" printf(ptr, int : int)
+
+dll_export "kernel.dll" printf //TODO: Do this <-

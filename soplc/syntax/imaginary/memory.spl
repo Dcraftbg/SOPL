@@ -1,0 +1,19 @@
+interf Allocator {
+    func alloc(long : ptr); // size and error code
+    func free(ptr);
+    func resize(long, ptr : ptr);
+}
+struct Libc {};
+
+Libc <= Allocator {
+    func alloc(long : ptr)  = extern "C" malloc;
+    func free(ptr)   = extern "C" free;
+    func resize(long, ptr : ptr) = extern "C" resize;   
+};
+let libc: Libc;
+func alloc_str(s: long, allocator: *Allocator = &Libc) -> *char {
+    return allocator->alloc(s);
+}
+func free_str(s: ptr, allocator: *Allocator = &Libc) -> *char {
+    return allocator->free(s);
+}

@@ -1,0 +1,4 @@
+extern "C" puts(*char : int);
+func myprint(a: *char : int) {
+    puts(a);
+}
