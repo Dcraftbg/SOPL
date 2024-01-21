@@ -137,7 +137,7 @@ type ScopeBody = Vec<(ProgramLocation,Instruction)>;
 type ContractInputs = LinkedHashMap<String, VarType>;
 
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct ContractInputPool {
     body: Vec<VarType>,
     is_dynamic: bool,
@@ -177,7 +177,7 @@ impl FunctionContract {
         }, Output: self.Output.clone() }
     }
 }
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct AnyContract {
     pub InputPool: ContractInputPool,
     pub Output: Option<VarType>
@@ -694,12 +694,12 @@ fn parse_token_to_build_inst(token: Token,lexer: &mut Lexer, program: &mut CmdPr
                     match externType.typ {
                         TokenType::WordType(Word) => {
                             par_assert!(lexer.currentLocation, !build.contains_symbol(&Word), "Error: Redifinition of existing symbol {}",Word);
-                            let mut contract: Option<AnyContract> = None;
+                            let mut contract: AnyContract = AnyContract::default();
 
                             if let Some(tok) = lexer.peekable().peek() {
                                 if tok.typ == TokenType::IntrinsicType(IntrinsicType::OPENPAREN) {
                                     let tok = tok.clone();
-                                    contract = Some(parse_any_contract(lexer));
+                                    contract = parse_any_contract(lexer);
                                     par_assert!(tok, tok.typ==TokenType::IntrinsicType(IntrinsicType::DOTCOMA),"Error: Expected dotcoma at the end of extern definition!");
                                 }
                                 else{
@@ -716,10 +716,10 @@ fn parse_token_to_build_inst(token: Token,lexer: &mut Lexer, program: &mut CmdPr
                                     match externWord.typ {
                                         TokenType::WordType(Word) => {
                                             par_assert!(lexer.currentLocation, !build.contains_symbol(&Word), "Error: Redifinition of existing symbol {}",Word);
-                                            let mut contract: Option<AnyContract> = None;
+                                            let mut contract: AnyContract = AnyContract::default();
                                             if let Some(tok) = lexer.peekable().peek() {
                                                 if tok.typ == TokenType::IntrinsicType(IntrinsicType::OPENPAREN) {
-                                                    contract = Some(parse_any_contract(lexer));
+                                                    contract = parse_any_contract(lexer);
                                                     if !lexer.is_newline() {
                                                         let ntc = par_expect!(lexer.currentLocation,lexer.next(),"Error: stream of tokens abruptly ended in extern definition");
                                                         par_assert!(ntc, ntc.typ==TokenType::IntrinsicType(IntrinsicType::DOTCOMA),"Error: Expected dotcoma at the end of extern definition! But found {}",ntc.typ.to_string(false));

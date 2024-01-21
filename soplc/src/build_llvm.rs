@@ -1,24 +1,28 @@
 use std::collections::HashMap;
 
 use inkwell::AddressSpace;
+use inkwell::module::Linkage;
 use inkwell::targets::{Target, TargetMachine, TargetTriple};
 use inkwell::types::{FunctionType, BasicType, AnyType, AnyTypeEnum};
-use inkwell::values::{BasicValue, IntValue, AnyValueEnum, IntMathValue, AnyValue, PointerValue};
+use inkwell::values::{BasicValue, IntValue, AnyValueEnum, IntMathValue, AnyValue, PointerValue, BasicValueEnum, ArrayValue, GlobalValue};
 use inkwell::{context::Context, module::Module};
 use inkwell::builder::Builder;
 
-use crate::{CmdProgram, BuildProgram, io, Function, FunctionContract, VarType, PtrTyp, Instruction, Expression, OfP, RawConstValue, RawConstValueType};
+use crate::{CmdProgram, BuildProgram, io, Function, FunctionContract, VarType, PtrTyp, Instruction, Expression, OfP, RawConstValue, RawConstValueType, AnyContract, ProgramStringType, ProgramString};
 #[derive(Debug)]
 struct LocalLLVM<'ctx> {
    ptr: PointerValue<'ctx>,
    var: VarType 
 }
 type LocalsLLVM<'ctx> = HashMap<String, LocalLLVM<'ctx>>;
+// TODO: use &ProgramString instead of full copy
 struct BuildEnv<'ctx> {
     context: &'ctx Context,
     builder: Builder<'ctx>,
     module: Module<'ctx>,
-    locals: LocalsLLVM<'ctx>
+    locals: LocalsLLVM<'ctx>,
+    strings: Vec<ProgramString>,
+    stringoff: usize,
 }
 impl <'ctx> BuildEnv<'ctx> {
     fn var_type_to_type<'a>(&'a self, typ: &VarType) -> inkwell::types::BasicTypeEnum<'ctx> {
@@ -32,12 +36,23 @@ impl <'ctx> BuildEnv<'ctx> {
                match p.typ {
                    PtrTyp::VOID => {
                        let void = self.context.i8_type();
-                       void.ptr_type(AddressSpace::default()).as_basic_type_enum()
+                       let mut typ = void.as_basic_type_enum();
+                       for _ in 0..p.inner_ref+1 {
+                          typ = typ.ptr_type(AddressSpace::default()).as_basic_type_enum()
+                       }
+                       typ.as_basic_type_enum()
                    }
-                   _ => todo!()
+                   PtrTyp::TYP(ref typ) => {
+                       let mut typ = self.var_type_to_type(typ).as_basic_type_enum();
+                       for _ in 0..p.inner_ref+1 {
+                          typ = typ.ptr_type(AddressSpace::default()).as_basic_type_enum()
+                       }
+                       typ.as_basic_type_enum()
+                   }
+                   _ => todo!("PtrType: {:?}", p.typ)
                }
             }
-            _ => todo!()
+            _ => todo!("VarType: {:?}", typ)
         }
     }
     fn build_contract<'a>(&'a self, c: &FunctionContract) -> FunctionType<'ctx>
@@ -53,6 +68,9 @@ impl <'ctx> BuildEnv<'ctx> {
            None => self.context.void_type().fn_type(&param_types, false)
         }
     }
+    fn get_str<'a>(&'a self, id: usize) -> &ProgramString {
+        return self.strings.get(id-self.stringoff).expect("Invalid id")
+    }
     fn build_expr<'a>(&'a self, e: &Expression) -> AnyValueEnum<'ctx> {
         match e {
             Expression::val(v) => {
@@ -66,6 +84,14 @@ impl <'ctx> BuildEnv<'ctx> {
                                 let valu64 = unsafe { *((&vali64 as *const i64) as *const u64) };
                                 i32_t.const_int(valu64, true).into()
                             }
+                            RawConstValueType::STR(s) => {
+                                let id = *s;
+                                let stri = self.get_str(id);
+                                match stri.Typ {
+                                    ProgramStringType::STR => todo!("ProgramStringType::STR is not yet done for OfP"),
+                                    ProgramStringType::CSTR => self.builder.build_global_string_ptr(&stri.Data, "str").expect("TODO: Handle these errors").as_pointer_value().into(),
+                                }
+                            }
                             _ => todo!("TODO: Other val const value: {:?}",val)
                         }
                     }
@@ -74,6 +100,16 @@ impl <'ctx> BuildEnv<'ctx> {
                         let a = self.locals.get(name).expect("It should get it");
                         let var = self.var_type_to_type(&a.var);
                         self.builder.build_load(var, a.ptr.clone(), "load").expect("This should work").into()
+                    }
+                    OfP::RESULT(name, args) => {
+                        let func = self.module.get_function(name).expect("This should not fail");
+                        let mut fargs = Vec::with_capacity(args.len());
+                        for arg in args {
+                            let expr = Expression::val(arg.clone());
+                            let val = self.build_expr(&expr);
+                            fargs.push(Self::any_value_into_basic_value(&val).expect("This should work").into());
+                        }
+                        self.builder.build_call(func, fargs.as_slice(), "funccall").expect("Call should work").as_any_value_enum()
                     }
                     _ => todo!("TODO: Other OfP for build_expr: {:?}",v)
                 }
@@ -98,13 +134,41 @@ impl <'ctx> BuildEnv<'ctx> {
             _ => todo!("TODO: Expression in build_expr")
         }
     }
+    fn build_any_contract<'a>(&'a self, c: &AnyContract) -> FunctionType<'ctx>
+    {
+        let mut param_types: Vec<inkwell::types::BasicMetadataTypeEnum> = Vec::with_capacity(c.InputPool.body.len());
+        for input in c.InputPool.body.iter() {
+            param_types.push(self.var_type_to_type(input).into());
+        } 
+        match c.Output.as_ref() {
+           Some(v) => {
+               self.var_type_to_type(v).fn_type(&param_types, false)
+           } 
+           None => self.context.void_type().fn_type(&param_types, false)
+        }
+    }
+    fn any_value_into_basic_value(val: &AnyValueEnum<'ctx>) -> Option<BasicValueEnum<'ctx>> {
+        match val {
+            AnyValueEnum::IntValue(v)     => Some(v.clone().into()),
+            AnyValueEnum::FloatValue(v)   => Some(v.clone().into()),
+            AnyValueEnum::PointerValue(v) => Some(v.clone().into()),
+            AnyValueEnum::ArrayValue(v)   => Some(v.clone().into()),
+            _ => None
+        }
+    }
     fn build(&mut self, _p: &CmdProgram, b: &BuildProgram)
     {
+        self.stringoff = b.stringoffset;
         assert!(b.dll_imports.len() == 0, "TODO: DLL-imports in llvm native");
         assert!(b.dll_exports.len() == 0, "TODO: DLL-exports in llvm native");
         assert!(b.global_vars.len() == 0, "TODO: Global vars");
         assert!(b.buffers.len() == 0, "TODO: Buffers");
-        assert!(b.externals.len() == 0, "TODO: Externals");
+        self.strings = b.stringdefs.clone();
+        for (name, external) in b.externals.iter() {
+            assert!(!external.contract.InputPool.is_dynamic, "TODO: Dynamic externals are not yet done");
+            let ty = self.build_any_contract(&external.contract);
+            self.module.add_function(name, ty, Some(Linkage::External));
+        }
         for (fname, func) in b.functions.iter() {
             let ty = self.build_contract(&func.contract);
             let f = self.module.add_function(&fname, ty, None);
@@ -119,7 +183,6 @@ impl <'ctx> BuildEnv<'ctx> {
                 self.builder.build_store(ptr, v).expect("This should work");
             }
             self.locals = locals;
-        
             assert!(func.buffers.len() == 0, "TODO: Buffers");
             for (_,inst) in func.body.iter() {
                 match inst {
@@ -132,6 +195,16 @@ impl <'ctx> BuildEnv<'ctx> {
                             _ => todo!("Unsupported return value {:?}",ret)
                         };
                         self.builder.build_return(Some(&r)).expect("I hope this don't fail :D");                  
+                    }
+                    Instruction::CALLRAW(name, args) => {
+                        let func = self.module.get_function(name).expect("This should not fail");
+                        let mut fargs = Vec::with_capacity(args.len());
+                        for arg in args {
+                            let expr = Expression::val(arg.clone());
+                            let val = self.build_expr(&expr);
+                            fargs.push(Self::any_value_into_basic_value(&val).expect("This should work").into());
+                        }
+                        self.builder.build_call(func, fargs.as_slice(), "funccall").expect("Call should work");
                     }
                     _ => todo!("TODO: Instruction: {:?}", inst)
                 }
@@ -163,7 +236,7 @@ pub fn build_llvm_native(p: &CmdProgram, b: &BuildProgram, path: &str) -> io::Re
     ).ok_or(
         io::Error::new(io::ErrorKind::Other, "Could not create machine target!")
     )?;
-    let mut env = BuildEnv {context: &context, builder, module, locals: LocalsLLVM::default()};
+    let mut env = BuildEnv {context: &context, builder, module, locals: LocalsLLVM::default(), strings: Vec::new(), stringoff: 0};
     env.build(p, b);
     println!("Module {}",env.module.to_string());
     machine.write_to_file(

@@ -1,4 +1,5 @@
 extern "C" puts(*char)
-func main() {
+func main(: int) {
     puts("Hello World!")
+    return 0;
 }

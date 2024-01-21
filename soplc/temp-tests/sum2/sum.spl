@@ -1,0 +1,6 @@
+
+extern "C" addTwo(int : int);
+
+func addThree(a: int : int) {
+    return addTwo(a)+1;
+}

@@ -22,8 +22,8 @@ debug.log
 /sopl_test/
 /lighthouse/
 /doodle/
-*.lock
-*.exe
-*.o
+**/*.lock
+**/*.exe
+**/*.o
 /soplc/libs/fs/
 

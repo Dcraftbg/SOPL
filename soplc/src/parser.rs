@@ -249,7 +249,7 @@ impl BuildProgram {
     }
     pub fn get_contract_of_symbol(&self, str: &String) -> Option<AnyContract> {
         if let Some(ext) = self.externals.get(str) {
-            return ext.contract.clone()
+            return Some(ext.contract.clone())
         }
         else if let Some(dll_import) = self.dll_imports.get(str) {
             return Some(dll_import.contract.clone())
@@ -579,7 +579,7 @@ pub enum ExternalType {
 pub struct External {
     pub typ: ExternalType,
     pub loc: ProgramLocation,
-    pub contract: Option<AnyContract>
+    pub contract: AnyContract
 }
 impl ExternalType {
    pub fn to_string(&self) -> String {
