@@ -1,3 +1,4 @@
+use core::fmt;
 use std::collections::HashMap;
 
 use inkwell::AddressSpace;
@@ -6,7 +7,7 @@ use inkwell::targets::{Target, TargetMachine, TargetTriple};
 use inkwell::types::{FunctionType, BasicType, AnyType, AnyTypeEnum};
 use inkwell::values::{BasicValue, IntValue, AnyValueEnum, IntMathValue, AnyValue, PointerValue, BasicValueEnum, ArrayValue, GlobalValue};
 use inkwell::{context::Context, module::Module};
-use inkwell::builder::Builder;
+use inkwell::builder::{Builder, BuilderError};
 
 use crate::{CmdProgram, BuildProgram, io, Function, FunctionContract, VarType, PtrTyp, Instruction, Expression, OfP, RawConstValue, RawConstValueType, AnyContract, ProgramStringType, ProgramString};
 #[derive(Debug)]
@@ -15,6 +16,39 @@ struct LocalLLVM<'ctx> {
    var: VarType 
 }
 type LocalsLLVM<'ctx> = HashMap<String, LocalLLVM<'ctx>>;
+#[derive(Debug)]
+enum BuildEnvError {
+    Builder(BuilderError),
+    AnyValueEnumConvertion,
+    FunctionNotFound,
+    ParameterNotFound,
+}
+impl fmt::Display for BuildEnvError {
+   fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+       // TODO: Also accept the location for slightly more information
+       match self {
+           Self::Builder(b) => {
+               writeln!(f, "Builder Error: {}",b)?
+           },
+           Self::AnyValueEnumConvertion => {
+               writeln!(f, "Could not convert Any value to Basic value")?
+           },
+           Self::FunctionNotFound => {
+               writeln!(f, "Could not find function")?
+           }
+           Self::ParameterNotFound => {
+               writeln!(f, "Could not find parameter")?
+           }
+       }
+       Ok(())
+   } 
+}
+impl From<BuilderError> for BuildEnvError {
+    fn from(err: BuilderError) -> Self {
+        BuildEnvError::Builder(err)
+    }
+}
+type BuildEnvResult<T> = Result<T, BuildEnvError>;
 // TODO: use &ProgramString instead of full copy
 struct BuildEnv<'ctx> {
     context: &'ctx Context,
@@ -71,7 +105,7 @@ impl <'ctx> BuildEnv<'ctx> {
     fn get_str<'a>(&'a self, id: usize) -> &ProgramString {
         return self.strings.get(id-self.stringoff).expect("Invalid id")
     }
-    fn build_expr<'a>(&'a self, e: &Expression) -> AnyValueEnum<'ctx> {
+    fn build_expr<'a>(&'a self, e: &Expression) -> BuildEnvResult<AnyValueEnum<'ctx>>{
         match e {
             Expression::val(v) => {
                 match v {
@@ -82,14 +116,19 @@ impl <'ctx> BuildEnv<'ctx> {
                                 let val = *v;
                                 let vali64 = val as i64;
                                 let valu64 = unsafe { *((&vali64 as *const i64) as *const u64) };
-                                i32_t.const_int(valu64, true).into()
+                                Ok(i32_t.const_int(valu64, true).into())
                             }
                             RawConstValueType::STR(s) => {
                                 let id = *s;
                                 let stri = self.get_str(id);
                                 match stri.Typ {
                                     ProgramStringType::STR => todo!("ProgramStringType::STR is not yet done for OfP"),
-                                    ProgramStringType::CSTR => self.builder.build_global_string_ptr(&stri.Data, "str").expect("TODO: Handle these errors").as_pointer_value().into(),
+                                    ProgramStringType::CSTR => 
+                                        Ok(
+                                        self.builder.build_global_string_ptr(&stri.Data, "str")?
+                                          .as_pointer_value()
+                                          .into()
+                                        ),
                                 }
                             }
                             _ => todo!("TODO: Other val const value: {:?}",val)
@@ -97,19 +136,20 @@ impl <'ctx> BuildEnv<'ctx> {
                     }
                     OfP::LOCALVAR(name) => {
                         println!("Local var: {}",name);
-                        let a = self.locals.get(name).expect("It should get it");
+                        let a = self.locals.get(name).expect("[ERROR] Finding local. Typechecking probably failed");
                         let var = self.var_type_to_type(&a.var);
-                        self.builder.build_load(var, a.ptr.clone(), "load").expect("This should work").into()
+                        Ok(self.builder.build_load(var, a.ptr.clone(), "load")?
+                            .into())
                     }
                     OfP::RESULT(name, args) => {
                         let func = self.module.get_function(name).expect("This should not fail");
                         let mut fargs = Vec::with_capacity(args.len());
                         for arg in args {
                             let expr = Expression::val(arg.clone());
-                            let val = self.build_expr(&expr);
+                            let val = self.build_expr(&expr)?;
                             fargs.push(Self::any_value_into_basic_value(&val).expect("This should work").into());
                         }
-                        self.builder.build_call(func, fargs.as_slice(), "funccall").expect("Call should work").as_any_value_enum()
+                        Ok(self.builder.build_call(func, fargs.as_slice(), "funccall")?.as_any_value_enum())
                     }
                     _ => todo!("TODO: Other OfP for build_expr: {:?}",v)
                 }
@@ -117,13 +157,13 @@ impl <'ctx> BuildEnv<'ctx> {
             Expression::expr(expr) => {
                 match expr.op {
                     crate::Op::PLUS => {
-                        let left  = self.build_expr(expr.left.as_ref().unwrap());
-                        let right = self.build_expr(expr.right.as_ref().unwrap());
+                        let left  = self.build_expr(expr.left.as_ref().unwrap())?;
+                        let right = self.build_expr(expr.right.as_ref().unwrap())?;
                         match left {
                             AnyValueEnum::IntValue(left) => {
                                 assert!(right.is_int_value() || right.is_float_value(), "Type checking failed and trying to add integer to other type");
                                 let right = right.into_int_value();
-                                self.builder.build_int_add(left, right, "Addition").expect("You should not fail I hope").into()
+                                Ok(self.builder.build_int_add(left, right, "add")?.into())
                             }
                             _ => todo!("Unsupported value for addition: {:?}",left)
                         }
@@ -147,16 +187,16 @@ impl <'ctx> BuildEnv<'ctx> {
            None => self.context.void_type().fn_type(&param_types, false)
         }
     }
-    fn any_value_into_basic_value(val: &AnyValueEnum<'ctx>) -> Option<BasicValueEnum<'ctx>> {
+    fn any_value_into_basic_value(val: &AnyValueEnum<'ctx>) -> BuildEnvResult<BasicValueEnum<'ctx>> {
         match val {
-            AnyValueEnum::IntValue(v)     => Some(v.clone().into()),
-            AnyValueEnum::FloatValue(v)   => Some(v.clone().into()),
-            AnyValueEnum::PointerValue(v) => Some(v.clone().into()),
-            AnyValueEnum::ArrayValue(v)   => Some(v.clone().into()),
-            _ => None
+            AnyValueEnum::IntValue(v)     => Ok(v.clone().into()),
+            AnyValueEnum::FloatValue(v)   => Ok(v.clone().into()),
+            AnyValueEnum::PointerValue(v) => Ok(v.clone().into()),
+            AnyValueEnum::ArrayValue(v)   => Ok(v.clone().into()),
+            _ => Err(BuildEnvError::AnyValueEnumConvertion)
         }
     }
-    fn build(&mut self, _p: &CmdProgram, b: &BuildProgram)
+    fn build(&mut self, _p: &CmdProgram, b: &BuildProgram) -> BuildEnvResult<()>
     {
         self.stringoff = b.stringoffset;
         assert!(b.dll_imports.len() == 0, "TODO: DLL-imports in llvm native");
@@ -177,10 +217,10 @@ impl <'ctx> BuildEnv<'ctx> {
             let mut locals: LocalsLLVM = LocalsLLVM::with_capacity(func.locals.len());
             for (i, (name, local)) in func.locals.iter().enumerate() {
                 let ty = self.var_type_to_type(local);
-                let ptr = self.builder.build_alloca(ty, name).expect("You should work!");
+                let ptr = self.builder.build_alloca(ty, name)?;
                 locals.insert(name.clone(), LocalLLVM {var: local.clone(), ptr});
-                let v = f.get_nth_param(i as u32).expect("This should work");
-                self.builder.build_store(ptr, v).expect("This should work");
+                let v = f.get_nth_param(i as u32).ok_or(BuildEnvError::ParameterNotFound)?;
+                self.builder.build_store(ptr, v)?;
             }
             self.locals = locals;
             assert!(func.buffers.len() == 0, "TODO: Buffers");
@@ -189,27 +229,28 @@ impl <'ctx> BuildEnv<'ctx> {
                     // TODO: remove this
                     Instruction::FNBEGIN() => {}
                     Instruction::RET(exp) => {
-                        let ret = self.build_expr(exp);
+                        let ret = self.build_expr(exp)?;
                         let r = match ret {
                             AnyValueEnum::IntValue(v) => v.as_basic_value_enum(),
                             _ => todo!("Unsupported return value {:?}",ret)
                         };
-                        self.builder.build_return(Some(&r)).expect("I hope this don't fail :D");                  
+                        self.builder.build_return(Some(&r))?;                  
                     }
                     Instruction::CALLRAW(name, args) => {
-                        let func = self.module.get_function(name).expect("This should not fail");
+                        let func = self.module.get_function(name).ok_or(BuildEnvError::FunctionNotFound)?;
                         let mut fargs = Vec::with_capacity(args.len());
                         for arg in args {
                             let expr = Expression::val(arg.clone());
-                            let val = self.build_expr(&expr);
-                            fargs.push(Self::any_value_into_basic_value(&val).expect("This should work").into());
+                            let val = self.build_expr(&expr)?;
+                            fargs.push(Self::any_value_into_basic_value(&val)?.into());
                         }
-                        self.builder.build_call(func, fargs.as_slice(), "funccall").expect("Call should work");
+                        self.builder.build_call(func, fargs.as_slice(), "call")?;
                     }
                     _ => todo!("TODO: Instruction: {:?}", inst)
                 }
             }
         }
+        Ok(())
     }
 }
 
@@ -237,7 +278,10 @@ pub fn build_llvm_native(p: &CmdProgram, b: &BuildProgram, path: &str) -> io::Re
         io::Error::new(io::ErrorKind::Other, "Could not create machine target!")
     )?;
     let mut env = BuildEnv {context: &context, builder, module, locals: LocalsLLVM::default(), strings: Vec::new(), stringoff: 0};
-    env.build(p, b);
+    if let Err(err) = env.build(p, b) {
+        eprintln!("[ERROR] Could not build environment: {}",err);
+        return Err(io::Error::new(io::ErrorKind::Other, "Could not build environment"));
+    }
     println!("Module {}",env.module.to_string());
     machine.write_to_file(
         &env.module,
