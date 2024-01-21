@@ -282,7 +282,6 @@ pub fn build_llvm_native(p: &CmdProgram, b: &BuildProgram, path: &str) -> io::Re
         eprintln!("[ERROR] Could not build environment: {}",err);
         return Err(io::Error::new(io::ErrorKind::Other, "Could not build environment"));
     }
-    println!("Module {}",env.module.to_string());
     machine.write_to_file(
         &env.module,
         inkwell::targets::FileType::Object,

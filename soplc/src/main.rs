@@ -1974,7 +1974,6 @@ fn main() {
         eprintln!("[ERROR] Could not compile {} for {} with out {}, because:\n{}", program.path, target.name, program.opath, err);
         exit(1);
     }
-    println!("b: {:?}",b);
 }
 
 
