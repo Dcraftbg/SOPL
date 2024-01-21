@@ -135,7 +135,6 @@ impl <'ctx> BuildEnv<'ctx> {
                         }
                     }
                     OfP::LOCALVAR(name) => {
-                        println!("Local var: {}",name);
                         let a = self.locals.get(name).expect("[ERROR] Finding local. Typechecking probably failed");
                         let var = self.var_type_to_type(&a.var);
                         Ok(self.builder.build_load(var, a.ptr.clone(), "load")?
@@ -215,12 +214,16 @@ impl <'ctx> BuildEnv<'ctx> {
             let entry = self.context.append_basic_block(f, "entry");
             self.builder.position_at_end(entry);
             let mut locals: LocalsLLVM = LocalsLLVM::with_capacity(func.locals.len());
+            
             for (i, (name, local)) in func.locals.iter().enumerate() {
                 let ty = self.var_type_to_type(local);
                 let ptr = self.builder.build_alloca(ty, name)?;
                 locals.insert(name.clone(), LocalLLVM {var: local.clone(), ptr});
-                let v = f.get_nth_param(i as u32).ok_or(BuildEnvError::ParameterNotFound)?;
-                self.builder.build_store(ptr, v)?;
+                if i < func.contract.Inputs.len() {
+                   let id = func.contract.Inputs.len() - i - 1;
+                   let v = f.get_nth_param(id as u32).ok_or(BuildEnvError::ParameterNotFound)?;
+                   self.builder.build_store(ptr, v)?;
+                }
             }
             self.locals = locals;
             assert!(func.buffers.len() == 0, "TODO: Buffers");
@@ -228,6 +231,8 @@ impl <'ctx> BuildEnv<'ctx> {
                 match inst {
                     // TODO: remove this
                     Instruction::FNBEGIN() => {}
+                    // TODO: remove this
+                    Instruction::DEFVAR(..) => {}
                     Instruction::RET(exp) => {
                         let ret = self.build_expr(exp)?;
                         let r = match ret {
@@ -282,6 +287,7 @@ pub fn build_llvm_native(p: &CmdProgram, b: &BuildProgram, path: &str) -> io::Re
         eprintln!("[ERROR] Could not build environment: {}",err);
         return Err(io::Error::new(io::ErrorKind::Other, "Could not build environment"));
     }
+    println!("Source code {}", env.module.print_to_string().to_string());
     machine.write_to_file(
         &env.module,
         inkwell::targets::FileType::Object,

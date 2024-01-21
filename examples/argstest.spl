@@ -1,6 +1,7 @@
 //TODO: fix tests with printf, since printf no longer works
 
-extern "C" printf(*char, int : int);
-func main(argc: int, argv: **char) {
+extern "C" printf(*char, int);
+func main(argc: int, argv: **char : int) {
     printf("Amount of arguments: %d\n", argc);
+    return 0;
 }

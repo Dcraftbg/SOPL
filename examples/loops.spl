@@ -1,8 +1,9 @@
 extern "C" printf(*char, int);
-func main(){
+func main(: int){
     let i: int = 0;
     while i < 5 {
         printf("%d> Hello World!\n",i);
         i+=1;
     }
+    return 0;
 }
