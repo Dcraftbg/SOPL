@@ -1,0 +1,4 @@
+extern "C" puts(*char)
+func main() {
+    puts("Hello World!")
+}

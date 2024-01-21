@@ -12,6 +12,7 @@ mod utils;
 mod cmdprogram;
 mod cfor;
 mod constants;
+mod build_llvm;
 
 use lexer::*;
 use parser::*;
@@ -163,7 +164,7 @@ impl ContractInputPool {
 #[derive(Debug, Clone)]
 pub struct FunctionContract {
     Inputs: ContractInputs,
-    Outputs: Vec<VarType>
+    Output: Option<VarType>
 }
 impl FunctionContract {
     fn to_any_contract(&self) -> AnyContract {
@@ -173,13 +174,13 @@ impl FunctionContract {
                 o.push(val.clone());
             }
             ContractInputPool { body: o, is_dynamic: false, dynamic_type: None}
-        }, Outputs: self.Outputs.clone() }
+        }, Output: self.Output.clone() }
     }
 }
 #[derive(Debug, Clone)]
 pub struct AnyContract {
     pub InputPool: ContractInputPool,
-    pub Outputs: Vec<VarType>
+    pub Output: Option<VarType>
 }
 #[derive(Debug)]
 pub enum NormalScopeType {
@@ -491,7 +492,7 @@ fn parse_argument_contract(lexer: &mut Lexer, build: &mut BuildProgram, program:
 IT DOES NOT CONSUME THE FIRST (
 */
 fn parse_any_contract(lexer: &mut Lexer) -> AnyContract {
-    let mut out = AnyContract { InputPool: ContractInputPool::new(), Outputs: vec![] };
+    let mut out = AnyContract { InputPool: ContractInputPool::new(), Output: None };
     let mut expectNextSY = false;
     let mut is_input = true;
     while let Some(token) = lexer.next() {
@@ -529,13 +530,14 @@ fn parse_any_contract(lexer: &mut Lexer) -> AnyContract {
                     other => par_error!(token, "Unexpected intrinsic in any contract! {}",other.to_string(false))
                 }
             }
-            TokenType::Definition(Def) => {
+            TokenType::Definition(ref Def) => {
                 expectNextSY = true;
                 if is_input {
-                    out.InputPool.push(Def);
+                    out.InputPool.push(Def.clone());
                 }
                 else {
-                    out.Outputs.push(Def)
+                    par_assert!(token, out.Output.is_none(), "Multiple return types are not allowed");
+                    out.Output = Some(Def.clone());
                 }
             }
             _ => {
@@ -547,7 +549,7 @@ fn parse_any_contract(lexer: &mut Lexer) -> AnyContract {
     out
 }
 fn parse_function_contract(lexer: &mut Lexer) -> FunctionContract {
-    let mut out = FunctionContract {Inputs: LinkedHashMap::new(), Outputs: vec![]};
+    let mut out = FunctionContract {Inputs: LinkedHashMap::new(), Output: None};
     let mut is_input = true;
     let first = lexer.next();
     let first = par_expect!(lexer.currentLocation,first,"abruptly ran out of tokens in function contract");
@@ -595,9 +597,10 @@ fn parse_function_contract(lexer: &mut Lexer) -> FunctionContract {
                     }
                 }
             }
-            TokenType::Definition(Def) => {
+            TokenType::Definition(ref Def) => {
                 expectNextSY = true;
-                out.Outputs.push(Def)
+                par_assert!(token, out.Output.is_none(), "Multiple return types are not allowed");
+                out.Output = Some(Def.clone())
             }
             _ => {
                 par_error!(token, "Unexpected Token Type in Function Contract. Expected Definition but found: {}",token.typ.to_string(false))
@@ -1581,7 +1584,7 @@ fn type_check_scope(build: &BuildProgram, program: &CmdProgram, scope: TCScopeTy
             Instruction::DEFVAR(_)           => {},
             
             Instruction::CALLRAW(name,contract)        => {
-                let mut externContract = build.get_contract_of_symbol(name).unwrap_or(AnyContract { InputPool: ContractInputPool::new(), Outputs: vec![] }).clone();//build.externals.get(name).unwrap().contract.as_ref().unwrap_or(&AnyContract { InputPool: vec![], Outputs: vec![] }).clone();
+                let mut externContract = build.get_contract_of_symbol(name).unwrap_or(AnyContract { InputPool: ContractInputPool::new(), Output: None }).clone();//build.externals.get(name).unwrap().contract.as_ref().unwrap_or(&AnyContract { InputPool: vec![], Outputs: vec![] }).clone();
                 externContract.InputPool.reverse();
                 typ_assert!(loc, externContract.InputPool.len() == contract.len() || externContract.InputPool.is_dynamic, "Error: Expected: {} amount of arguments but found {}",externContract.InputPool.len(), contract.len());
                 for arg in contract {
@@ -1746,7 +1749,7 @@ fn type_check_scope(build: &BuildProgram, program: &CmdProgram, scope: TCScopeTy
         }
     }
     if scope.is_func() {
-        if !scope.get_contract(build).unwrap().Outputs.is_empty() {
+        if !scope.get_contract(build).unwrap().Output.is_none() {
             typ_assert!(scope.get_location(build).unwrap(),hasFoundRet,"Error: Expected return value but function didn't return anything!");
         }
     }
@@ -1785,18 +1788,15 @@ fn dump_tokens(lexer: &mut Lexer) {
 }
 
 type TargetBuildfn_t = fn(&CmdProgram, &BuildProgram, &str) -> io::Result<()>;
-fn build_llvm_native(p: &CmdProgram, b: &BuildProgram, path: &str) -> io::Result<()> {
-    todo!()
-}
 struct Target {
     build: TargetBuildfn_t,
     name: &'static str,
 }
-const TARGET_DEFAULT: &'static str = "llvm_native";
+const TARGET_DEFAULT: &'static str = "llvm-native";
 const TARGETS: &[Target] = &[
     Target {
         name: "llvm-native",
-        build: build_llvm_native,
+        build: build_llvm::build_llvm_native,
     },
 ];
 
@@ -1907,10 +1907,13 @@ fn main() {
             }
         }
     });
-    if TARGETS.iter().find(|target| target.name == program.target.as_str()).is_none() {
-        eprintln!("Unknown target: {}", program.target);
+    let target = TARGETS.iter().find(|t| t.name == program.target.as_str());
+    if target.is_none() {
+        eprintln!("Unknown target: \"{}\"", program.target);
         list_targets(1);
+        exit(1);
     }
+    let target = target.unwrap();
     let mut Intrinsics: HashMap<String,IntrinsicType> = HashMap::new();
     Intrinsics.insert("extern".to_string(), IntrinsicType::Extern);
     Intrinsics.insert("dll_import".to_string(), IntrinsicType::DLL_IMPORT);
@@ -1949,13 +1952,13 @@ fn main() {
     Definitions.insert("short".to_string(), VarType::SHORT);
     
     if program.path.is_empty() {
-        println!("Error: Unspecified input file!");
+        eprintln!("[ERROR] Unspecified input file!");
         usage(&program_n);
         exit(1);
     }
     let info = fs::read_to_string(&program.path);
     if let Err(info) = info {
-        eprintln!("Error: Could not read file \"{}\"!",program.path);
+        eprintln!("[ERROR] Could not read file \"{}\"!",program.path);
         eprintln!("{}",info.to_string());
         exit(1);
     }
@@ -1966,14 +1969,13 @@ fn main() {
     if program.use_type_checking {
         type_check_build(&mut build, &program);
     }
-    match program.target.as_str() {
-        _ => {
-            eprintln!("Target {} is either unsupported or a target is not provided!\n",program.target)
-        }
+    let b = (target.build)(&program, &build, &program.opath);
+    if let Err(err) = b {
+        eprintln!("[ERROR] Could not compile {} for {} with out {}, because:\n{}", program.path, target.name, program.opath, err);
+        exit(1);
     }
-
+    println!("b: {:?}",b);
 }
-
 
 
 
