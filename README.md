@@ -82,9 +82,9 @@ Ideas that are left for discussion and further expansion:
 ## Tools
 SOPL has a few tools to make your life easier!
 
-One of the most major ones is [lighthouse](https://github.com/Dimitar85898/Lighthouse). Lighthouse makes organizing your projects A LOT simpler.
+One of the most major ones is [lighthouse](https://github.com/Dcraftbg/Lighthouse). Lighthouse makes organizing your projects A LOT simpler.
 It also makes building, testing and running your code a lot easier.
-You can follow the "How to get started" over at the repository (https://github.com/Dimitar85898/Lighthouse). 
+You can follow the "How to get started" over at the repository (https://github.com/Dcraftbg/Lighthouse). 
 It is highly recommended to use lighthouse! Lighthouse is an awesome tool that should make it better and easier to build with SOPL - you don't have to manage any flags or anything, everything is built for you, however this doesn't stop the endless customization you can have with normal SOPL - simply edit the lighthouse.cfg file that gets generated on every new project. For more information check out the repo.
 
 One other tool that isn't as major is sopl_test which is generally only recommended to be used by the developer of the language since its only purpose is to test if all of the examples work as intentionally
@@ -176,7 +176,7 @@ Currently SOPL Highlighting only supports vscode but in the future I plan to add
 
 etc.
 
-For highlighting checkout: [this](https://github.com/Dimitar85898/SOPL-Highlighting) - https://github.com/Dimitar85898/SOPL-Highlighting
+For highlighting checkout: [this](https://github.com/Dcraftbg/SOPL-Highlighting) - https://github.com/Dcraftbg/SOPL-Highlighting
 ## How to use?
 *Note that documentation may not cover all of the latest features tho you might expect updates on them shortly after implementation*
 *If you want to learn most of the details checkout theversions*
